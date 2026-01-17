@@ -4,6 +4,11 @@
 //! - Virtual scrolling (only visible lines rendered)
 //! - Hardware acceleration (GPU when using wgpu backend)
 //! - Geometry caching between frames
+//!
+//! ## Performance Optimizations:
+//! 1. Span merging: Efficiently merge consecutive cells with identical styles
+//! 2. Smart cache invalidation: Selective cache clearing based on change type
+//! 3. Memory pre-allocation: Reuse buffers and pre-allocate based on known sizes
 
 use iced::mouse;
 use iced::widget::canvas::{self, Cache, Frame, Geometry, Text};
@@ -38,7 +43,8 @@ impl Selection {
         }
     }
 
-    /// Check if a cell is within the selection
+    /// Check if a cell is within the selection (reserved for future hit-testing)
+    #[allow(dead_code)]
     pub fn contains(&self, row: usize, col: usize) -> bool {
         if !self.active {
             return false;
@@ -154,7 +160,11 @@ pub fn get_selected_text(lines: &[Vec<StyledSpan>], selection: &Selection) -> St
 pub enum CursorStyle {
     #[default]
     Block,
+    /// Underline cursor (reserved for future cursor style support)
+    #[allow(dead_code)]
     Underline,
+    /// Bar/I-beam cursor (reserved for future cursor style support)
+    #[allow(dead_code)]
     Bar,
 }
 
@@ -196,10 +206,6 @@ pub mod config {
         BASE_CHAR_WIDTH * (font_size / BASE_FONT_SIZE)
     }
 
-    // Legacy constants for backward compatibility
-    pub const LINE_HEIGHT: f32 = BASE_LINE_HEIGHT;
-    pub const FONT_SIZE: f32 = BASE_FONT_SIZE;
-    pub const CHAR_WIDTH: f32 = BASE_CHAR_WIDTH;
 }
 
 /// Canvas state for virtual scrolling
@@ -266,10 +272,15 @@ impl TerminalCanvasState {
         let content_height = total_lines as f32 * config::line_height(font_size);
         let max_scroll = (content_height - self.viewport_height).max(0.0);
         self.scroll_offset = max_scroll;
-        self.cache.clear();
+        // Don't clear cache on scroll - virtual scrolling handles visibility changes
+        // Only clear if not in streaming mode
+        if !self.streaming_mode {
+            self.cache.clear();
+        }
     }
 
-    /// Check if scrolled to bottom
+    /// Check if scrolled to bottom (reserved for auto-scroll logic)
+    #[allow(dead_code)]
     pub fn is_at_bottom(&self, total_lines: usize, font_size: f32) -> bool {
         let content_height = total_lines as f32 * config::line_height(font_size);
         let max_scroll = (content_height - self.viewport_height).max(0.0);
@@ -277,8 +288,9 @@ impl TerminalCanvasState {
     }
 }
 
-/// Message emitted by terminal canvas
+/// Message emitted by terminal canvas (for future use)
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum TerminalCanvasMessage {
     Scrolled(f32),
 }
@@ -472,6 +484,17 @@ impl<'a> TerminalCanvas<'a> {
 
         let mut x = config::PADDING_LEFT;
 
+        // Optimization: Merge consecutive spans with identical styles before rendering
+        // This reduces the number of draw calls significantly
+        let mut merged_text = String::with_capacity(128); // Pre-allocate
+        let mut current_color: Option<Color> = None;
+        let mut current_bold = false;
+        let mut current_underline = false;
+        let mut current_dim = false;
+        let mut current_italic = false;
+        let mut current_strikethrough = false;
+        let mut segment_start_x = x;
+
         for span in spans {
             if span.text.is_empty() {
                 continue;
@@ -484,8 +507,7 @@ impl<'a> TerminalCanvas<'a> {
                 color = Color::from_rgba(color.r, color.g, color.b, color.a * 0.5);
             }
 
-            // Apply italic effect (Iced doesn't support italic directly, so we use a slight color shift)
-            // In a real implementation, you might want to use a different font or skew transform
+            // Apply italic effect (color shift as Iced doesn't support italic directly)
             if span.italic {
                 color = Color::from_rgba(
                     color.r * 0.9,
@@ -495,11 +517,64 @@ impl<'a> TerminalCanvas<'a> {
                 );
             }
 
-            // Draw the text segment
-            self.draw_text_segment(frame, &span.text, x, y.round(), color, span);
+            // Check if we can merge with current segment
+            let can_merge = current_color == Some(color)
+                && current_bold == span.bold
+                && current_underline == span.underline
+                && current_dim == span.dim
+                && current_italic == span.italic
+                && current_strikethrough == span.strikethrough
+                && !merged_text.is_empty();
 
-            // Advance x position
-            x += span.text.chars().count() as f32 * config::char_width(self.font_size);
+            if can_merge {
+                // Merge with current segment
+                merged_text.push_str(&span.text);
+            } else {
+                // Flush current segment if any
+                if !merged_text.is_empty() {
+                    let effective_color = current_color.unwrap_or(self.default_color);
+                    let span_data = StyledSpan {
+                        text: merged_text.clone(),
+                        color: Some(effective_color),
+                        bold: current_bold,
+                        underline: current_underline,
+                        dim: current_dim,
+                        italic: current_italic,
+                        strikethrough: current_strikethrough,
+                    };
+                    self.draw_text_segment(frame, &merged_text, segment_start_x, y.round(), effective_color, &span_data);
+
+                    let char_count = merged_text.chars().count();
+                    segment_start_x += char_count as f32 * config::char_width(self.font_size);
+                    x = segment_start_x;
+                    merged_text.clear();
+                }
+
+                // Start new segment
+                merged_text.push_str(&span.text);
+                current_color = Some(color);
+                current_bold = span.bold;
+                current_underline = span.underline;
+                current_dim = span.dim;
+                current_italic = span.italic;
+                current_strikethrough = span.strikethrough;
+                segment_start_x = x;
+            }
+        }
+
+        // Flush final segment
+        if !merged_text.is_empty() {
+            let effective_color = current_color.unwrap_or(self.default_color);
+            let span_data = StyledSpan {
+                text: merged_text.clone(),
+                color: Some(effective_color),
+                bold: current_bold,
+                underline: current_underline,
+                dim: current_dim,
+                italic: current_italic,
+                strikethrough: current_strikethrough,
+            };
+            self.draw_text_segment(frame, &merged_text, segment_start_x, y.round(), effective_color, &span_data);
         }
     }
 
@@ -659,7 +734,10 @@ where
                         self.pixel_to_cell(position.x, position.y, state.scroll_offset);
                     state.selection = Some(Selection::new(row, col));
                     state.is_dragging = true;
-                    state.cache.clear();
+                    // Don't clear cache for selection start - selection overlay is separate
+                    if !state.streaming_mode {
+                        state.cache.clear();
+                    }
                     return (canvas::event::Status::Captured, None);
                 }
                 (canvas::event::Status::Ignored, None)
@@ -671,7 +749,10 @@ where
                             self.pixel_to_cell(position.x, position.y, state.scroll_offset);
                         if let Some(selection) = &mut state.selection {
                             selection.end = (row, col);
-                            state.cache.clear();
+                            // Only clear cache for selection updates in non-streaming mode
+                            if !state.streaming_mode {
+                                state.cache.clear();
+                            }
                             return (canvas::event::Status::Captured, None);
                         }
                     }
@@ -685,7 +766,9 @@ where
                         // If no actual selection (start == end), clear it
                         if selection.start == selection.end {
                             state.selection = None;
-                            state.cache.clear();
+                            if !state.streaming_mode {
+                                state.cache.clear();
+                            }
                         }
                     }
                     return (canvas::event::Status::Captured, None);
@@ -706,7 +789,10 @@ where
 
                 if (state.scroll_offset - new_offset).abs() > 0.1 {
                     state.scroll_offset = new_offset;
-                    if !state.streaming_mode {
+                    // Scrolling doesn't require cache clear - just visible range change
+                    // Only clear in non-streaming mode if really needed (large scrolls)
+                    if !state.streaming_mode && scroll_amount.abs() > bounds.height {
+                        // Large scroll - clear cache
                         state.cache.clear();
                     }
                 }

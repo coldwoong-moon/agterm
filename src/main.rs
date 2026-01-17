@@ -261,8 +261,10 @@ struct AgTerm {
     last_cursor_blink: Instant,
     /// Font size (8.0 ~ 24.0)
     font_size: f32,
-    /// Search state
+    /// Search state (reserved for future search functionality)
+    #[allow(dead_code)]
     search_mode: bool,
+    #[allow(dead_code)]
     search_query: String,
     search_matches: Vec<(usize, usize, usize)>, // (line, start_col, end_col)
     current_match_index: Option<usize>,

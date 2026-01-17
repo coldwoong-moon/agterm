@@ -110,9 +110,13 @@ pub enum MouseEncoding {
 pub struct Cell {
     pub c: char,
     pub fg: Option<AnsiColor>,
+    /// Background color (reserved for future rendering enhancement)
+    #[allow(dead_code)]
     pub bg: Option<AnsiColor>,
     pub bold: bool,
     pub underline: bool,
+    /// Reverse video (reserved for future rendering enhancement)
+    #[allow(dead_code)]
     pub reverse: bool,
     pub dim: bool,
     pub italic: bool,
@@ -194,7 +198,8 @@ pub struct TerminalScreen {
     cursor_visible: bool,
     /// Auto-wrap mode (DECAWM) - default true
     auto_wrap_mode: bool,
-    /// Bracketed paste mode (CSI ?2004h/l)
+    /// Bracketed paste mode (CSI ?2004h/l) - tracked for terminal compatibility
+    #[allow(dead_code)]
     bracketed_paste_mode: bool,
     /// Application cursor keys mode (DECCKM - CSI ?1h/l)
     application_cursor_keys: bool,
@@ -387,27 +392,32 @@ impl TerminalScreen {
         (self.cursor_row, self.cursor_col)
     }
 
-    /// Get window title (OSC 0 or OSC 2)
+    /// Get window title (OSC 0 or OSC 2) - reserved for future window title bar integration
+    #[allow(dead_code)]
     pub fn window_title(&self) -> Option<&str> {
         self.window_title.as_deref()
     }
 
-    /// Get icon name (OSC 1)
+    /// Get icon name (OSC 1) - reserved for future icon integration
+    #[allow(dead_code)]
     pub fn icon_name(&self) -> Option<&str> {
         self.icon_name.as_deref()
     }
 
-    /// Get current working directory from shell (OSC 7)
+    /// Get current working directory from shell (OSC 7) - reserved for future tab label enhancement
+    #[allow(dead_code)]
     pub fn cwd_from_shell(&self) -> Option<&str> {
         self.cwd_from_shell.as_deref()
     }
 
-    /// Get clipboard request data (OSC 52)
+    /// Get clipboard request data (OSC 52) - reserved for future clipboard integration
+    #[allow(dead_code)]
     pub fn clipboard_request(&self) -> Option<&str> {
         self.clipboard_request.as_deref()
     }
 
-    /// Clear clipboard request after it has been read
+    /// Clear clipboard request after it has been read - reserved for future clipboard integration
+    #[allow(dead_code)]
     pub fn clear_clipboard_request(&mut self) {
         self.clipboard_request = None;
     }
@@ -434,17 +444,20 @@ impl TerminalScreen {
         }
     }
 
-    /// Get current mouse reporting mode
+    /// Get current mouse reporting mode - reserved for future mouse interaction support
+    #[allow(dead_code)]
     pub fn mouse_mode(&self) -> MouseMode {
         self.mouse_mode
     }
 
-    /// Get current mouse encoding mode
+    /// Get current mouse encoding mode - reserved for future mouse interaction support
+    #[allow(dead_code)]
     pub fn mouse_encoding(&self) -> MouseEncoding {
         self.mouse_encoding
     }
 
-    /// Check if mouse reporting is enabled
+    /// Check if mouse reporting is enabled - reserved for future mouse interaction support
+    #[allow(dead_code)]
     pub fn is_mouse_reporting_enabled(&self) -> bool {
         self.mouse_mode != MouseMode::None
     }
@@ -454,12 +467,14 @@ impl TerminalScreen {
         self.cursor_visible
     }
 
-    /// Get auto-wrap mode state
+    /// Get auto-wrap mode state - reserved for future line wrapping logic enhancement
+    #[allow(dead_code)]
     pub fn auto_wrap_mode(&self) -> bool {
         self.auto_wrap_mode
     }
 
-    /// Get bracketed paste mode state
+    /// Get bracketed paste mode state - reserved for future paste handling
+    #[allow(dead_code)]
     pub fn bracketed_paste_mode(&self) -> bool {
         self.bracketed_paste_mode
     }
@@ -1764,10 +1779,6 @@ mod tests {
         assert_eq!(buffer[4][0].c, ' '); // Blank line
     }
 }
-#[cfg(test)]
-mod test_il {
-    use crate::terminal::screen::TerminalScreen;
-}
 
 #[test]
 fn test_application_cursor_keys_default() {
@@ -2364,6 +2375,298 @@ fn test_sgr_reset_specific_attributes() {
     assert!(!screen.strikethrough);
 }
 
+#[test]
+fn test_sgr_256_color_foreground() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Test 256-color foreground (SGR 38;5;N)
+    // Standard color (0-15)
+    screen.process(b"\x1b[38;5;9mRed");
+    assert_eq!(
+        screen.current_fg,
+        Some(AnsiColor::Palette256(9))
+    );
+    let cell = &screen.buffer[0][0];
+    assert_eq!(cell.c, 'R');
+    assert_eq!(cell.fg, Some(AnsiColor::Palette256(9)));
+
+    // 6x6x6 color cube (16-231)
+    screen.process(b"\x1b[38;5;196mBright");
+    assert_eq!(
+        screen.current_fg,
+        Some(AnsiColor::Palette256(196))
+    );
+
+    // Grayscale (232-255)
+    screen.process(b"\x1b[38;5;244mGray");
+    assert_eq!(
+        screen.current_fg,
+        Some(AnsiColor::Palette256(244))
+    );
+
+    // Reset to default
+    screen.process(b"\x1b[39m");
+    assert_eq!(screen.current_fg, None);
+}
+
+#[test]
+fn test_sgr_256_color_background() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Test 256-color background (SGR 48;5;N)
+    // Standard color
+    screen.process(b"\x1b[48;5;12mBlue");
+    assert_eq!(
+        screen.current_bg,
+        Some(AnsiColor::Palette256(12))
+    );
+    let cell = &screen.buffer[0][0];
+    assert_eq!(cell.c, 'B');
+    assert_eq!(cell.bg, Some(AnsiColor::Palette256(12)));
+
+    // 6x6x6 color cube
+    screen.process(b"\x1b[48;5;46mGreen");
+    assert_eq!(
+        screen.current_bg,
+        Some(AnsiColor::Palette256(46))
+    );
+
+    // Grayscale
+    screen.process(b"\x1b[48;5;240mDark");
+    assert_eq!(
+        screen.current_bg,
+        Some(AnsiColor::Palette256(240))
+    );
+
+    // Reset to default
+    screen.process(b"\x1b[49m");
+    assert_eq!(screen.current_bg, None);
+}
+
+#[test]
+fn test_sgr_truecolor_foreground() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Test TrueColor foreground (SGR 38;2;R;G;B)
+    screen.process(b"\x1b[38;2;255;128;64mOrange");
+    assert_eq!(
+        screen.current_fg,
+        Some(AnsiColor::Rgb(255, 128, 64))
+    );
+    let cell = &screen.buffer[0][0];
+    assert_eq!(cell.c, 'O');
+    assert_eq!(cell.fg, Some(AnsiColor::Rgb(255, 128, 64)));
+
+    // Test pure colors
+    screen.process(b"\x1b[38;2;255;0;0mRed");
+    assert_eq!(
+        screen.current_fg,
+        Some(AnsiColor::Rgb(255, 0, 0))
+    );
+
+    screen.process(b"\x1b[38;2;0;255;0mGreen");
+    assert_eq!(
+        screen.current_fg,
+        Some(AnsiColor::Rgb(0, 255, 0))
+    );
+
+    screen.process(b"\x1b[38;2;0;0;255mBlue");
+    assert_eq!(
+        screen.current_fg,
+        Some(AnsiColor::Rgb(0, 0, 255))
+    );
+
+    // Test black and white
+    screen.process(b"\x1b[38;2;0;0;0mBlack");
+    assert_eq!(
+        screen.current_fg,
+        Some(AnsiColor::Rgb(0, 0, 0))
+    );
+
+    screen.process(b"\x1b[38;2;255;255;255mWhite");
+    assert_eq!(
+        screen.current_fg,
+        Some(AnsiColor::Rgb(255, 255, 255))
+    );
+
+    // Reset to default
+    screen.process(b"\x1b[39m");
+    assert_eq!(screen.current_fg, None);
+}
+
+#[test]
+fn test_sgr_truecolor_background() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Test TrueColor background (SGR 48;2;R;G;B)
+    screen.process(b"\x1b[48;2;100;200;150mCyan");
+    assert_eq!(
+        screen.current_bg,
+        Some(AnsiColor::Rgb(100, 200, 150))
+    );
+    let cell = &screen.buffer[0][0];
+    assert_eq!(cell.c, 'C');
+    assert_eq!(cell.bg, Some(AnsiColor::Rgb(100, 200, 150)));
+
+    // Test various colors
+    screen.process(b"\x1b[48;2;64;128;192mBlue");
+    assert_eq!(
+        screen.current_bg,
+        Some(AnsiColor::Rgb(64, 128, 192))
+    );
+
+    screen.process(b"\x1b[48;2;255;255;0mYellow");
+    assert_eq!(
+        screen.current_bg,
+        Some(AnsiColor::Rgb(255, 255, 0))
+    );
+
+    // Reset to default
+    screen.process(b"\x1b[49m");
+    assert_eq!(screen.current_bg, None);
+}
+
+#[test]
+fn test_sgr_mixed_color_modes() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Mix 16-color, 256-color, and TrueColor
+    // 16-color foreground + 256-color background
+    screen.process(b"\x1b[31;48;5;220mTest1");
+    assert_eq!(screen.current_fg, Some(AnsiColor::Indexed(1)));
+    assert_eq!(screen.current_bg, Some(AnsiColor::Palette256(220)));
+
+    // TrueColor foreground + 16-color background
+    screen.process(b"\x1b[38;2;128;64;200;44mTest2");
+    assert_eq!(screen.current_fg, Some(AnsiColor::Rgb(128, 64, 200)));
+    assert_eq!(screen.current_bg, Some(AnsiColor::Indexed(4)));
+
+    // 256-color foreground + TrueColor background
+    screen.process(b"\x1b[38;5;100;48;2;50;100;150mTest3");
+    assert_eq!(screen.current_fg, Some(AnsiColor::Palette256(100)));
+    assert_eq!(screen.current_bg, Some(AnsiColor::Rgb(50, 100, 150)));
+
+    // Reset all
+    screen.process(b"\x1b[0m");
+    assert_eq!(screen.current_fg, None);
+    assert_eq!(screen.current_bg, None);
+}
+
+#[test]
+fn test_sgr_color_with_attributes() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Combine TrueColor with text attributes
+    screen.process(b"\x1b[1;3;4;38;2;255;100;50mBold Italic Underline Orange");
+    assert!(screen.bold);
+    assert!(screen.italic);
+    assert!(screen.underline);
+    assert_eq!(screen.current_fg, Some(AnsiColor::Rgb(255, 100, 50)));
+
+    let cell = &screen.buffer[0][0];
+    assert_eq!(cell.c, 'B');
+    assert!(cell.bold);
+    assert!(cell.italic);
+    assert!(cell.underline);
+    assert_eq!(cell.fg, Some(AnsiColor::Rgb(255, 100, 50)));
+
+    // Combine 256-color with attributes
+    screen.process(b"\x1b[2;9;48;5;200mDim Strikethrough");
+    assert!(screen.dim);
+    assert!(screen.strikethrough);
+    assert_eq!(screen.current_bg, Some(AnsiColor::Palette256(200)));
+}
+
+#[test]
+fn test_ansi_color_to_iced_color() {
+    // Test Indexed color conversion
+    let indexed = AnsiColor::Indexed(1); // Red
+    let color = indexed.to_color();
+    assert_eq!(color, Color::from_rgb(0.8, 0.2, 0.2));
+
+    // Test 256-color palette conversion (standard color)
+    let palette_std = AnsiColor::Palette256(9); // Bright Red
+    let color_std = palette_std.to_color();
+    assert_eq!(color_std, Color::from_rgb(1.0, 0.3, 0.3));
+
+    // Test 256-color palette conversion (color cube)
+    let palette_cube = AnsiColor::Palette256(16); // First color in 6x6x6 cube
+    let color_cube = palette_cube.to_color();
+    assert_eq!(color_cube, Color::from_rgb(0.0, 0.0, 0.0));
+
+    let palette_cube2 = AnsiColor::Palette256(231); // Last color in 6x6x6 cube
+    let color_cube2 = palette_cube2.to_color();
+    assert_eq!(color_cube2, Color::from_rgb(1.0, 1.0, 1.0));
+
+    // Test 256-color palette conversion (grayscale)
+    let palette_gray = AnsiColor::Palette256(232); // First grayscale
+    let color_gray = palette_gray.to_color();
+    let expected_gray = 8.0 / 255.0;
+    assert_eq!(color_gray, Color::from_rgb(expected_gray, expected_gray, expected_gray));
+
+    let palette_gray_mid = AnsiColor::Palette256(244); // Mid grayscale
+    let color_gray_mid = palette_gray_mid.to_color();
+    let expected_gray_mid = (8.0 + 12.0 * 10.0) / 255.0;
+    assert_eq!(color_gray_mid, Color::from_rgb(expected_gray_mid, expected_gray_mid, expected_gray_mid));
+
+    // Test RGB color conversion
+    let rgb = AnsiColor::Rgb(255, 128, 64);
+    let color_rgb = rgb.to_color();
+    assert_eq!(color_rgb, Color::from_rgb(1.0, 128.0 / 255.0, 64.0 / 255.0));
+
+    let rgb_black = AnsiColor::Rgb(0, 0, 0);
+    let color_black = rgb_black.to_color();
+    assert_eq!(color_black, Color::from_rgb(0.0, 0.0, 0.0));
+
+    let rgb_white = AnsiColor::Rgb(255, 255, 255);
+    let color_white = rgb_white.to_color();
+    assert_eq!(color_white, Color::from_rgb(1.0, 1.0, 1.0));
+}
+
+#[test]
+fn test_256_color_palette_ranges() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Test all standard colors (0-15)
+    for i in 0..=15 {
+        screen.process(format!("\x1b[38;5;{}m.", i).as_bytes());
+        assert_eq!(screen.current_fg, Some(AnsiColor::Palette256(i)));
+    }
+
+    // Test color cube boundaries (16-231)
+    screen.process(b"\x1b[38;5;16m."); // First cube color
+    assert_eq!(screen.current_fg, Some(AnsiColor::Palette256(16)));
+
+    screen.process(b"\x1b[38;5;231m."); // Last cube color
+    assert_eq!(screen.current_fg, Some(AnsiColor::Palette256(231)));
+
+    // Test grayscale boundaries (232-255)
+    screen.process(b"\x1b[38;5;232m."); // First grayscale
+    assert_eq!(screen.current_fg, Some(AnsiColor::Palette256(232)));
+
+    screen.process(b"\x1b[38;5;255m."); // Last grayscale
+    assert_eq!(screen.current_fg, Some(AnsiColor::Palette256(255)));
+}
+
+#[test]
+fn test_color_cube_calculation() {
+    // Test the 6x6x6 color cube calculation
+    // Color 16 should be (0,0,0) in the cube = RGB(0,0,0)
+    let color_16 = palette256_to_color(16);
+    assert_eq!(color_16, Color::from_rgb(0.0, 0.0, 0.0));
+
+    // Color 21 should be (0,0,5) in the cube = RGB(0,0,255)
+    let color_21 = palette256_to_color(21);
+    assert_eq!(color_21, Color::from_rgb(0.0, 0.0, 255.0 / 255.0));
+
+    // Color 226 should be (5,5,0) in the cube = RGB(255,255,0) - yellow
+    let color_226 = palette256_to_color(226);
+    assert_eq!(color_226, Color::from_rgb(255.0 / 255.0, 255.0 / 255.0, 0.0));
+
+    // Color 231 should be (5,5,5) in the cube = RGB(255,255,255)
+    let color_231 = palette256_to_color(231);
+    assert_eq!(color_231, Color::from_rgb(1.0, 1.0, 1.0));
+}
 #[cfg(test)]
 mod resize_tests {
     use super::*;

@@ -14,7 +14,8 @@ pub type PtyId = Uuid;
 /// Maximum output buffer size per session (1MB)
 const MAX_OUTPUT_BUFFER_SIZE: usize = 1024 * 1024;
 
-/// Maximum lines per command block output
+/// Maximum lines per command block output (reserved for future block-mode feature)
+#[allow(dead_code)]
 pub const MAX_OUTPUT_LINES: usize = 10000;
 
 #[derive(Debug, thiserror::Error)]
