@@ -1,0 +1,149 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: AgTerm v${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## AgTerm v${{ steps.get_version.outputs.VERSION }}
+
+            ### Installation
+
+            Download the appropriate binary for your platform and add it to your PATH.
+
+            #### macOS (Apple Silicon)
+            ```bash
+            curl -L -o agterm https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/agterm-macos-arm64
+            chmod +x agterm
+            sudo mv agterm /usr/local/bin/
+            ```
+
+            #### macOS (Intel)
+            ```bash
+            curl -L -o agterm https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/agterm-macos-amd64
+            chmod +x agterm
+            sudo mv agterm /usr/local/bin/
+            ```
+
+            #### Linux (x86_64)
+            ```bash
+            curl -L -o agterm https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/agterm-linux-amd64
+            chmod +x agterm
+            sudo mv agterm /usr/local/bin/
+            ```
+
+            #### Windows
+            Download `agterm-windows-amd64.exe` and add it to your PATH.
+
+            ### Changelog
+
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+
+  build-release:
+    name: Build Release
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: agterm-linux-amd64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact: agterm-linux-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: agterm-macos-amd64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: agterm-macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: agterm-windows-amd64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Package binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cp target/${{ matrix.target }}/release/agterm ${{ matrix.artifact }}
+          chmod +x ${{ matrix.artifact }}
+
+      - name: Package binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cp target/${{ matrix.target }}/release/agterm.exe ${{ matrix.artifact }}
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./${{ matrix.artifact }}
+          asset_name: ${{ matrix.artifact }}
+          asset_content_type: application/octet-stream
+
+  publish-crate:
+    name: Publish to crates.io
+    needs: [create-release, build-release]
+    runs-on: ubuntu-latest
+    if: "!contains(github.ref, 'alpha') && !contains(github.ref, 'beta')"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Publish to crates.io
+        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+        continue-on-error: true  # Don't fail if already published

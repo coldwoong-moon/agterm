@@ -1,0 +1,58 @@
+# AgTerm Default Configuration
+# This file contains default values and is embedded in the binary.
+# Override these values in ~/.config/agterm/config.toml or .agterm/config.toml
+
+[general]
+app_name = "agterm"
+# default_shell is auto-detected from $SHELL
+# default_working_dir = "/path/to/default"
+
+[pty]
+max_sessions = 32
+default_cols = 120
+default_rows = 40
+scrollback_lines = 10000
+
+[mcp]
+timeout_secs = 30
+retry_attempts = 3
+retry_delay_secs = 5
+
+# Example MCP server configuration:
+# [[mcp.servers]]
+# name = "filesystem"
+# transport = "stdio"
+# command = "npx"
+# args = ["-y", "@anthropic/mcp-filesystem-server"]
+# auto_connect = true
+
+# [[mcp.servers]]
+# name = "github"
+# transport = "stdio"
+# command = "npx"
+# args = ["-y", "@anthropic/mcp-github-server"]
+# auto_connect = true
+# [mcp.servers.env]
+# GITHUB_TOKEN = "${GITHUB_TOKEN}"
+
+[storage]
+# database_path = "~/.local/share/agterm/agterm.db"
+# logs_dir = "~/.local/share/agterm/logs"
+compression_level = "compacted"  # raw, compacted, summarized
+archive_retention_days = 90
+ai_summarization = false
+# ai_provider = "ollama"
+
+[tui]
+target_fps = 60
+show_line_numbers = false
+theme = "default"
+mouse_support = true
+keybindings = "vim"  # vim, emacs
+
+[logging]
+level = "info"
+format = "pretty"  # pretty, compact, json
+timestamps = true
+file_line = false
+# file = "~/.local/share/agterm/agterm.log"
