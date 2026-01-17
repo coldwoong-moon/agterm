@@ -302,9 +302,14 @@ fn main() -> iced::Result {
         .run()
 }
 
-/// Input field ID for focusing
+/// Input field ID for focusing (Block mode)
 fn input_id() -> TextInputId {
     TextInputId::new("terminal_input")
+}
+
+/// Raw mode input field ID for IME support
+fn raw_input_id() -> TextInputId {
+    TextInputId::new("raw_terminal_input")
 }
 
 /// Main application state
@@ -335,6 +340,7 @@ impl Default for AgTerm {
             blocks: Vec::new(),
             pending_output: Vec::new(),
             raw_output_buffer: String::new(),
+            raw_input: String::new(),
             input: String::new(),
             cwd,
             error_message,
@@ -362,6 +368,7 @@ struct TerminalTab {
     blocks: Vec<CommandBlock>,
     pending_output: Vec<String>,  // Output before first command
     raw_output_buffer: String,    // Raw PTY output for Raw mode display
+    raw_input: String,            // Input buffer for Raw mode (IME support)
     input: String,
     cwd: String,  // Current working directory display
     error_message: Option<String>,  // PTY error message if creation failed
@@ -419,6 +426,8 @@ enum Message {
 
     // Raw input (Raw mode)
     RawInput(String),
+    RawInputChanged(String),
+    RawInputSubmit,
 
     // Mode toggle
     ToggleMode,
@@ -480,6 +489,7 @@ impl AgTerm {
                     blocks: Vec::new(),
                     pending_output: Vec::new(),
                     raw_output_buffer: String::new(),
+                    raw_input: String::new(),
                     input: String::new(),
                     cwd,
                     error_message,
@@ -490,7 +500,7 @@ impl AgTerm {
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
-                Task::none()
+                text_input::focus(raw_input_id())
             }
 
             Message::CloseTab(index) => {
@@ -654,6 +664,36 @@ impl AgTerm {
                 Task::none()
             }
 
+            Message::RawInputChanged(new_input) => {
+                // Handle text input in Raw mode (for IME/Korean support)
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    // Find newly added characters
+                    let old_len = tab.raw_input.len();
+                    let new_len = new_input.len();
+
+                    if new_len > old_len {
+                        // Characters were added - send them to PTY
+                        let added = &new_input[old_len..];
+                        if let Some(session_id) = &tab.session_id {
+                            let _ = self.pty_manager.write(session_id, added.as_bytes());
+                        }
+                    }
+                    tab.raw_input = new_input;
+                }
+                Task::none()
+            }
+
+            Message::RawInputSubmit => {
+                // Enter key in Raw mode - send newline and clear input
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    if let Some(session_id) = &tab.session_id {
+                        let _ = self.pty_manager.write(session_id, b"\r");
+                    }
+                    tab.raw_input.clear();
+                }
+                text_input::focus(raw_input_id())
+            }
+
             Message::ToggleMode => {
                 if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                     tab.mode = match tab.mode {
@@ -800,8 +840,20 @@ impl AgTerm {
             }
 
             Message::Tick => {
-                // No auto-focus needed for Raw mode (we use keyboard events)
-                self.startup_focus_count = 0;
+                // Auto-focus on raw input for IME support
+                let focus_task = if self.startup_focus_count > 0 {
+                    self.startup_focus_count -= 1;
+                    if let Some(tab) = self.tabs.get(self.active_tab) {
+                        match tab.mode {
+                            TerminalMode::Raw => text_input::focus(raw_input_id()),
+                            TerminalMode::Block => text_input::focus(input_id()),
+                        }
+                    } else {
+                        Task::none()
+                    }
+                } else {
+                    Task::none()
+                };
 
                 // Poll PTY output for all tabs
                 for tab in &mut self.tabs {
@@ -875,7 +927,7 @@ impl AgTerm {
                         tab.blocks.drain(0..excess);
                     }
                 }
-                Task::none()
+                focus_task
             }
         }
     }
@@ -1029,6 +1081,49 @@ impl AgTerm {
                     // ========== Raw Mode: Full terminal view ==========
                     let terminal_output = self.render_raw_terminal(&tab.raw_output_buffer);
 
+                    // ========== Input Area (Raw Mode - for IME/Korean support) ==========
+                    let prompt_symbol = text("❯").size(16).font(MONO_FONT).color(theme::PROMPT);
+                    let raw_input_field = text_input("", &tab.raw_input)
+                        .id(raw_input_id())
+                        .on_input(Message::RawInputChanged)
+                        .on_submit(Message::RawInputSubmit)
+                        .padding([10, 14])
+                        .size(14)
+                        .font(MONO_FONT)
+                        .style(|_, _| text_input::Style {
+                            background: theme::BG_INPUT.into(),
+                            border: Border {
+                                color: theme::BORDER,
+                                width: 1.0,
+                                radius: 6.0.into(),
+                            },
+                            icon: theme::TEXT_MUTED,
+                            placeholder: theme::TEXT_MUTED,
+                            value: theme::TEXT_PRIMARY,
+                            selection: theme::ACCENT_BLUE,
+                        });
+
+                    let input_row: Element<Message> = container(
+                        row![
+                            prompt_symbol,
+                            Space::with_width(10),
+                            raw_input_field
+                        ]
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill),
+                    )
+                    .padding([8, 12])
+                    .style(|_| container::Style {
+                        background: Some(theme::BG_SECONDARY.into()),
+                        border: Border {
+                            color: theme::BORDER,
+                            width: 1.0,
+                            radius: 0.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .into();
+
                     // ========== Status Bar (Raw Mode) ==========
                     let shell_name = self.get_shell_name();
                     let mode_indicator = text("RAW")
@@ -1083,6 +1178,7 @@ impl AgTerm {
                                 background: Some(theme::BG_BLOCK.into()),
                                 ..Default::default()
                             }),
+                        input_row,
                         status_bar
                     ]
                     .width(Length::Fill)
@@ -1706,6 +1802,7 @@ mod tests {
             blocks: Vec::new(),
             pending_output: vec!["Test Welcome".to_string()],
             raw_output_buffer: String::new(),
+            raw_input: String::new(),
             input: String::new(),
             cwd: "/test/path".to_string(),
             error_message: None,
