@@ -56,7 +56,8 @@ format = "pretty"           # pretty, compact, json
 timestamps = true
 file_line = false
 file_output = true          # Enable file output
-file_path = "~/.local/share/agterm/logs"
+# file_path = auto          # macOS: ~/Library/Application Support/agterm/logs
+                            # Linux: ~/.local/share/agterm/logs
 
 [debug]
 enabled = false             # Enable debug panel on startup (or set AGTERM_DEBUG=1)

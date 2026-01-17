@@ -19,8 +19,14 @@ This skill is invoked when user types `/agterm-logs` or asks to view AgTerm logs
 ### View Recent Logs
 
 ```bash
+# Determine log directory based on platform
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    LOG_DIR="$HOME/Library/Application Support/agterm/logs"
+else
+    LOG_DIR="$HOME/.local/share/agterm/logs"
+fi
+
 # Find the latest log file
-LOG_DIR="$HOME/.local/share/agterm/logs"
 LATEST_LOG=$(ls -t "$LOG_DIR"/agterm.log.* 2>/dev/null | head -1)
 
 if [ -n "$LATEST_LOG" ]; then
@@ -33,7 +39,11 @@ fi
 ### Follow Logs in Real-time
 
 ```bash
-LOG_DIR="$HOME/.local/share/agterm/logs"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    LOG_DIR="$HOME/Library/Application Support/agterm/logs"
+else
+    LOG_DIR="$HOME/.local/share/agterm/logs"
+fi
 tail -f "$LOG_DIR"/agterm.log.* 2>/dev/null
 ```
 
@@ -41,7 +51,7 @@ tail -f "$LOG_DIR"/agterm.log.* 2>/dev/null
 
 ```bash
 # Error logs only
-grep -i "ERROR\|error" "$LOG_DIR"/agterm.log.*
+grep -i "ERROR" "$LOG_DIR"/agterm.log.*
 
 # Warning and above
 grep -iE "WARN|ERROR" "$LOG_DIR"/agterm.log.*
@@ -66,7 +76,11 @@ grep "agterm::" "$LOG_DIR"/agterm.log.*
 ### Clear Logs
 
 ```bash
-rm -f "$HOME/.local/share/agterm/logs"/agterm.log.*
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    rm -f "$HOME/Library/Application Support/agterm/logs"/agterm.log.*
+else
+    rm -f "$HOME/.local/share/agterm/logs"/agterm.log.*
+fi
 echo "Log files cleared"
 ```
 
