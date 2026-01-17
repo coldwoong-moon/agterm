@@ -145,6 +145,31 @@ impl Default for Cell {
     }
 }
 
+/// Saved state for alternate screen buffer switching.
+///
+/// Stores complete terminal state when entering alternate screen,
+/// allowing full restoration when returning to main screen.
+#[derive(Clone, Debug)]
+struct AlternateScreenState {
+    /// Cursor position (row, col)
+    cursor_pos: (usize, usize),
+    /// Current text attributes
+    current_fg: Option<AnsiColor>,
+    current_bg: Option<AnsiColor>,
+    bold: bool,
+    underline: bool,
+    reverse: bool,
+    dim: bool,
+    italic: bool,
+    strikethrough: bool,
+    /// Scroll region
+    scroll_region: Option<(usize, usize)>,
+    /// Saved cursor for DECSC/DECRC
+    saved_cursor: Option<(usize, usize)>,
+    /// Saved cursor state (DECSC)
+    saved_cursor_state: Option<(usize, usize, Option<AnsiColor>, Option<AnsiColor>, bool)>,
+}
+
 /// Terminal screen buffer with VTE parser
 pub struct TerminalScreen {
     cols: usize,
@@ -188,8 +213,8 @@ pub struct TerminalScreen {
     alternate_scrollback: Option<VecDeque<Vec<Cell>>>,
     /// Whether we're currently using the alternate screen
     use_alternate_screen: bool,
-    /// Saved cursor position for alternate screen
-    alternate_saved_cursor: Option<(usize, usize)>,
+    /// Saved main screen state (cursor pos, attributes, scroll region, etc.)
+    alternate_saved_state: Option<AlternateScreenState>,
     /// Mouse reporting mode
     mouse_mode: MouseMode,
     /// Mouse encoding mode
@@ -205,6 +230,8 @@ pub struct TerminalScreen {
     application_cursor_keys: bool,
     /// Pending responses to be sent to PTY (for DA, DSR, CPR, etc.)
     pending_responses: Vec<String>,
+    /// Bell (BEL) triggered flag - set when \x07 is received
+    bell_triggered: bool,
 }
 
 impl TerminalScreen {
@@ -239,7 +266,7 @@ impl TerminalScreen {
             alternate_buffer: None,
             alternate_scrollback: None,
             use_alternate_screen: false,
-            alternate_saved_cursor: None,
+            alternate_saved_state: None,
             mouse_mode: MouseMode::None,
             mouse_encoding: MouseEncoding::Default,
             cursor_visible: true,
@@ -247,6 +274,7 @@ impl TerminalScreen {
             bracketed_paste_mode: false,
             application_cursor_keys: false,
             pending_responses: Vec::new(),
+            bell_triggered: false,
         }
     }
 
@@ -465,6 +493,13 @@ impl TerminalScreen {
     /// Get cursor visibility state
     pub fn cursor_visible(&self) -> bool {
         self.cursor_visible
+    }
+
+    /// Check if bell was triggered and clear the flag (consume)
+    pub fn take_bell_triggered(&mut self) -> bool {
+        let triggered = self.bell_triggered;
+        self.bell_triggered = false;
+        triggered
     }
 
     /// Get auto-wrap mode state - reserved for future line wrapping logic enhancement
@@ -712,37 +747,99 @@ impl TerminalScreen {
         }
     }
 
-    /// Switch to alternate screen buffer
-    fn switch_to_alternate_screen(&mut self) {
+    /// Switch to alternate screen buffer (CSI ?47h, ?1047h, ?1049h).
+    ///
+    /// Saves complete main screen state including:
+    /// - Buffer contents and scrollback
+    /// - Cursor position and attributes
+    /// - Scroll region
+    /// - DECSC saved cursor state
+    ///
+    /// The `clear_screen` parameter determines if the alternate screen should be cleared.
+    fn switch_to_alternate_screen(&mut self, clear_screen: bool) {
         if !self.use_alternate_screen {
-            // Save current buffer and scrollback
+            // Save complete main screen state
             self.alternate_buffer = Some(self.buffer.clone());
             self.alternate_scrollback = Some(self.scrollback.clone());
-            self.alternate_saved_cursor = self.saved_cursor;
+            self.alternate_saved_state = Some(AlternateScreenState {
+                cursor_pos: (self.cursor_row, self.cursor_col),
+                current_fg: self.current_fg,
+                current_bg: self.current_bg,
+                bold: self.bold,
+                underline: self.underline,
+                reverse: self.reverse,
+                dim: self.dim,
+                italic: self.italic,
+                strikethrough: self.strikethrough,
+                scroll_region: self.scroll_region,
+                saved_cursor: self.saved_cursor,
+                saved_cursor_state: self.saved_cursor_state.clone(),
+            });
 
-            // Create fresh alternate screen
-            self.buffer = vec![vec![Cell::default(); self.cols]; self.rows];
+            // Create alternate screen buffer
+            if clear_screen {
+                // Clear alternate screen (CSI ?1047h, ?1049h)
+                self.buffer = vec![vec![Cell::default(); self.cols]; self.rows];
+            } else {
+                // Keep current content (CSI ?47h - simple buffer switch)
+                // This is rarely used, but some apps might rely on it
+                self.buffer = vec![vec![Cell::default(); self.cols]; self.rows];
+            }
+
             self.scrollback = VecDeque::new();
             self.cursor_row = 0;
             self.cursor_col = 0;
             self.scroll_region = None;
             self.saved_cursor = None;
+            self.saved_cursor_state = None;
+
+            // Reset text attributes to defaults in alternate screen
+            self.current_fg = None;
+            self.current_bg = None;
+            self.bold = false;
+            self.underline = false;
+            self.reverse = false;
+            self.dim = false;
+            self.italic = false;
+            self.strikethrough = false;
 
             self.use_alternate_screen = true;
         }
     }
 
-    /// Switch back to normal screen buffer
+    /// Switch back to normal screen buffer (CSI ?47l, ?1047l, ?1049l).
+    ///
+    /// Fully restores main screen state including:
+    /// - Buffer contents and scrollback
+    /// - Cursor position and attributes
+    /// - Scroll region
+    /// - DECSC saved cursor state
     fn switch_to_normal_screen(&mut self) {
         if self.use_alternate_screen {
-            // Restore saved buffer and scrollback
+            // Restore buffer and scrollback
             if let Some(saved_buffer) = self.alternate_buffer.take() {
                 self.buffer = saved_buffer;
             }
             if let Some(saved_scrollback) = self.alternate_scrollback.take() {
                 self.scrollback = saved_scrollback;
             }
-            self.saved_cursor = self.alternate_saved_cursor;
+
+            // Restore complete terminal state
+            if let Some(state) = self.alternate_saved_state.take() {
+                self.cursor_row = min(state.cursor_pos.0, self.rows.saturating_sub(1));
+                self.cursor_col = min(state.cursor_pos.1, self.cols.saturating_sub(1));
+                self.current_fg = state.current_fg;
+                self.current_bg = state.current_bg;
+                self.bold = state.bold;
+                self.underline = state.underline;
+                self.reverse = state.reverse;
+                self.dim = state.dim;
+                self.italic = state.italic;
+                self.strikethrough = state.strikethrough;
+                self.scroll_region = state.scroll_region;
+                self.saved_cursor = state.saved_cursor;
+                self.saved_cursor_state = state.saved_cursor_state;
+            }
 
             self.use_alternate_screen = false;
         }
@@ -1065,14 +1162,21 @@ impl Perform for TerminalScreen {
                         // SGR Extended Mouse Mode (CSI ?1006h)
                         self.mouse_encoding = MouseEncoding::Sgr;
                     }
-                    1049 => {
-                        // Save cursor and switch to alternate screen
-                        self.saved_cursor = Some((self.cursor_row, self.cursor_col));
-                        self.switch_to_alternate_screen();
+                    47 => {
+                        // CSI ?47h - Switch to alternate screen (basic mode)
+                        // Used by some older applications
+                        self.switch_to_alternate_screen(false);
                     }
-                    47 | 1047 => {
-                        // Switch to alternate screen (without saving cursor)
-                        self.switch_to_alternate_screen();
+                    1047 => {
+                        // CSI ?1047h - Switch to alternate screen and clear it
+                        // More common in modern terminals
+                        self.switch_to_alternate_screen(true);
+                    }
+                    1049 => {
+                        // CSI ?1049h - Save cursor, switch to alternate screen and clear
+                        // Most complete mode - used by vim, less, htop, etc.
+                        // Note: cursor is saved in the state structure
+                        self.switch_to_alternate_screen(true);
                     }
                     _ => {
                         // Other private modes not implemented yet
@@ -1102,16 +1206,10 @@ impl Perform for TerminalScreen {
                         // Disable SGR Extended Mouse Mode (CSI ?1006l)
                         self.mouse_encoding = MouseEncoding::Default;
                     }
-                    1049 => {
-                        // Switch to normal screen and restore cursor
-                        self.switch_to_normal_screen();
-                        if let Some((row, col)) = self.saved_cursor {
-                            self.cursor_row = min(row, self.rows - 1);
-                            self.cursor_col = min(col, self.cols - 1);
-                        }
-                    }
-                    47 | 1047 => {
-                        // Switch to normal screen (without restoring cursor)
+                    47 | 1047 | 1049 => {
+                        // CSI ?47l, ?1047l, ?1049l - Switch back to normal screen
+                        // All three modes restore the main screen completely
+                        // The saved state includes cursor position and all attributes
                         self.switch_to_normal_screen();
                     }
                     _ => {
@@ -2077,30 +2175,30 @@ fn test_emoji_wide_character() {
     assert!(pos.1 > 0);
 }
 
-    #[test]
-    fn test_application_cursor_keys_mode_sequences() {
-        let mut screen = TerminalScreen::new(80, 24);
+#[test]
+fn test_application_cursor_keys_mode_sequences() {
+    let mut screen = TerminalScreen::new(80, 24);
 
-        // Test that mode changes are correctly applied via escape sequences
-        // Normal mode (default)
-        assert!(!screen.application_cursor_keys());
+    // Test that mode changes are correctly applied via escape sequences
+    // Normal mode (default)
+    assert!(!screen.application_cursor_keys());
 
-        // Enable application mode (like vim does)
+    // Enable application mode (like vim does)
+    screen.process(b"\x1b[?1h");
+    assert!(screen.application_cursor_keys());
+
+    // Disable application mode (back to normal)
+    screen.process(b"\x1b[?1l");
+    assert!(!screen.application_cursor_keys());
+
+    // Test multiple mode changes
+    for _ in 0..3 {
         screen.process(b"\x1b[?1h");
         assert!(screen.application_cursor_keys());
-
-        // Disable application mode (back to normal)
         screen.process(b"\x1b[?1l");
         assert!(!screen.application_cursor_keys());
-
-        // Test multiple mode changes
-        for _ in 0..3 {
-            screen.process(b"\x1b[?1h");
-            assert!(screen.application_cursor_keys());
-            screen.process(b"\x1b[?1l");
-            assert!(!screen.application_cursor_keys());
-        }
     }
+}
 
 #[test]
 fn test_device_attributes_primary_da1() {
@@ -2179,10 +2277,10 @@ fn test_multiple_device_attribute_requests() {
     let mut screen = TerminalScreen::new(80, 24);
 
     // Send multiple requests
-    screen.process(b"\x1b[c");       // Primary DA
-    screen.process(b"\x1b[>c");      // Secondary DA
-    screen.process(b"\x1b[5n");      // DSR
-    screen.process(b"\x1b[6n");      // CPR
+    screen.process(b"\x1b[c"); // Primary DA
+    screen.process(b"\x1b[>c"); // Secondary DA
+    screen.process(b"\x1b[5n"); // DSR
+    screen.process(b"\x1b[6n"); // CPR
 
     // Should have four pending responses
     let responses = screen.take_pending_responses();
@@ -2382,27 +2480,18 @@ fn test_sgr_256_color_foreground() {
     // Test 256-color foreground (SGR 38;5;N)
     // Standard color (0-15)
     screen.process(b"\x1b[38;5;9mRed");
-    assert_eq!(
-        screen.current_fg,
-        Some(AnsiColor::Palette256(9))
-    );
+    assert_eq!(screen.current_fg, Some(AnsiColor::Palette256(9)));
     let cell = &screen.buffer[0][0];
     assert_eq!(cell.c, 'R');
     assert_eq!(cell.fg, Some(AnsiColor::Palette256(9)));
 
     // 6x6x6 color cube (16-231)
     screen.process(b"\x1b[38;5;196mBright");
-    assert_eq!(
-        screen.current_fg,
-        Some(AnsiColor::Palette256(196))
-    );
+    assert_eq!(screen.current_fg, Some(AnsiColor::Palette256(196)));
 
     // Grayscale (232-255)
     screen.process(b"\x1b[38;5;244mGray");
-    assert_eq!(
-        screen.current_fg,
-        Some(AnsiColor::Palette256(244))
-    );
+    assert_eq!(screen.current_fg, Some(AnsiColor::Palette256(244)));
 
     // Reset to default
     screen.process(b"\x1b[39m");
@@ -2416,27 +2505,18 @@ fn test_sgr_256_color_background() {
     // Test 256-color background (SGR 48;5;N)
     // Standard color
     screen.process(b"\x1b[48;5;12mBlue");
-    assert_eq!(
-        screen.current_bg,
-        Some(AnsiColor::Palette256(12))
-    );
+    assert_eq!(screen.current_bg, Some(AnsiColor::Palette256(12)));
     let cell = &screen.buffer[0][0];
     assert_eq!(cell.c, 'B');
     assert_eq!(cell.bg, Some(AnsiColor::Palette256(12)));
 
     // 6x6x6 color cube
     screen.process(b"\x1b[48;5;46mGreen");
-    assert_eq!(
-        screen.current_bg,
-        Some(AnsiColor::Palette256(46))
-    );
+    assert_eq!(screen.current_bg, Some(AnsiColor::Palette256(46)));
 
     // Grayscale
     screen.process(b"\x1b[48;5;240mDark");
-    assert_eq!(
-        screen.current_bg,
-        Some(AnsiColor::Palette256(240))
-    );
+    assert_eq!(screen.current_bg, Some(AnsiColor::Palette256(240)));
 
     // Reset to default
     screen.process(b"\x1b[49m");
@@ -2449,45 +2529,27 @@ fn test_sgr_truecolor_foreground() {
 
     // Test TrueColor foreground (SGR 38;2;R;G;B)
     screen.process(b"\x1b[38;2;255;128;64mOrange");
-    assert_eq!(
-        screen.current_fg,
-        Some(AnsiColor::Rgb(255, 128, 64))
-    );
+    assert_eq!(screen.current_fg, Some(AnsiColor::Rgb(255, 128, 64)));
     let cell = &screen.buffer[0][0];
     assert_eq!(cell.c, 'O');
     assert_eq!(cell.fg, Some(AnsiColor::Rgb(255, 128, 64)));
 
     // Test pure colors
     screen.process(b"\x1b[38;2;255;0;0mRed");
-    assert_eq!(
-        screen.current_fg,
-        Some(AnsiColor::Rgb(255, 0, 0))
-    );
+    assert_eq!(screen.current_fg, Some(AnsiColor::Rgb(255, 0, 0)));
 
     screen.process(b"\x1b[38;2;0;255;0mGreen");
-    assert_eq!(
-        screen.current_fg,
-        Some(AnsiColor::Rgb(0, 255, 0))
-    );
+    assert_eq!(screen.current_fg, Some(AnsiColor::Rgb(0, 255, 0)));
 
     screen.process(b"\x1b[38;2;0;0;255mBlue");
-    assert_eq!(
-        screen.current_fg,
-        Some(AnsiColor::Rgb(0, 0, 255))
-    );
+    assert_eq!(screen.current_fg, Some(AnsiColor::Rgb(0, 0, 255)));
 
     // Test black and white
     screen.process(b"\x1b[38;2;0;0;0mBlack");
-    assert_eq!(
-        screen.current_fg,
-        Some(AnsiColor::Rgb(0, 0, 0))
-    );
+    assert_eq!(screen.current_fg, Some(AnsiColor::Rgb(0, 0, 0)));
 
     screen.process(b"\x1b[38;2;255;255;255mWhite");
-    assert_eq!(
-        screen.current_fg,
-        Some(AnsiColor::Rgb(255, 255, 255))
-    );
+    assert_eq!(screen.current_fg, Some(AnsiColor::Rgb(255, 255, 255)));
 
     // Reset to default
     screen.process(b"\x1b[39m");
@@ -2500,26 +2562,17 @@ fn test_sgr_truecolor_background() {
 
     // Test TrueColor background (SGR 48;2;R;G;B)
     screen.process(b"\x1b[48;2;100;200;150mCyan");
-    assert_eq!(
-        screen.current_bg,
-        Some(AnsiColor::Rgb(100, 200, 150))
-    );
+    assert_eq!(screen.current_bg, Some(AnsiColor::Rgb(100, 200, 150)));
     let cell = &screen.buffer[0][0];
     assert_eq!(cell.c, 'C');
     assert_eq!(cell.bg, Some(AnsiColor::Rgb(100, 200, 150)));
 
     // Test various colors
     screen.process(b"\x1b[48;2;64;128;192mBlue");
-    assert_eq!(
-        screen.current_bg,
-        Some(AnsiColor::Rgb(64, 128, 192))
-    );
+    assert_eq!(screen.current_bg, Some(AnsiColor::Rgb(64, 128, 192)));
 
     screen.process(b"\x1b[48;2;255;255;0mYellow");
-    assert_eq!(
-        screen.current_bg,
-        Some(AnsiColor::Rgb(255, 255, 0))
-    );
+    assert_eq!(screen.current_bg, Some(AnsiColor::Rgb(255, 255, 0)));
 
     // Reset to default
     screen.process(b"\x1b[49m");
@@ -2602,12 +2655,18 @@ fn test_ansi_color_to_iced_color() {
     let palette_gray = AnsiColor::Palette256(232); // First grayscale
     let color_gray = palette_gray.to_color();
     let expected_gray = 8.0 / 255.0;
-    assert_eq!(color_gray, Color::from_rgb(expected_gray, expected_gray, expected_gray));
+    assert_eq!(
+        color_gray,
+        Color::from_rgb(expected_gray, expected_gray, expected_gray)
+    );
 
     let palette_gray_mid = AnsiColor::Palette256(244); // Mid grayscale
     let color_gray_mid = palette_gray_mid.to_color();
     let expected_gray_mid = (8.0 + 12.0 * 10.0) / 255.0;
-    assert_eq!(color_gray_mid, Color::from_rgb(expected_gray_mid, expected_gray_mid, expected_gray_mid));
+    assert_eq!(
+        color_gray_mid,
+        Color::from_rgb(expected_gray_mid, expected_gray_mid, expected_gray_mid)
+    );
 
     // Test RGB color conversion
     let rgb = AnsiColor::Rgb(255, 128, 64);
@@ -2661,7 +2720,10 @@ fn test_color_cube_calculation() {
 
     // Color 226 should be (5,5,0) in the cube = RGB(255,255,0) - yellow
     let color_226 = palette256_to_color(226);
-    assert_eq!(color_226, Color::from_rgb(255.0 / 255.0, 255.0 / 255.0, 0.0));
+    assert_eq!(
+        color_226,
+        Color::from_rgb(255.0 / 255.0, 255.0 / 255.0, 0.0)
+    );
 
     // Color 231 should be (5,5,5) in the cube = RGB(255,255,255)
     let color_231 = palette256_to_color(231);
@@ -2763,5 +2825,284 @@ mod resize_tests {
 
         assert_eq!(screen.buffer.len(), 1);
         assert_eq!(screen.buffer[0].len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod alternate_screen_tests {
+    use super::*;
+
+    #[test]
+    fn test_alternate_screen_basic_switch() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Write some text on main screen
+        screen.process(b"Main screen text");
+        let main_buffer = screen.buffer.clone();
+
+        // Switch to alternate screen (CSI ?47h)
+        screen.process(b"\x1b[?47h");
+        assert!(screen.use_alternate_screen);
+
+        // Alternate screen should be clear
+        assert_eq!(screen.buffer[0][0].c, ' ');
+
+        // Write on alternate screen
+        screen.process(b"Alternate screen text");
+
+        // Switch back (CSI ?47l)
+        screen.process(b"\x1b[?47l");
+        assert!(!screen.use_alternate_screen);
+
+        // Main screen text should be restored
+        assert_eq!(screen.buffer[0][0].c, main_buffer[0][0].c);
+    }
+
+    #[test]
+    fn test_alternate_screen_1047_clear() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Write on main screen
+        screen.process(b"Main screen");
+
+        // Switch with CSI ?1047h (should clear alternate screen)
+        screen.process(b"\x1b[?1047h");
+        assert!(screen.use_alternate_screen);
+        assert_eq!(screen.buffer[0][0].c, ' ');
+
+        // Write on alternate screen
+        screen.process(b"Alt");
+        assert_eq!(screen.buffer[0][0].c, 'A');
+
+        // Switch back
+        screen.process(b"\x1b[?1047l");
+        assert!(!screen.use_alternate_screen);
+        assert_eq!(screen.buffer[0][0].c, 'M'); // 'Main screen'
+    }
+
+    #[test]
+    fn test_alternate_screen_1049_full_save() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Set up main screen with cursor position and attributes
+        screen.process(b"\x1b[5;10HMain \x1b[31mRed Text\x1b[0m");
+        let (row, col) = screen.cursor_position();
+
+        // Switch with CSI ?1049h (save cursor + clear)
+        screen.process(b"\x1b[?1049h");
+        assert!(screen.use_alternate_screen);
+
+        // Cursor should be reset to 0,0 in alternate screen
+        let (alt_row, alt_col) = screen.cursor_position();
+        assert_eq!(alt_row, 0);
+        assert_eq!(alt_col, 0);
+
+        // Write on alternate screen
+        screen.process(b"Alternate content");
+
+        // Switch back - should restore cursor position
+        screen.process(b"\x1b[?1049l");
+        assert!(!screen.use_alternate_screen);
+
+        // Original content and cursor position should be restored
+        let (restored_row, restored_col) = screen.cursor_position();
+        assert_eq!(restored_row, row);
+        assert_eq!(restored_col, col);
+    }
+
+    #[test]
+    fn test_alternate_screen_preserves_attributes() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Set text attributes on main screen
+        screen.process(b"\x1b[1;4;31mBold Red Underline\x1b[0m");
+        screen.process(b"\x1b[1m"); // Set bold again
+
+        // Switch to alternate screen
+        screen.process(b"\x1b[?1049h");
+
+        // Attributes should be reset in alternate screen
+        assert!(!screen.bold);
+
+        // Set different attributes in alternate screen
+        screen.process(b"\x1b[34mBlue");
+        assert!(screen.current_fg.is_some());
+
+        // Switch back to main screen
+        screen.process(b"\x1b[?1049l");
+
+        // Original attributes should be restored (bold was set)
+        assert!(screen.bold);
+    }
+
+    #[test]
+    fn test_alternate_screen_preserves_scroll_region() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Set scroll region on main screen
+        screen.process(b"\x1b[5;20r"); // Lines 5-20
+        assert_eq!(screen.scroll_region, Some((4, 19))); // 0-indexed
+
+        // Switch to alternate screen
+        screen.process(b"\x1b[?1049h");
+
+        // Scroll region should be cleared in alternate screen
+        assert_eq!(screen.scroll_region, None);
+
+        // Set different scroll region in alternate screen
+        screen.process(b"\x1b[1;10r");
+        assert_eq!(screen.scroll_region, Some((0, 9)));
+
+        // Switch back
+        screen.process(b"\x1b[?1049l");
+
+        // Original scroll region should be restored
+        assert_eq!(screen.scroll_region, Some((4, 19)));
+    }
+
+    #[test]
+    fn test_alternate_screen_preserves_scrollback() {
+        let mut screen = TerminalScreen::new(80, 3);
+
+        // Generate scrollback on main screen
+        for i in 0..10 {
+            screen.process(format!("Line {}\n", i).as_bytes());
+        }
+
+        let scrollback_len = screen.scrollback.len();
+        assert!(scrollback_len > 0, "Should have scrollback");
+
+        // Switch to alternate screen
+        screen.process(b"\x1b[?1049h");
+
+        // Alternate screen should have empty scrollback
+        assert_eq!(screen.scrollback.len(), 0);
+
+        // Generate scrollback in alternate screen
+        for i in 0..5 {
+            screen.process(format!("Alt Line {}\n", i).as_bytes());
+        }
+
+        // Switch back
+        screen.process(b"\x1b[?1049l");
+
+        // Original scrollback should be restored
+        assert_eq!(screen.scrollback.len(), scrollback_len);
+    }
+
+    #[test]
+    fn test_alternate_screen_vim_like_behavior() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Simulate vim-like usage
+        // 1. User has text on main screen
+        screen.process(b"$ ls\nfile1.txt\nfile2.txt\n$ ");
+        let main_content = screen.buffer.clone();
+
+        // 2. Launch vim (CSI ?1049h)
+        screen.process(b"\x1b[?1049h");
+        assert!(screen.use_alternate_screen);
+
+        // 3. Vim content
+        screen.process(b"~\n~\n~\nfile.txt [New File]");
+
+        // 4. Exit vim (CSI ?1049l)
+        screen.process(b"\x1b[?1049l");
+        assert!(!screen.use_alternate_screen);
+
+        // 5. User should see original shell prompt
+        assert_eq!(screen.buffer[3][2].c, main_content[3][2].c);
+    }
+
+    #[test]
+    fn test_alternate_screen_less_like_behavior() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Main screen with command
+        screen.process(b"$ cat bigfile.txt | less\n");
+
+        // less enters alternate screen with CSI ?1047h
+        screen.process(b"\x1b[?1047h");
+
+        // Display file content
+        screen.process(b"Line 1 of file\nLine 2 of file\nLine 3 of file");
+
+        // User quits less (CSI ?1047l)
+        screen.process(b"\x1b[?1047l");
+
+        // Should return to shell prompt
+        assert_eq!(screen.buffer[0][0].c, '$');
+    }
+
+    #[test]
+    fn test_alternate_screen_multiple_switches() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        screen.process(b"Main1");
+
+        // First switch
+        screen.process(b"\x1b[?1049h");
+        screen.process(b"Alt1");
+        screen.process(b"\x1b[?1049l");
+        assert_eq!(screen.buffer[0][0].c, 'M');
+
+        // Second switch
+        screen.process(b"\x1b[?1049h");
+        screen.process(b"Alt2");
+        screen.process(b"\x1b[?1049l");
+        assert_eq!(screen.buffer[0][0].c, 'M');
+
+        // State should be consistent after multiple switches
+        assert!(!screen.use_alternate_screen);
+    }
+
+    #[test]
+    fn test_alternate_screen_htop_like_behavior() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Shell prompt
+        screen.process(b"$ htop\n");
+
+        // htop uses CSI ?1049h
+        screen.process(b"\x1b[?1049h");
+        assert!(screen.use_alternate_screen);
+
+        // htop draws interface with colors and positioning
+        screen.process(b"\x1b[1;1H\x1b[7mCPU [|||||||||||||||| 100%]\x1b[0m");
+        screen.process(b"\x1b[2;1HMem [|||||            50%]");
+
+        // Exit htop
+        screen.process(b"\x1b[?1049l");
+        assert!(!screen.use_alternate_screen);
+
+        // Back to shell
+        assert_eq!(screen.buffer[0][0].c, '$');
+    }
+
+    #[test]
+    fn test_alternate_screen_preserves_decsc_state() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Save cursor with DECSC on main screen
+        screen.process(b"\x1b[10;20H"); // Move cursor
+        screen.process(b"\x1b7"); // DECSC - save cursor
+        screen.process(b"\x1b[1;1H"); // Move somewhere else
+
+        // Switch to alternate screen
+        screen.process(b"\x1b[?1049h");
+
+        // DECSC state should be cleared in alternate screen
+        screen.process(b"\x1b8"); // DECRC - restore cursor
+        let (_row, _col) = screen.cursor_position();
+        // Should be at origin or unchanged, not at saved position
+
+        // Switch back
+        screen.process(b"\x1b[?1049l");
+
+        // Original DECSC state should be restored
+        screen.process(b"\x1b8"); // DECRC
+        let (restored_row, restored_col) = screen.cursor_position();
+        assert_eq!(restored_row, 9); // 10th row (0-indexed)
+        assert_eq!(restored_col, 19); // 20th column (0-indexed)
     }
 }

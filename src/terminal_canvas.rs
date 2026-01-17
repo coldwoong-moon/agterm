@@ -205,7 +205,6 @@ pub mod config {
     pub fn char_width(font_size: f32) -> f32 {
         BASE_CHAR_WIDTH * (font_size / BASE_FONT_SIZE)
     }
-
 }
 
 /// Canvas state for virtual scrolling
@@ -542,7 +541,14 @@ impl<'a> TerminalCanvas<'a> {
                         italic: current_italic,
                         strikethrough: current_strikethrough,
                     };
-                    self.draw_text_segment(frame, &merged_text, segment_start_x, y.round(), effective_color, &span_data);
+                    self.draw_text_segment(
+                        frame,
+                        &merged_text,
+                        segment_start_x,
+                        y.round(),
+                        effective_color,
+                        &span_data,
+                    );
 
                     let char_count = merged_text.chars().count();
                     segment_start_x += char_count as f32 * config::char_width(self.font_size);
@@ -574,7 +580,14 @@ impl<'a> TerminalCanvas<'a> {
                 italic: current_italic,
                 strikethrough: current_strikethrough,
             };
-            self.draw_text_segment(frame, &merged_text, segment_start_x, y.round(), effective_color, &span_data);
+            self.draw_text_segment(
+                frame,
+                &merged_text,
+                segment_start_x,
+                y.round(),
+                effective_color,
+                &span_data,
+            );
         }
     }
 

@@ -306,6 +306,7 @@ impl Default for AgTerm {
             content_version: 0,
             screen: TerminalScreen::new(80, 24),
             cursor_blink_on: true,
+            bell_pending: false,
         };
 
         let mut debug_panel = DebugPanel::new();
@@ -366,6 +367,8 @@ struct TerminalTab {
     screen: TerminalScreen,
     /// Cursor blink state
     cursor_blink_on: bool,
+    /// Bell notification state - when bell is triggered in background tab
+    bell_pending: bool,
 }
 
 /// Terminal input mode
@@ -486,6 +489,7 @@ impl AgTerm {
                     content_version: 0,
                     screen: TerminalScreen::new(80, 24),
                     cursor_blink_on: true,
+                    bell_pending: false,
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
@@ -510,6 +514,10 @@ impl AgTerm {
             Message::SelectTab(index) => {
                 if index < self.tabs.len() {
                     self.active_tab = index;
+                    // Clear bell notification when switching to a tab
+                    if let Some(tab) = self.tabs.get_mut(index) {
+                        tab.bell_pending = false;
+                    }
                 }
                 text_input::focus(raw_input_id())
             }
@@ -532,6 +540,10 @@ impl AgTerm {
             Message::NextTab => {
                 if !self.tabs.is_empty() {
                     self.active_tab = (self.active_tab + 1) % self.tabs.len();
+                    // Clear bell notification when switching to a tab
+                    if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                        tab.bell_pending = false;
+                    }
                 }
                 text_input::focus(raw_input_id())
             }
@@ -543,6 +555,10 @@ impl AgTerm {
                     } else {
                         self.active_tab - 1
                     };
+                    // Clear bell notification when switching to a tab
+                    if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                        tab.bell_pending = false;
+                    }
                 }
                 text_input::focus(raw_input_id())
             }
@@ -595,10 +611,16 @@ impl AgTerm {
 
             Message::KeyPressed(key, modifiers) => {
                 // Handle Ctrl/Cmd+C: Copy if selection exists, otherwise send interrupt signal
-                if (modifiers.control() || modifiers.command()) && matches!(key.as_ref(), Key::Character("c")) {
+                if (modifiers.control() || modifiers.command())
+                    && matches!(key.as_ref(), Key::Character("c"))
+                {
                     // Check if there's an active selection
                     let has_selection = if let Some(tab) = self.tabs.get(self.active_tab) {
-                        tab.canvas_state.selection.as_ref().map(|s| s.active && s.start != s.end).unwrap_or(false)
+                        tab.canvas_state
+                            .selection
+                            .as_ref()
+                            .map(|s| s.active && s.start != s.end)
+                            .unwrap_or(false)
                     } else {
                         false
                     };
@@ -733,7 +755,8 @@ impl AgTerm {
                     if let Some(selection) = &tab.canvas_state.selection {
                         if selection.active && selection.start != selection.end {
                             // Extract selected text
-                            let selected_text = get_selected_text(&tab.parsed_line_cache, selection);
+                            let selected_text =
+                                get_selected_text(&tab.parsed_line_cache, selection);
 
                             // Copy to clipboard using arboard
                             if !selected_text.is_empty() {
@@ -833,6 +856,10 @@ impl AgTerm {
                                 // Process bytes through VTE parser
                                 tab.screen.process(&data);
 
+                                // Check for bell (BEL character) and clear the active tab's bell
+                                // (active tab clears immediately, background tabs keep it)
+                                let _ = tab.screen.take_bell_triggered();
+
                                 // Send pending responses (DA, DSR, CPR, etc.) to PTY
                                 let pending_responses = tab.screen.take_pending_responses();
                                 for response in pending_responses {
@@ -856,6 +883,19 @@ impl AgTerm {
                         }
                     }
                 }
+
+                // Check background tabs for bell notifications
+                for (i, tab) in self.tabs.iter_mut().enumerate() {
+                    if i == self.active_tab {
+                        continue; // Skip active tab (already processed above)
+                    }
+
+                    // Check if bell was triggered in background tab
+                    if tab.screen.take_bell_triggered() {
+                        tab.bell_pending = true;
+                    }
+                }
+
                 focus_task
             }
         }
@@ -920,13 +960,16 @@ impl AgTerm {
     /// Render the tab bar with all tabs and new tab button
     fn view_tab_bar(&self) -> Element<Message> {
         let mut tab_elements = Vec::with_capacity(self.tabs.len());
-        for (i, _) in self.tabs.iter().enumerate() {
+        for (i, tab) in self.tabs.iter().enumerate() {
             let is_active = i == self.active_tab;
             let label = format!("Terminal {}", i + 1);
             let can_close = self.tabs.len() > 1;
+            let has_bell = tab.bell_pending;
 
             let icon_color = if is_active {
                 theme::TAB_ACTIVE
+            } else if has_bell {
+                theme::ACCENT_YELLOW // Yellow bell indicator for inactive tabs
             } else {
                 theme::TEXT_MUTED
             };
@@ -937,9 +980,16 @@ impl AgTerm {
             };
 
             // Tab label button (clickable to select)
+            // Show bell icon (🔔) if bell is pending, otherwise show arrow (▶)
+            let tab_icon = if has_bell && !is_active {
+                "🔔"
+            } else {
+                "▶"
+            };
+
             let tab_label_button = button(
                 row![
-                    text("▶").size(11).color(icon_color),
+                    text(tab_icon).size(11).color(icon_color),
                     Space::with_width(8),
                     text(label.clone()).size(13).color(label_color)
                 ]
@@ -1155,7 +1205,10 @@ impl AgTerm {
 
     /// Render raw terminal output (for Raw mode)
     /// Uses Canvas for virtual scrolling and hardware acceleration
-    fn render_raw_terminal<'a>(&'a self, parsed_cache: &'a [Vec<StyledSpan>]) -> Element<'a, Message> {
+    fn render_raw_terminal<'a>(
+        &'a self,
+        parsed_cache: &'a [Vec<StyledSpan>],
+    ) -> Element<'a, Message> {
         use iced::widget::canvas;
 
         let tab = &self.tabs[self.active_tab];
@@ -1253,6 +1306,7 @@ mod tests {
             content_version: 0,
             screen: TerminalScreen::new(80, 24),
             cursor_blink_on: true,
+            bell_pending: false,
         };
 
         AgTerm {

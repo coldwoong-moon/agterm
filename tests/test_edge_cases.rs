@@ -75,7 +75,7 @@ fn test_rapid_cursor_movements() {
     for _ in 0..100 {
         screen.process(b"\x1b[10;10H"); // Move to (10, 10)
         screen.process(b"X");
-        screen.process(b"\x1b[5;5H");   // Move to (5, 5)
+        screen.process(b"\x1b[5;5H"); // Move to (5, 5)
         screen.process(b"Y");
     }
 
@@ -150,11 +150,11 @@ fn test_mixed_width_characters_line() {
 
     // Mix of ASCII, Korean, Japanese, Chinese
     screen.process(b"ASCII ");
-    screen.process("한글".as_bytes());      // Korean (2 wide chars)
+    screen.process("한글".as_bytes()); // Korean (2 wide chars)
     screen.process(b" more ");
-    screen.process("日本語".as_bytes());    // Japanese (3 wide chars)
+    screen.process("日本語".as_bytes()); // Japanese (3 wide chars)
     screen.process(b" and ");
-    screen.process("中文".as_bytes());      // Chinese (2 wide chars)
+    screen.process("中文".as_bytes()); // Chinese (2 wide chars)
 
     let lines = screen.get_all_lines();
 
@@ -163,7 +163,8 @@ fn test_mixed_width_characters_line() {
     assert!(!lines[0][0].wide);
 
     // Verify wide characters present
-    let line_text: String = lines[0].iter()
+    let line_text: String = lines[0]
+        .iter()
         .filter(|c| !c.placeholder)
         .map(|c| c.c)
         .collect();
@@ -207,9 +208,10 @@ fn test_one_row_terminal() {
 
     // Last line with content should be "Line 3"
     // (After \r\n, cursor is on a new line)
-    let line_3 = lines.iter().rev().find(|line| {
-        line.len() > 5 && line[0].c == 'L' && line[5].c == '3'
-    });
+    let line_3 = lines
+        .iter()
+        .rev()
+        .find(|line| line.len() > 5 && line[0].c == 'L' && line[5].c == '3');
     assert!(line_3.is_some(), "Should find Line 3");
 }
 
@@ -232,9 +234,9 @@ fn test_resize_while_content_present() {
     assert!(lines.len() >= 12);
 
     // Verify some content survived
-    let has_line_text = lines.iter().any(|line| {
-        line.iter().any(|cell| cell.c == 'L')
-    });
+    let has_line_text = lines
+        .iter()
+        .any(|line| line.iter().any(|cell| cell.c == 'L'));
     assert!(has_line_text);
 }
 
@@ -313,9 +315,10 @@ fn test_excessive_scrollback() {
 
     // Should have the most recent lines
     // Find a line starting with 'L' (Line)
-    let has_line = lines.iter().rev().any(|line| {
-        line.len() > 0 && line[0].c == 'L'
-    });
+    let has_line = lines
+        .iter()
+        .rev()
+        .any(|line| line.len() > 0 && line[0].c == 'L');
     assert!(has_line, "Should find lines starting with 'L'");
 }
 
@@ -325,8 +328,8 @@ fn test_rapid_screen_clear() {
 
     // Rapidly clear and redraw
     for i in 0..100 {
-        screen.process(b"\x1b[2J");  // Clear screen
-        screen.process(b"\x1b[H");   // Home
+        screen.process(b"\x1b[2J"); // Clear screen
+        screen.process(b"\x1b[H"); // Home
         screen.process(format!("Frame {}", i).as_bytes());
     }
 
@@ -371,9 +374,10 @@ fn test_combined_scroll_and_write() {
     assert!(lines.len() > 10);
 
     // Last line with content should be Line 12
-    let line_12 = lines.iter().rev().find(|line| {
-        line.len() > 6 && line[5].c == '1' && line[6].c == '2'
-    });
+    let line_12 = lines
+        .iter()
+        .rev()
+        .find(|line| line.len() > 6 && line[5].c == '1' && line[6].c == '2');
     assert!(line_12.is_some(), "Should find Line 12");
 }
 
@@ -399,11 +403,11 @@ fn test_many_attributes_toggle() {
 
     // Rapidly toggle attributes
     for _ in 0..50 {
-        screen.process(b"\x1b[1m");  // Bold on
+        screen.process(b"\x1b[1m"); // Bold on
         screen.process(b"\x1b[22m"); // Bold off
-        screen.process(b"\x1b[4m");  // Underline on
+        screen.process(b"\x1b[4m"); // Underline on
         screen.process(b"\x1b[24m"); // Underline off
-        screen.process(b"\x1b[7m");  // Reverse on
+        screen.process(b"\x1b[7m"); // Reverse on
         screen.process(b"\x1b[27m"); // Reverse off
     }
 
@@ -436,7 +440,7 @@ fn test_emoji_sequences() {
     // Various emoji
     screen.process("🚀 ".as_bytes()); // Rocket
     screen.process("👨‍💻 ".as_bytes()); // Technologist (multi-codepoint)
-    screen.process("❤️ ".as_bytes());  // Heart (with variation selector)
+    screen.process("❤️ ".as_bytes()); // Heart (with variation selector)
 
     let lines = screen.get_all_lines();
     // Should have some content (exact width handling may vary)
@@ -451,7 +455,7 @@ fn test_alternate_charset() {
     // Some terminals support alternate character sets (DEC line drawing)
     // Test that we don't crash on these sequences
     screen.process(b"\x1b(0"); // Switch to line drawing set
-    screen.process(b"lqqqk");  // Draw a line
+    screen.process(b"lqqqk"); // Draw a line
     screen.process(b"\x1b(B"); // Switch back to ASCII
 
     // Should not crash
@@ -544,8 +548,8 @@ fn test_wide_char_in_scrollback() {
     assert!(lines.len() > 5);
 
     // Check that wide characters are in scrollback
-    let has_korean = lines.iter().any(|line| {
-        line.iter().any(|cell| cell.c == '한')
-    });
+    let has_korean = lines
+        .iter()
+        .any(|line| line.iter().any(|cell| cell.c == '한'));
     assert!(has_korean);
 }

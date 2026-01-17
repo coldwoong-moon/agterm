@@ -170,7 +170,8 @@ fn test_osc8_hyperlink_with_id() {
     let lines = screen.get_all_lines();
 
     // Verify text is rendered
-    let text: String = lines[0].iter()
+    let text: String = lines[0]
+        .iter()
         .filter(|c| !c.placeholder)
         .map(|c| c.c)
         .collect();
@@ -197,7 +198,8 @@ fn test_osc8_nested_hyperlinks() {
     let lines = screen.get_all_lines();
 
     // Text should be rendered regardless
-    let text: String = lines[0].iter()
+    let text: String = lines[0]
+        .iter()
         .filter(|c| !c.placeholder)
         .map(|c| c.c)
         .collect();
@@ -243,9 +245,9 @@ fn test_resize_preserve_content() {
     let lines = screen.get_all_lines();
 
     // Content should still be present
-    let has_line1 = lines.iter().any(|line| {
-        line.iter().any(|cell| cell.c == '1')
-    });
+    let has_line1 = lines
+        .iter()
+        .any(|line| line.iter().any(|cell| cell.c == '1'));
     assert!(has_line1, "Line 1 should be preserved after resize");
 }
 
@@ -284,7 +286,8 @@ fn test_resize_increase_columns() {
     let lines = screen.get_all_lines();
 
     // Content should still be there
-    let text: String = lines[0].iter()
+    let text: String = lines[0]
+        .iter()
         .filter(|c| !c.placeholder)
         .map(|c| c.c)
         .take(10)
@@ -656,7 +659,8 @@ fn find_text_matches(lines: &[Vec<Cell>], query: &str) -> Vec<(usize, usize, usi
 
     for (line_idx, line) in lines.iter().enumerate() {
         // Convert line to string, skipping placeholders
-        let line_text: String = line.iter()
+        let line_text: String = line
+            .iter()
             .filter(|c| !c.placeholder)
             .map(|c| c.c)
             .collect();

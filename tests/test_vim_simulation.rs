@@ -249,7 +249,7 @@ fn test_vim_clear_operations() {
     // After clear from col 10 (0-indexed col 9): "Line 12 w" + spaces
     assert_eq!(lines[11][0].c, 'L'); // Beginning still has text
     assert_eq!(lines[11][9].c, ' '); // Position 9 (col 10, 1-indexed) should be cleared
-    // Lines 12+ should be empty
+                                     // Lines 12+ should be empty
     assert_eq!(lines[12][0].c, ' ');
     assert_eq!(lines[23][0].c, ' ');
 
@@ -324,10 +324,10 @@ fn test_vim_complex_editing_sequence() {
 
     // 1. Enter vim
     screen.process(b"\x1b[?1049h"); // Alternate screen
-    screen.process(b"\x1b[?1h");    // Application cursor keys
-    screen.process(b"\x1b[?25h");   // Show cursor
-    screen.process(b"\x1b[2J");     // Clear screen
-    screen.process(b"\x1b[H");      // Home
+    screen.process(b"\x1b[?1h"); // Application cursor keys
+    screen.process(b"\x1b[?25h"); // Show cursor
+    screen.process(b"\x1b[2J"); // Clear screen
+    screen.process(b"\x1b[H"); // Home
 
     // 2. Write initial buffer
     screen.process(b"#!/bin/bash\r\n");
@@ -335,12 +335,12 @@ fn test_vim_complex_editing_sequence() {
     screen.process(b"exit 0\r\n");
 
     // 3. Move to line 2 and insert a line above
-    screen.process(b"\x1b[2;1H");   // Row 2, col 1
-    screen.process(b"\x1b[L");      // Insert line
+    screen.process(b"\x1b[2;1H"); // Row 2, col 1
+    screen.process(b"\x1b[L"); // Insert line
     screen.process(b"# This is a comment");
 
     // 4. Move to end of file and add a line
-    screen.process(b"\x1b[5;1H");   // Row 5 (past current content)
+    screen.process(b"\x1b[5;1H"); // Row 5 (past current content)
     screen.process(b"echo 'Goodbye'\r\n");
 
     // 5. Verify final content
@@ -350,7 +350,7 @@ fn test_vim_complex_editing_sequence() {
     assert_eq!(lines[2][0].c, 'e'); // echo 'Hello World'
 
     // 6. Exit vim
-    screen.process(b"\x1b[?1l");    // Normal cursor keys
+    screen.process(b"\x1b[?1l"); // Normal cursor keys
     screen.process(b"\x1b[?1049l"); // Exit alternate screen
 }
 

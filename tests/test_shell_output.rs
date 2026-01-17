@@ -22,7 +22,7 @@ fn test_simple_text_output() {
     assert_eq!(lines[1][0].c, 'H');
     assert_eq!(lines[1][1].c, 'e');
     assert_eq!(lines[1][5].c, ','); // Comma after "Hello"
-    // Third line: prompt
+                                    // Third line: prompt
     assert_eq!(lines[2][0].c, '$');
 }
 
@@ -56,13 +56,13 @@ fn test_ls_colored_output() {
     // Directory (blue)
     screen.process(b"\x1b[34m"); // Blue foreground
     screen.process(b"Documents");
-    screen.process(b"\x1b[0m");  // Reset
+    screen.process(b"\x1b[0m"); // Reset
     screen.process(b"  ");
 
     // Executable (green)
     screen.process(b"\x1b[32m"); // Green foreground
     screen.process(b"script.sh");
-    screen.process(b"\x1b[0m");  // Reset
+    screen.process(b"\x1b[0m"); // Reset
     screen.process(b"  ");
 
     // Regular file (default)
@@ -115,7 +115,7 @@ fn test_colored_error_output() {
     screen.process(b"$ cat nonexistent.txt\r\n");
     screen.process(b"\x1b[31m"); // Red foreground
     screen.process(b"cat: nonexistent.txt: No such file or directory");
-    screen.process(b"\x1b[0m");  // Reset
+    screen.process(b"\x1b[0m"); // Reset
     screen.process(b"\r\n$ ");
 
     let lines = screen.get_all_lines();
@@ -307,7 +307,7 @@ fn test_unicode_shell_output() {
 
     let lines = screen.get_all_lines();
     assert_eq!(lines[0][0].c, '$'); // Prompt
-    // Unicode characters should be present
+                                    // Unicode characters should be present
     assert_eq!(lines[1][0].c, 'H');
 }
 
@@ -344,8 +344,8 @@ fn test_command_with_backspace() {
 
     // Simulate user typing and correcting a command
     screen.process(b"$ echoo"); // Typo
-    screen.process(b"\x08");    // Backspace
-    screen.process(b"\x08");    // Backspace
+    screen.process(b"\x08"); // Backspace
+    screen.process(b"\x08"); // Backspace
     screen.process(b"o test\r\n"); // Correction
 
     let lines = screen.get_all_lines();
@@ -367,9 +367,10 @@ fn test_long_output_scrolling() {
     assert!(lines.len() > 24); // Should include scrollback
 
     // Find line 30
-    let line_30 = lines.iter().rev().find(|line| {
-        line.len() > 6 && line[0].c == 'L' && line[5].c == '3' && line[6].c == '0'
-    });
+    let line_30 = lines
+        .iter()
+        .rev()
+        .find(|line| line.len() > 6 && line[0].c == 'L' && line[5].c == '3' && line[6].c == '0');
     assert!(line_30.is_some(), "Should find Line 30");
 }
 
