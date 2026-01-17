@@ -1,0 +1,34 @@
+{
+  "skills": [
+    {
+      "name": "agterm-run",
+      "description": "Build and run AgTerm application",
+      "path": ".claude/skills/agterm-run.md"
+    },
+    {
+      "name": "agterm-debug",
+      "description": "Launch AgTerm in debug mode with debug panel",
+      "path": ".claude/skills/agterm-debug.md"
+    },
+    {
+      "name": "agterm-test",
+      "description": "Run AgTerm test suite",
+      "path": ".claude/skills/agterm-test.md"
+    },
+    {
+      "name": "agterm-logs",
+      "description": "View and analyze AgTerm logs",
+      "path": ".claude/skills/agterm-logs.md"
+    },
+    {
+      "name": "agterm-profile",
+      "description": "Performance profiling for AgTerm",
+      "path": ".claude/skills/agterm-profile.md"
+    },
+    {
+      "name": "agterm-inspect",
+      "description": "Inspect AgTerm runtime state and configuration",
+      "path": ".claude/skills/agterm-inspect.md"
+    }
+  ]
+}

@@ -51,8 +51,15 @@ mouse_support = true
 keybindings = "vim"  # vim, emacs
 
 [logging]
-level = "info"
-format = "pretty"  # pretty, compact, json
+level = "info"              # trace, debug, info, warn, error
+format = "pretty"           # pretty, compact, json
 timestamps = true
 file_line = false
-# file = "~/.local/share/agterm/agterm.log"
+file_output = true          # Enable file output
+file_path = "~/.local/share/agterm/logs"
+
+[debug]
+enabled = false             # Enable debug panel on startup (or set AGTERM_DEBUG=1)
+show_fps = true             # Show FPS in debug panel
+show_pty_stats = true       # Show PTY statistics
+log_buffer_size = 50        # Number of log entries to keep in debug panel

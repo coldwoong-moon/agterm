@@ -1,6 +1,7 @@
 //! PTY (Pseudo-Terminal) management
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use tracing::{debug, error, info, instrument, trace, warn};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -82,7 +83,9 @@ fn default_shell() -> String {
     }
 }
 
+#[instrument(skip_all, fields(rows = rows, cols = cols))]
 fn create_pty_session(rows: u16, cols: u16) -> Result<InternalPtySession, PtyError> {
+    debug!("Creating PTY session");
     let pty_system = native_pty_system();
     let size = PtySize {
         rows,
@@ -93,9 +96,13 @@ fn create_pty_session(rows: u16, cols: u16) -> Result<InternalPtySession, PtyErr
 
     let pair = pty_system
         .openpty(size)
-        .map_err(|e| PtyError::SpawnFailed(e.to_string()))?;
+        .map_err(|e| {
+            error!(error = %e, "Failed to open PTY");
+            PtyError::SpawnFailed(e.to_string())
+        })?;
 
     let shell = default_shell();
+    debug!(shell = %shell, "Using shell");
     let working_dir = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
 
     let mut cmd = CommandBuilder::new(&shell);
@@ -105,7 +112,12 @@ fn create_pty_session(rows: u16, cols: u16) -> Result<InternalPtySession, PtyErr
     let child = pair
         .slave
         .spawn_command(cmd)
-        .map_err(|e| PtyError::SpawnFailed(e.to_string()))?;
+        .map_err(|e| {
+            error!(error = %e, "Failed to spawn shell command");
+            PtyError::SpawnFailed(e.to_string())
+        })?;
+
+    info!("PTY session created successfully");
 
     let mut reader = pair
         .master
@@ -289,19 +301,23 @@ pub struct PtyManager {
 
 impl PtyManager {
     pub fn new() -> Self {
+        debug!("Initializing PTY manager");
         let (tx, rx) = mpsc::channel();
         let thread = thread::spawn(move || {
             run_pty_thread(rx);
         });
 
+        info!("PTY manager initialized");
         Self {
             tx,
             _thread: thread,
         }
     }
 
+    #[instrument(skip(self), fields(rows = rows, cols = cols))]
     pub fn create_session(&self, rows: u16, cols: u16) -> Result<PtyId, PtyError> {
         let id = Uuid::new_v4();
+        debug!(session_id = %id, "Creating new PTY session");
         let (response_tx, response_rx) = mpsc::channel();
 
         self.tx
@@ -311,15 +327,26 @@ impl PtyManager {
                 cols,
                 response: response_tx,
             })
-            .map_err(|e| PtyError::Channel(e.to_string()))?;
+            .map_err(|e| {
+                error!(error = %e, "Failed to send create command");
+                PtyError::Channel(e.to_string())
+            })?;
 
         response_rx
             .recv()
-            .map_err(|e| PtyError::Channel(e.to_string()))?
-            .map(|_| id)
+            .map_err(|e| {
+                error!(error = %e, "Failed to receive create response");
+                PtyError::Channel(e.to_string())
+            })?
+            .map(|_| {
+                info!(session_id = %id, "PTY session created");
+                id
+            })
     }
 
+    #[instrument(skip(self, data), fields(session_id = %id, bytes = data.len()))]
     pub fn write(&self, id: &PtyId, data: &[u8]) -> Result<(), PtyError> {
+        trace!(bytes = data.len(), "PTY write");
         let (response_tx, response_rx) = mpsc::channel();
 
         self.tx
@@ -328,13 +355,20 @@ impl PtyManager {
                 data: data.to_vec(),
                 response: response_tx,
             })
-            .map_err(|e| PtyError::Channel(e.to_string()))?;
+            .map_err(|e| {
+                error!(error = %e, "Failed to send write command");
+                PtyError::Channel(e.to_string())
+            })?;
 
         response_rx
             .recv()
-            .map_err(|e| PtyError::Channel(e.to_string()))?
+            .map_err(|e| {
+                error!(error = %e, "Failed to receive write response");
+                PtyError::Channel(e.to_string())
+            })?
     }
 
+    #[instrument(skip(self), fields(session_id = %id))]
     pub fn read(&self, id: &PtyId) -> Result<Vec<u8>, PtyError> {
         let (response_tx, response_rx) = mpsc::channel();
 
@@ -345,12 +379,19 @@ impl PtyManager {
             })
             .map_err(|e| PtyError::Channel(e.to_string()))?;
 
-        response_rx
+        let result = response_rx
             .recv()
-            .map_err(|e| PtyError::Channel(e.to_string()))?
+            .map_err(|e| PtyError::Channel(e.to_string()))??;
+
+        if !result.is_empty() {
+            trace!(bytes = result.len(), "PTY read");
+        }
+        Ok(result)
     }
 
+    #[instrument(skip(self), fields(session_id = %id, rows = rows, cols = cols))]
     pub fn resize(&self, id: &PtyId, rows: u16, cols: u16) -> Result<(), PtyError> {
+        debug!("Resizing PTY");
         let (response_tx, response_rx) = mpsc::channel();
 
         self.tx
@@ -367,7 +408,9 @@ impl PtyManager {
             .map_err(|e| PtyError::Channel(e.to_string()))?
     }
 
+    #[instrument(skip(self), fields(session_id = %id))]
     pub fn close_session(&self, id: &PtyId) -> Result<(), PtyError> {
+        info!("Closing PTY session");
         let (response_tx, response_rx) = mpsc::channel();
 
         self.tx
@@ -375,7 +418,10 @@ impl PtyManager {
                 id: *id,
                 response: response_tx,
             })
-            .map_err(|e| PtyError::Channel(e.to_string()))?;
+            .map_err(|e| {
+                warn!(error = %e, "Failed to send close command");
+                PtyError::Channel(e.to_string())
+            })?;
 
         response_rx
             .recv()

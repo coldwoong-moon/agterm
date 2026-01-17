@@ -39,10 +39,9 @@ dirs = "5"
 
 # Logging
 log = "0.4"
-# TODO: implement structured tracing and observability
-# tracing = "0.1"
-# TODO: implement structured logging
-# tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+tracing-appender = "0.2"
 
 # Error Handling
 thiserror = "2"

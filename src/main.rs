@@ -9,7 +9,13 @@ use iced::widget::text_input::Id as TextInputId;
 use iced::keyboard::{self, Key, Modifiers};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
 mod terminal;
+mod logging;
+mod debug;
+
+use debug::{DebugPanel, DebugPanelMessage};
+use logging::LoggingConfig;
 
 use terminal::pty::{PtyManager, MAX_OUTPUT_LINES};
 
@@ -296,6 +302,12 @@ fn format_duration(duration: Duration) -> String {
 }
 
 fn main() -> iced::Result {
+    // Initialize logging system
+    let logging_config = LoggingConfig::default();
+    logging::init_logging(&logging_config);
+
+    tracing::info!("AgTerm starting");
+
     iced::application("AgTerm - AI Agent Terminal", AgTerm::update, AgTerm::view)
         .subscription(AgTerm::subscription)
         .font(D2CODING_FONT)
@@ -319,10 +331,13 @@ struct AgTerm {
     pty_manager: Arc<PtyManager>,
     next_tab_id: usize,
     startup_focus_count: u8,
+    /// Debug panel state
+    debug_panel: DebugPanel,
 }
 
 impl Default for AgTerm {
     fn default() -> Self {
+        tracing::debug!("Initializing AgTerm application");
         let pty_manager = Arc::new(PtyManager::new());
         let session_result = pty_manager.create_session(24, 80);
         let cwd = std::env::current_dir()
@@ -330,8 +345,14 @@ impl Default for AgTerm {
             .unwrap_or_else(|_| "~".to_string());
 
         let (session_id, error_message) = match session_result {
-            Ok(id) => (Some(id), None),
-            Err(e) => (None, Some(format!("Failed to create PTY session: {}", e))),
+            Ok(id) => {
+                tracing::info!(session_id = %id, "Initial PTY session created");
+                (Some(id), None)
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to create initial PTY session");
+                (None, Some(format!("Failed to create PTY session: {}", e)))
+            }
         };
 
         let tab = TerminalTab {
@@ -350,12 +371,16 @@ impl Default for AgTerm {
             mode: TerminalMode::Raw,  // Default to Raw mode for interactive apps
         };
 
+        let debug_panel = DebugPanel::new();
+
+        tracing::info!("AgTerm application initialized");
         Self {
             tabs: vec![tab],
             active_tab: 0,
             pty_manager,
             next_tab_id: 1,
             startup_focus_count: 10,
+            debug_panel,
         }
     }
 }
@@ -451,6 +476,10 @@ enum Message {
 
     // Tick for PTY polling
     Tick,
+
+    // Debug panel
+    ToggleDebugPanel,
+    DebugPanelMessage(DebugPanelMessage),
 }
 
 impl AgTerm {
@@ -667,15 +696,20 @@ impl AgTerm {
             Message::RawInputChanged(new_input) => {
                 // Handle text input in Raw mode (for IME/Korean support)
                 if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                    // Find newly added characters
-                    let old_len = tab.raw_input.len();
-                    let new_len = new_input.len();
+                    let old_len = tab.raw_input.chars().count();
+                    let new_len = new_input.chars().count();
 
-                    if new_len > old_len {
-                        // Characters were added - send them to PTY
-                        let added = &new_input[old_len..];
-                        if let Some(session_id) = &tab.session_id {
+                    if let Some(session_id) = &tab.session_id {
+                        if new_len > old_len {
+                            // Characters were added - send only the new chars to PTY
+                            let added: String = new_input.chars().skip(old_len).collect();
                             let _ = self.pty_manager.write(session_id, added.as_bytes());
+                        } else if new_len < old_len {
+                            // Characters were deleted - send backspace
+                            let deleted_count = old_len - new_len;
+                            for _ in 0..deleted_count {
+                                let _ = self.pty_manager.write(session_id, &[0x7f]); // Backspace
+                            }
                         }
                     }
                     tab.raw_input = new_input;
@@ -734,17 +768,22 @@ impl AgTerm {
                         Key::Character("5") => return self.update(Message::SelectTab(4)),
                         Key::Character("v") => return iced::clipboard::read().map(Message::ClipboardContent),
                         Key::Character("m") => return self.update(Message::ToggleMode),  // Toggle mode
+                        Key::Character("d") => return self.update(Message::ToggleDebugPanel),  // Toggle debug panel
                         _ => {}
                     }
                 }
 
-                // Raw mode: send all other keys directly to PTY
+                // F12 to toggle debug panel (no modifier needed)
+                if matches!(key.as_ref(), Key::Named(keyboard::key::Named::F12)) {
+                    return self.update(Message::ToggleDebugPanel);
+                }
+
+                // Raw mode: send special keys directly to PTY
+                // NOTE: Regular characters are handled by text_input (for IME support)
                 if current_mode == TerminalMode::Raw && !modifiers.command() {
                     let input = match key.as_ref() {
-                        // Named keys
-                        Key::Named(keyboard::key::Named::Enter) => Some("\r".to_string()),
-                        Key::Named(keyboard::key::Named::Backspace) => Some("\x7f".to_string()),
-                        Key::Named(keyboard::key::Named::Tab) => Some("\t".to_string()),
+                        // Only handle special/named keys here
+                        // Regular characters go through text_input for IME support
                         Key::Named(keyboard::key::Named::Escape) => Some("\x1b".to_string()),
                         Key::Named(keyboard::key::Named::ArrowUp) => Some("\x1b[A".to_string()),
                         Key::Named(keyboard::key::Named::ArrowDown) => Some("\x1b[B".to_string()),
@@ -756,15 +795,8 @@ impl AgTerm {
                         Key::Named(keyboard::key::Named::PageDown) => Some("\x1b[6~".to_string()),
                         Key::Named(keyboard::key::Named::Delete) => Some("\x1b[3~".to_string()),
                         Key::Named(keyboard::key::Named::Insert) => Some("\x1b[2~".to_string()),
-                        // Character keys
-                        Key::Character(c) => {
-                            if modifiers.control() {
-                                // Ctrl+key combinations (already handled above for c, d, z)
-                                None
-                            } else {
-                                Some(c.to_string())
-                            }
-                        }
+                        // Tab key - send directly (text_input uses it for focus)
+                        Key::Named(keyboard::key::Named::Tab) => Some("\t".to_string()),
                         _ => None,
                     };
 
@@ -839,7 +871,25 @@ impl AgTerm {
                 Task::none()
             }
 
+            Message::ToggleDebugPanel => {
+                self.debug_panel.toggle();
+                Task::none()
+            }
+
+            Message::DebugPanelMessage(msg) => {
+                self.debug_panel.update(msg);
+                Task::none()
+            }
+
             Message::Tick => {
+                // Record frame for metrics
+                self.debug_panel.metrics.record_frame();
+
+                // Update input debug state
+                if let Some(tab) = self.tabs.get(self.active_tab) {
+                    self.debug_panel.input_state.raw_mode = tab.mode == TerminalMode::Raw;
+                }
+
                 // Auto-focus on raw input for IME support
                 let focus_task = if self.startup_focus_count > 0 {
                     self.startup_focus_count -= 1;
@@ -861,6 +911,9 @@ impl AgTerm {
                         if let Ok(data) = self.pty_manager.read(session_id) {
                             if !data.is_empty() {
                                 let raw_output = String::from_utf8_lossy(&data);
+
+                                // Record PTY read metrics
+                                self.debug_panel.metrics.record_pty_read(data.len());
 
                                 match tab.mode {
                                     TerminalMode::Raw => {
@@ -1359,7 +1412,7 @@ impl AgTerm {
         };
 
         // ========== Main Layout ==========
-        let main_content = column![
+        let terminal_area = column![
             container(tab_bar)
                 .padding([8, 12])
                 .width(Length::Fill)
@@ -1379,7 +1432,22 @@ impl AgTerm {
                     background: Some(theme::BG_SECONDARY.into()),
                     ..Default::default()
                 })
-        ];
+        ]
+        .width(Length::Fill);
+
+        // Main content with optional debug panel
+        let main_content: Element<Message> = if self.debug_panel.visible {
+            let debug_panel_view: Element<Message> = self.debug_panel.view();
+            row![
+                terminal_area,
+                debug_panel_view
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+        } else {
+            terminal_area.height(Length::Fill).into()
+        };
 
         container(main_content)
             .width(Length::Fill)
@@ -1394,8 +1462,13 @@ impl AgTerm {
     /// Render raw terminal output (for Raw mode)
     fn render_raw_terminal(&self, buffer: &str) -> Element<Message> {
         // Parse the buffer and render with ANSI colors
-        // Get the last N lines to display (terminal scrollback)
-        let lines: Vec<&str> = buffer.lines().collect();
+        // Handle different line endings: \r\n, \n, or standalone \r
+        let normalized = buffer
+            .replace("\r\n", "\n")
+            .replace('\r', "\n");
+
+        // Split into lines and get the last N lines
+        let lines: Vec<&str> = normalized.lines().collect();
         let display_lines: Vec<&str> = if lines.len() > 100 {
             lines[lines.len() - 100..].to_vec()
         } else {
@@ -1818,6 +1891,7 @@ mod tests {
             pty_manager,
             next_tab_id: 1,
             startup_focus_count: 0,
+            debug_panel: DebugPanel::new(),
         }
     }
 
