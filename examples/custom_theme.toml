@@ -1,0 +1,61 @@
+# AgTerm Custom Theme Example
+# Save this file to ~/.config/agterm/themes/my_theme.toml
+# and set theme = "my_theme" in your config.toml
+
+name = "My Custom Theme"
+variant = "dark"  # or "light"
+
+[ui]
+# Background colors
+bg_primary = "#1a1b26"
+bg_secondary = "#16161e"
+bg_block = "#24283b"
+bg_block_hover = "#292e42"
+bg_input = "#16161e"
+
+# Text colors
+text_primary = "#a9b1d6"
+text_secondary = "#787c99"
+text_muted = "#565f89"
+
+# Accent colors
+accent_blue = "#7aa2f7"
+accent_green = "#9ece6a"
+accent_yellow = "#e0af68"
+accent_red = "#f7768e"
+accent_purple = "#bb9af7"
+accent_cyan = "#7dcfff"
+
+# UI elements
+border = "#292e42"
+tab_active = "#7aa2f7"
+selection = "#7aa2f7"
+
+[ansi]
+# Normal colors (0-7)
+black = "#1a1b26"
+red = "#f7768e"
+green = "#9ece6a"
+yellow = "#e0af68"
+blue = "#7aa2f7"
+magenta = "#bb9af7"
+cyan = "#7dcfff"
+white = "#a9b1d6"
+
+# Bright colors (8-15)
+bright_black = "#414868"
+bright_red = "#f7768e"
+bright_green = "#9ece6a"
+bright_yellow = "#e0af68"
+bright_blue = "#7aa2f7"
+bright_magenta = "#bb9af7"
+bright_cyan = "#7dcfff"
+bright_white = "#c0caf5"
+
+[terminal]
+foreground = "#a9b1d6"
+background = "#1a1b26"
+cursor = "#7aa2f7"
+cursor_text = "#1a1b26"
+selection = "#7aa2f7"
+selection_text = "#a9b1d6"

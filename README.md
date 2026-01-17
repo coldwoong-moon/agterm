@@ -1,57 +1,72 @@
 # AgTerm
 
-**AI Agent Terminal Orchestrator with MCP Support**
+**AI Agent Terminal - Native GPU-Accelerated Terminal Emulator**
 
-AgTerm is a next-generation terminal multiplexer designed for AI agent workflows. It provides tree-based task management, real-time visualization, intelligent archiving, and native Model Context Protocol (MCP) integration.
+AgTerm is a modern terminal emulator built with Rust and the Iced GUI framework, featuring native GPU acceleration, comprehensive ANSI/VTE support, and Korean/CJK input handling. Designed for both daily terminal use and AI agent workflows.
+
+[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## Features
 
-- **Tree-based Task Management**: Organize tasks hierarchically with dependency tracking
-- **Real-time Visualization**: Monitor task progress with live updates and graph views
-- **Intelligent Archiving**: AI-powered session summarization and full-text search
-- **MCP Native**: First-class support for Model Context Protocol servers
-- **Multi-Terminal**: Split and manage multiple terminal sessions
-- **Customizable**: Themes, keybindings, and extensive configuration options
+### Core Terminal Features
+
+- **GPU-Accelerated Rendering**: Built on Iced GUI framework with tiny-skia CPU renderer optimized for text rendering
+- **Multi-Tab Support**: Create, close, duplicate, and switch between multiple terminal sessions
+- **Full VTE/ANSI Support**:
+  - 256-color and TrueColor (24-bit) color support
+  - SGR (Select Graphic Rendition) with bold, dim, italic, underline, strikethrough
+  - Cursor control and positioning
+  - Device Attributes (DA, DSR, CPR) responses
+  - OSC sequences (window title, hyperlinks)
+  - Application cursor keys mode
+- **Korean/CJK Input**: Native IME support with D2Coding font for Korean and other CJK characters
+- **Wide Character Support**: Proper handling of double-width characters (Korean, Japanese, Chinese)
+- **Smart Cursor Blinking**: Alacritty-style cursor with 530ms blink interval
+- **Text Selection & Clipboard**: Mouse-based text selection with copy/paste support
+- **Scrollback Buffer**: Unlimited scrollback with virtual scrolling for performance
+- **Terminal Bell**: Visual notification for background tabs
+
+### User Interface
+
+- **Modern Dark Theme**: Warp-inspired color scheme with high contrast
+- **Dynamic Tab Titles**: Custom tab titles via OSC sequences
+- **Bell Notifications**: Visual indicators when background tabs receive bell signals
+- **Status Bar**: Shows current shell, mode, and active tab information
+- **Debug Panel**: Real-time terminal state inspection (F12 or Cmd+D)
+- **Font Size Control**: Dynamically adjust font size (8-24pt)
+
+### Developer Features
+
+- **Debug Panel**: Inspect PTY state, metrics, and logs
+- **Comprehensive Logging**: Structured logging with tracing
+- **Performance Metrics**: Frame timing and PTY I/O monitoring
+- **Dynamic Tick Rate**: Adaptive polling based on activity (5-60 FPS)
 
 ## Installation
-
-### From Binary
-
-Download the latest release for your platform:
-
-```bash
-# macOS (Apple Silicon)
-curl -L -o agterm https://github.com/user/agterm/releases/latest/download/agterm-macos-arm64
-chmod +x agterm
-sudo mv agterm /usr/local/bin/
-
-# macOS (Intel)
-curl -L -o agterm https://github.com/user/agterm/releases/latest/download/agterm-macos-amd64
-chmod +x agterm
-sudo mv agterm /usr/local/bin/
-
-# Linux (x86_64)
-curl -L -o agterm https://github.com/user/agterm/releases/latest/download/agterm-linux-amd64
-chmod +x agterm
-sudo mv agterm /usr/local/bin/
-```
 
 ### From Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/user/agterm.git
+git clone https://github.com/coldwoong-moon/agterm.git
 cd agterm
 
 # Build and install
 cargo install --path .
 ```
 
+### Using Cargo
+
+```bash
+cargo install agterm
+```
+
 ### Requirements
 
-- Rust 1.75 or later (for building from source)
-- A terminal emulator with 256-color support
-- SQLite 3.x (bundled)
+- Rust 1.75 or later
+- macOS, Linux, or Windows
+- A system shell (bash, zsh, fish, etc.)
 
 ## Quick Start
 
@@ -59,198 +74,299 @@ cargo install --path .
 # Start AgTerm
 agterm
 
-# Start with a specific working directory
-agterm --working-dir ~/projects/myproject
-
-# Start with a custom config file
-agterm --config ~/.config/agterm/custom.toml
+# The terminal will open with a single tab ready to use
 ```
 
 ## Keyboard Shortcuts
 
-AgTerm supports multiple keybinding styles: `vim` (default), `emacs`, and `arrows`.
+### Tab Management
 
-### Vim Style (Default)
+| Shortcut | Action |
+|----------|--------|
+| `Cmd+T` | New tab |
+| `Cmd+W` | Close current tab |
+| `Cmd+Shift+D` | Duplicate current tab |
+| `Cmd+[` | Previous tab |
+| `Cmd+]` | Next tab |
+| `Cmd+1-9` | Switch to tab 1-9 |
 
-| Key | Action |
-|-----|--------|
-| `j` / `k` | Navigate down / up |
-| `h` / `l` | Navigate left / right |
-| `g` / `G` | Go to first / last |
-| `Ctrl+u` / `Ctrl+d` | Page up / down |
-| `Tab` | Focus next pane |
-| `?` / `F1` | Help |
-| `F3` | Split vertical |
-| `F4` | Graph view |
-| `F6` | Archive browser |
-| `/` | Search |
-| `a` | Add task |
-| `d` | Delete task |
-| `r` | Retry task |
-| `Ctrl+c` | Cancel task |
-| `Ctrl+q` | Quit |
+### Terminal Control
 
-### Views
+| Shortcut | Action |
+|----------|--------|
+| `Cmd+K` | Clear screen |
+| `Cmd+Home` | Scroll to top |
+| `Cmd+End` | Scroll to bottom |
+| `Ctrl+C` | Send interrupt signal (or copy if text selected) |
+| `Ctrl+D` | Send EOF signal |
+| `Ctrl+Z` | Send suspend signal |
 
-- **Task Tree** (default): Hierarchical view of all tasks
-- **Graph View** (`F4`): Visual dependency graph with progress
-- **Archive Browser** (`F6`): Browse and search past sessions
-- **MCP Panel** (`F5`): MCP server status and tools
+### Clipboard
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd+C` | Copy selection (if text selected) |
+| `Cmd+V` | Paste with bracketed paste mode |
+| `Cmd+Shift+C` | Force copy selection |
+| `Cmd+Shift+V` | Force paste (without bracketed paste) |
+
+### Font Size
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd++` or `Cmd+=` | Increase font size |
+| `Cmd+-` | Decrease font size |
+| `Cmd+0` | Reset font size to default |
+
+### Debug
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd+D` or `F12` | Toggle debug panel |
 
 ## Configuration
 
-AgTerm looks for configuration in these locations (in order):
+### Config File Location
 
-1. `/etc/agterm/config.toml` (system-wide)
-2. `~/.config/agterm/config.toml` (user)
-3. `.agterm/config.toml` (project-local)
-4. Environment variables (`AGTERM_*`)
+AgTerm looks for configuration files in the following locations:
+
+- macOS/Linux: `~/.config/agterm/config.toml`
+- Windows: `%APPDATA%\agterm\config.toml`
 
 ### Example Configuration
 
 ```toml
 [general]
 default_shell = "/bin/zsh"
+font_size = 14.0
 
-[pty]
-max_sessions = 32
+[terminal]
 scrollback_lines = 10000
+cursor_blink_interval_ms = 530
 
-[tui]
-theme = "dark"          # default, dark, light, monokai
-keybindings = "vim"     # vim, emacs, arrows
-mouse_support = true
-target_fps = 60
+[theme]
+name = "dark"
 
-[storage]
-compression_level = "compacted"
-ai_summarization = false
-
-[[mcp.servers]]
-name = "filesystem"
-transport = "stdio"
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
-auto_connect = true
+[logging]
+level = "info"
+log_file = "~/.config/agterm/logs/agterm.log"
 ```
 
-### Environment Variables
+Note: Configuration system is currently planned. Current version uses hardcoded defaults.
 
-All configuration options can be overridden via environment variables:
+## Technical Architecture
 
-```bash
-export AGTERM__TUI__THEME="dark"
-export AGTERM__PTY__MAX_SESSIONS="16"
-export AGTERM__LOGGING__LEVEL="debug"
-```
+### Framework Stack
 
-## Themes
+- **GUI Framework**: [Iced](https://iced.rs/) - Cross-platform GUI with GPU acceleration
+- **PTY Backend**: [portable-pty](https://docs.rs/portable-pty) - Cross-platform PTY management
+- **VTE Parser**: [vte](https://docs.rs/vte) - ANSI escape sequence parsing
+- **Clipboard**: [arboard](https://docs.rs/arboard) - Cross-platform clipboard access
 
-AgTerm includes several built-in themes:
-
-- **default**: Terminal default colors
-- **dark**: High-contrast dark theme (One Dark inspired)
-- **light**: Light theme for bright environments
-- **monokai**: Classic Monokai color scheme
-
-Custom themes can be defined in your config file:
-
-```toml
-[tui.theme]
-name = "custom"
-[tui.theme.colors]
-primary = "#61afef"
-secondary = "#56b6c2"
-success = "#98c379"
-error = "#e06c75"
-```
-
-## MCP Integration
-
-AgTerm can connect to MCP servers as a client, enabling AI agents to use external tools.
-
-### Configuring MCP Servers
-
-```toml
-[[mcp.servers]]
-name = "github"
-transport = "stdio"
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-github"]
-auto_connect = true
-[mcp.servers.env]
-GITHUB_TOKEN = "${GITHUB_TOKEN}"
-```
-
-### Available Transports
-
-- **stdio**: Spawn a subprocess (recommended)
-- **sse**: Connect via Server-Sent Events (HTTP)
-
-## Architecture
+### Rendering Pipeline
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Presentation Layer                    │
-│  TUI (ratatui) │ Widgets │ Theme │ Keybindings          │
-├─────────────────────────────────────────────────────────┤
-│                    Application Layer                     │
-│  Config │ State │ Event Loop                            │
-├─────────────────────────────────────────────────────────┤
-│                      Domain Layer                        │
-│  Task Graph │ Session │ Memory │ Events                  │
-├─────────────────────────────────────────────────────────┤
-│                   Infrastructure Layer                   │
-│  PTY Pool │ MCP Client │ SQLite Storage                  │
-└─────────────────────────────────────────────────────────┘
+PTY Output → VTE Parser → Screen Buffer → Styled Spans → GPU Canvas
 ```
 
-## Context Engineering
+1. **PTY Output**: Raw bytes from shell process
+2. **VTE Parser**: Parses ANSI escape sequences
+3. **Screen Buffer**: Grid-based terminal state (cells, cursor, attributes)
+4. **Styled Spans**: Optimized text spans with color and style attributes
+5. **GPU Canvas**: Hardware-accelerated rendering via Iced canvas
 
-AgTerm implements advanced context management strategies:
+### Performance Optimizations
 
-1. **WRITE**: Store outputs to filesystem and SQLite
-2. **SELECT**: Dynamic retrieval of relevant past sessions
-3. **COMPRESS**: Progressive summarization pipeline
-4. **ISOLATE**: Separate contexts for parallel tasks
+- **Virtual Scrolling**: Only renders visible lines
+- **Cached Text Layout**: Reuses styled spans between frames
+- **Dynamic Tick Rate**: Adjusts polling frequency based on activity
+- **Content Versioning**: Invalidates cache only when content changes
 
-### Compression Pipeline
+## Terminal Compatibility
 
-```
-Raw Output → Compaction (reversible) → AI Summary (lossy) → Rolling Summary
-```
+AgTerm aims for high compatibility with modern terminal applications:
+
+- **TERM**: Set to `xterm-256color` by default
+- **Shell Integration**: Works with bash, zsh, fish, and other common shells
+- **Interactive Apps**: Supports vim, emacs, htop, tmux, and other full-screen applications
+- **Color Support**: 256-color palette and 24-bit TrueColor
+- **Mouse Reporting**: Basic mouse events for applications that support it
+
+### Known Limitations
+
+- MCP (Model Context Protocol) support is planned but not yet implemented
+- Configuration file system is planned but not yet implemented
+- Search functionality (Cmd+F) is planned but not yet implemented
+- Split panes are not yet implemented
+- Custom themes are not yet configurable
 
 ## Development
 
+### Building from Source
+
 ```bash
+# Clone the repository
+git clone https://github.com/coldwoong-moon/agterm.git
+cd agterm
+
+# Run in development mode
+cargo run
+
 # Run tests
 cargo test
 
 # Run with debug logging
-AGTERM__LOGGING__LEVEL=debug cargo run
+RUST_LOG=debug cargo run
+
+# Build release binary
+cargo build --release
+```
+
+### Project Structure
+
+```
+agterm/
+├── src/
+│   ├── main.rs              # Application entry point and UI
+│   ├── terminal/
+│   │   ├── mod.rs
+│   │   ├── pty.rs           # PTY management
+│   │   ├── screen.rs        # Terminal screen buffer and VTE
+│   │   └── ansi_color.rs    # ANSI color parsing
+│   ├── terminal_canvas.rs   # GPU-accelerated canvas rendering
+│   ├── debug/
+│   │   ├── mod.rs
+│   │   ├── panel.rs         # Debug panel UI
+│   │   └── metrics.rs       # Performance metrics
+│   └── logging.rs           # Logging configuration
+├── assets/
+│   └── fonts/
+│       └── D2Coding.ttf     # Embedded Korean font
+└── Cargo.toml
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+cargo test
+
+# Run tests with output
+cargo test -- --nocapture
+
+# Run specific test
+cargo test test_tab_management
+
+# Run only unit tests (skip PTY integration tests)
+cargo test --lib
+```
+
+### Code Quality
+
+```bash
+# Format code
+cargo fmt
 
 # Check formatting
 cargo fmt --check
 
-# Run clippy
+# Run clippy lints
 cargo clippy --all-targets
+
+# Check for issues
+cargo clippy -- -D warnings
 ```
 
-## License
+## Screenshots
 
-MIT License. See [LICENSE](LICENSE) for details.
+> Screenshots coming soon
 
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines and submit pull requests.
+Contributions are welcome! Please follow these guidelines:
 
-## Credits
+1. **Fork the repository** and create a feature branch
+2. **Write tests** for new functionality
+3. **Follow Rust conventions** (use `cargo fmt` and `cargo clippy`)
+4. **Update documentation** as needed
+5. **Submit a pull request** with a clear description
 
-Built with:
-- [ratatui](https://ratatui.rs/) - TUI framework
-- [portable-pty](https://docs.rs/portable-pty) - Cross-platform PTY
-- [rmcp](https://github.com/anthropics/rmcp) - MCP SDK
-- [petgraph](https://github.com/petgraph/petgraph) - Graph data structure
-- [rusqlite](https://github.com/rusqlite/rusqlite) - SQLite bindings
+### Areas for Contribution
 
-Inspired by [Zellij](https://zellij.dev/), [tmux](https://github.com/tmux/tmux), and [Claude Code](https://claude.ai/code).
+- Configuration file system (TOML-based)
+- Search functionality (find in terminal output)
+- Split panes (horizontal/vertical splits)
+- Custom themes and color schemes
+- Performance optimizations
+- Additional ANSI sequence support
+- MCP (Model Context Protocol) integration
+
+## Roadmap
+
+### Version 1.1 (Current Development)
+
+- [ ] Configuration file support (TOML)
+- [ ] Search functionality (Cmd+F)
+- [ ] Custom color themes
+- [ ] Font family selection
+
+### Version 1.2 (Planned)
+
+- [ ] Split panes (horizontal/vertical)
+- [ ] Tab groups
+- [ ] Session persistence
+- [ ] Hyperlink support (OSC 8)
+
+### Version 2.0 (Future)
+
+- [ ] MCP (Model Context Protocol) integration
+- [ ] AI agent orchestration features
+- [ ] Task tree visualization
+- [ ] Session archiving with AI summarization
+
+## License
+
+AgTerm is released under the [MIT License](LICENSE).
+
+```
+MIT License
+
+Copyright (c) 2026 AgTerm Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction...
+```
+
+See [LICENSE](LICENSE) for full text.
+
+## Acknowledgments
+
+Built with amazing open-source projects:
+
+- [Iced](https://iced.rs/) - Cross-platform GUI framework
+- [portable-pty](https://docs.rs/portable-pty) - Cross-platform PTY implementation
+- [vte](https://docs.rs/vte) - VTE/ANSI escape sequence parser
+- [arboard](https://docs.rs/arboard) - Cross-platform clipboard
+- [D2Coding](https://github.com/naver/d2codingfont) - Korean monospace font by Naver
+
+Inspired by modern terminals:
+
+- [Warp](https://www.warp.dev/) - Modern terminal with AI features
+- [Alacritty](https://alacritty.org/) - GPU-accelerated terminal emulator
+- [iTerm2](https://iterm2.com/) - macOS terminal emulator
+- [Kitty](https://sw.kovidgoyal.net/kitty/) - Fast, feature-rich terminal
+
+## Community
+
+- **Issues**: [GitHub Issues](https://github.com/coldwoong-moon/agterm/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/coldwoong-moon/agterm/discussions)
+- **Repository**: [github.com/coldwoong-moon/agterm](https://github.com/coldwoong-moon/agterm)
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
+
+---
+
+Made with ❤️ by the AgTerm team

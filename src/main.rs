@@ -10,11 +10,13 @@ use iced::{Alignment, Border, Color, Element, Font, Length, Subscription, Task};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod config;
 mod debug;
 mod logging;
 mod terminal;
 mod terminal_canvas;
 
+use config::AppConfig;
 use debug::panel::TerminalState;
 use debug::{DebugPanel, DebugPanelMessage};
 use logging::{LogBuffer, LoggingConfig};
@@ -224,9 +226,30 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
 /// Global log buffer for debug panel (initialized once at startup)
 static LOG_BUFFER: std::sync::OnceLock<LogBuffer> = std::sync::OnceLock::new();
 
+/// Global configuration (initialized once at startup)
+static APP_CONFIG: std::sync::OnceLock<AppConfig> = std::sync::OnceLock::new();
+
 fn main() -> iced::Result {
+    // Load configuration
+    let config = AppConfig::load().unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to load config ({}), using defaults", e);
+        AppConfig::default()
+    });
+
+    // Store config globally
+    APP_CONFIG
+        .set(config.clone())
+        .expect("APP_CONFIG already initialized");
+
     // Initialize logging system
-    let logging_config = LoggingConfig::default();
+    let logging_config = LoggingConfig {
+        level: logging::parse_level(&config.logging.level),
+        format: logging::LogFormat::from_str(&config.logging.format),
+        timestamps: config.logging.timestamps,
+        file_line: config.logging.file_line,
+        file_output: config.logging.file_output,
+        file_path: config.logging.file_path.clone(),
+    };
     let log_buffer = logging::init_logging(&logging_config);
 
     // Store log buffer globally for access by DebugPanel
@@ -235,6 +258,7 @@ fn main() -> iced::Result {
         .expect("LOG_BUFFER already initialized");
 
     tracing::info!("AgTerm starting");
+    tracing::info!("Configuration loaded from default + user overrides");
 
     iced::application("AgTerm - AI Agent Terminal", AgTerm::update, AgTerm::view)
         .subscription(AgTerm::subscription)
@@ -245,6 +269,14 @@ fn main() -> iced::Result {
 /// Raw mode input field ID for IME support
 fn raw_input_id() -> TextInputId {
     TextInputId::new("raw_terminal_input")
+}
+
+/// Get global configuration
+fn get_config() -> AppConfig {
+    APP_CONFIG
+        .get()
+        .cloned()
+        .unwrap_or_else(AppConfig::default)
 }
 
 /// Main application state
@@ -274,11 +306,21 @@ struct AgTerm {
 impl Default for AgTerm {
     fn default() -> Self {
         tracing::debug!("Initializing AgTerm application");
+        let config = get_config();
+
         let pty_manager = Arc::new(PtyManager::new());
-        let session_result = pty_manager.create_session(24, 80);
-        let cwd = std::env::current_dir()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| "~".to_string());
+        let session_result = pty_manager.create_session(
+            config.pty.default_rows,
+            config.pty.default_cols,
+        );
+        let cwd = config
+            .general
+            .default_working_dir
+            .as_ref()
+            .and_then(|p| p.to_str())
+            .map(|s| s.to_string())
+            .or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string()))
+            .unwrap_or_else(|| "~".to_string());
 
         let (session_id, error_message) = match session_result {
             Ok(id) => {
@@ -305,7 +347,10 @@ impl Default for AgTerm {
             parsed_line_cache: Vec::new(),
             canvas_state: TerminalCanvasState::new(),
             content_version: 0,
-            screen: TerminalScreen::new(80, 24),
+            screen: TerminalScreen::new(
+                config.pty.default_cols as usize,
+                config.pty.default_rows as usize,
+            ),
             cursor_blink_on: true,
             bell_pending: false,
             title: None,
@@ -315,6 +360,11 @@ impl Default for AgTerm {
         // Connect log buffer to debug panel
         if let Some(log_buffer) = LOG_BUFFER.get() {
             debug_panel.set_log_buffer(log_buffer.clone());
+        }
+
+        // Apply debug config
+        if config.debug.enabled || std::env::var("AGTERM_DEBUG").is_ok() {
+            debug_panel.toggle();
         }
 
         tracing::info!("AgTerm application initialized");
@@ -327,7 +377,7 @@ impl Default for AgTerm {
             debug_panel,
             last_pty_activity: Instant::now(),
             last_cursor_blink: Instant::now(),
-            font_size: 14.0,
+            font_size: config.appearance.font_size,
             search_mode: false,
             search_query: String::new(),
             search_matches: Vec::new(),
@@ -983,12 +1033,17 @@ impl AgTerm {
                     };
                 }
 
-                // Cursor blinking (every 530ms, like Alacritty)
-                const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
-                if self.last_cursor_blink.elapsed().as_millis() as u64 >= CURSOR_BLINK_INTERVAL_MS {
+                // Cursor blinking (configurable interval)
+                let config = get_config();
+                let cursor_blink_interval = config.terminal.cursor_blink_interval_ms;
+                if self.last_cursor_blink.elapsed().as_millis() as u64 >= cursor_blink_interval {
                     self.last_cursor_blink = Instant::now();
                     if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                        tab.cursor_blink_on = !tab.cursor_blink_on;
+                        if config.terminal.cursor_blink {
+                            tab.cursor_blink_on = !tab.cursor_blink_on;
+                        } else {
+                            tab.cursor_blink_on = true; // Always on if blinking disabled
+                        }
                     }
                 }
 

@@ -35,11 +35,9 @@ unicode-width = "0.1"  # Wide character (CJK) width calculation
 # Unique IDs
 uuid = { version = "1", features = ["v4", "serde"] }
 
-# TODO: implement data serialization if needed
-# serde = { version = "1", features = ["derive"] }
-# serde_json = "1"
-
-# Configuration
+# Configuration and serialization
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 dirs = "5"
 
 # Clipboard

@@ -232,6 +232,15 @@ pub struct TerminalScreen {
     pending_responses: Vec<String>,
     /// Bell (BEL) triggered flag - set when \x07 is received
     bell_triggered: bool,
+    /// Cursor blink enabled (CSI ?12h/l)
+    cursor_blink_enabled: bool,
+    /// Color palette (256 colors) - RGB values for customization
+    /// Index 0-15: standard colors, 16-255: extended palette
+    color_palette: Vec<(u8, u8, u8)>,
+    /// Default foreground color (OSC 10)
+    default_fg_color: Option<(u8, u8, u8)>,
+    /// Default background color (OSC 11)
+    default_bg_color: Option<(u8, u8, u8)>,
 }
 
 impl TerminalScreen {
@@ -275,7 +284,53 @@ impl TerminalScreen {
             application_cursor_keys: false,
             pending_responses: Vec::new(),
             bell_triggered: false,
+            cursor_blink_enabled: true,
+            color_palette: Self::initialize_default_palette(),
+            default_fg_color: None,
+            default_bg_color: None,
         }
+    }
+
+    /// Initialize the default 256-color palette
+    fn initialize_default_palette() -> Vec<(u8, u8, u8)> {
+        let mut palette = Vec::with_capacity(256);
+
+        // 0-15: Standard 16 colors
+        palette.extend_from_slice(&[
+            (0, 0, 0),       // 0: Black
+            (204, 51, 51),   // 1: Red
+            (51, 204, 51),   // 2: Green
+            (204, 204, 51),  // 3: Yellow
+            (51, 51, 204),   // 4: Blue
+            (204, 51, 204),  // 5: Magenta
+            (51, 204, 204),  // 6: Cyan
+            (204, 204, 204), // 7: White
+            (127, 127, 127), // 8: Bright Black (Gray)
+            (255, 76, 76),   // 9: Bright Red
+            (76, 255, 76),   // 10: Bright Green
+            (255, 255, 76),  // 11: Bright Yellow
+            (76, 76, 255),   // 12: Bright Blue
+            (255, 76, 255),  // 13: Bright Magenta
+            (76, 255, 255),  // 14: Bright Cyan
+            (255, 255, 255), // 15: Bright White
+        ]);
+
+        // 16-231: 6x6x6 color cube
+        for r in 0..6 {
+            for g in 0..6 {
+                for b in 0..6 {
+                    palette.push((r * 51, g * 51, b * 51));
+                }
+            }
+        }
+
+        // 232-255: Grayscale
+        for i in 0..24 {
+            let gray = 8 + i * 10;
+            palette.push((gray, gray, gray));
+        }
+
+        palette
     }
 
     /// Process incoming bytes through VTE parser
@@ -460,6 +515,11 @@ impl TerminalScreen {
         self.clipboard_request = None;
     }
 
+    /// Take clipboard request and clear it (consume)
+    pub fn take_clipboard_request(&mut self) -> Option<String> {
+        self.clipboard_request.take()
+    }
+
     /// Parse file:// URI to extract path
     fn parse_file_uri(&self, uri: &str) -> Option<String> {
         if let Some(path_part) = uri.strip_prefix("file://") {
@@ -480,6 +540,22 @@ impl TerminalScreen {
         } else {
             None
         }
+    }
+
+    /// Parse RGB color specification
+    /// Format: "rgb:RR/GG/BB" or "rgb:RRRR/GGGG/BBBB" (hex values)
+    fn parse_rgb_color(&self, color_spec: &str) -> Option<(u8, u8, u8)> {
+        if let Some(rgb_part) = color_spec.strip_prefix("rgb:") {
+            let parts: Vec<&str> = rgb_part.split('/').collect();
+            if parts.len() == 3 {
+                // Parse hex values - handle both 2-digit (RR) and 4-digit (RRRR) formats
+                let r = u8::from_str_radix(parts[0].get(0..2)?, 16).ok()?;
+                let g = u8::from_str_radix(parts[1].get(0..2)?, 16).ok()?;
+                let b = u8::from_str_radix(parts[2].get(0..2)?, 16).ok()?;
+                return Some((r, g, b));
+            }
+        }
+        None
     }
 
     /// Get current mouse reporting mode - reserved for future mouse interaction support
@@ -503,6 +579,26 @@ impl TerminalScreen {
     /// Get cursor visibility state
     pub fn cursor_visible(&self) -> bool {
         self.cursor_visible
+    }
+
+    /// Check if cursor blink is enabled
+    pub fn cursor_blink_enabled(&self) -> bool {
+        self.cursor_blink_enabled
+    }
+
+    /// Get the color palette entry
+    pub fn get_palette_color(&self, index: u8) -> Option<(u8, u8, u8)> {
+        self.color_palette.get(index as usize).copied()
+    }
+
+    /// Get default foreground color
+    pub fn default_fg_color(&self) -> Option<(u8, u8, u8)> {
+        self.default_fg_color
+    }
+
+    /// Get default background color
+    pub fn default_bg_color(&self) -> Option<(u8, u8, u8)> {
+        self.default_bg_color
     }
 
     /// Check if bell was triggered and clear the flag (consume)
@@ -1119,6 +1215,75 @@ impl Perform for TerminalScreen {
                     }
                 }
             }
+            4 => {
+                // OSC 4 ; <index> ; <color spec> - Set/query color palette entry
+                // Query format: OSC 4 ; <index> ; ? ST
+                // Set format: OSC 4 ; <index> ; rgb:<rr>/<gg>/<bb> ST
+                if params.len() > 2 {
+                    let index_str = String::from_utf8_lossy(params[1]);
+                    if let Ok(index) = index_str.parse::<u8>() {
+                        let color_spec = String::from_utf8_lossy(params[2]);
+
+                        if color_spec == "?" {
+                            // Query color palette
+                            if let Some((r, g, b)) = self.color_palette.get(index as usize) {
+                                let response = format!(
+                                    "\x1b]4;{};rgb:{:02x}/{:02x}/{:02x}\x07",
+                                    index, r, g, b
+                                );
+                                self.pending_responses.push(response);
+                            }
+                        } else if color_spec.starts_with("rgb:") {
+                            // Set color palette
+                            if let Some(rgb) = self.parse_rgb_color(&color_spec) {
+                                if (index as usize) < self.color_palette.len() {
+                                    self.color_palette[index as usize] = rgb;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            10 => {
+                // OSC 10 ; <color spec> - Set/query default foreground color
+                // Query format: OSC 10 ; ? ST
+                // Set format: OSC 10 ; rgb:<rr>/<gg>/<bb> ST
+                if params.len() > 1 {
+                    let color_spec = String::from_utf8_lossy(params[1]);
+
+                    if color_spec == "?" {
+                        // Query default foreground
+                        let (r, g, b) = self.default_fg_color.unwrap_or((204, 204, 204));
+                        let response = format!("\x1b]10;rgb:{:02x}/{:02x}/{:02x}\x07", r, g, b);
+                        self.pending_responses.push(response);
+                    } else if color_spec.starts_with("rgb:") {
+                        // Set default foreground
+                        if let Some(rgb) = self.parse_rgb_color(&color_spec) {
+                            self.default_fg_color = Some(rgb);
+                        }
+                    }
+                }
+            }
+            11 => {
+                // OSC 11 ; <color spec> - Set/query default background color
+                // Query format: OSC 11 ; ? ST
+                // Set format: OSC 11 ; rgb:<rr>/<gg>/<bb> ST
+                if params.len() > 1 {
+                    let color_spec = String::from_utf8_lossy(params[1]);
+
+                    if color_spec == "?" {
+                        // Query default background
+                        let (r, g, b) = self.default_bg_color.unwrap_or((0, 0, 0));
+                        let response = format!("\x1b]11;rgb:{:02x}/{:02x}/{:02x}\x07", r, g, b);
+                        self.pending_responses.push(response);
+                    } else if color_spec.starts_with("rgb:") {
+                        // Set default background
+                        if let Some(rgb) = self.parse_rgb_color(&color_spec) {
+                            self.default_bg_color = Some(rgb);
+                        }
+                    }
+                }
+            }
             52 => {
                 // OSC 52 ; c ; <base64-data> - Clipboard operations
                 // c = clipboard selection (usually 'c' for clipboard, 'p' for primary)
@@ -1155,6 +1320,10 @@ impl Perform for TerminalScreen {
                     9 | 1000 => {
                         // X10 Mouse Reporting (CSI ?9h or CSI ?1000h)
                         self.mouse_mode = MouseMode::X10;
+                    }
+                    12 => {
+                        // AT&T 610 - Start Blinking Cursor (CSI ?12h)
+                        self.cursor_blink_enabled = true;
                     }
                     1002 => {
                         // Button-Event Mouse Tracking (CSI ?1002h)
@@ -1207,6 +1376,10 @@ impl Perform for TerminalScreen {
                     9 | 1000 | 1002 | 1003 => {
                         // Disable mouse reporting (CSI ?9l, ?1000l, ?1002l, ?1003l)
                         self.mouse_mode = MouseMode::None;
+                    }
+                    12 => {
+                        // AT&T 610 - Stop Blinking Cursor (CSI ?12l)
+                        self.cursor_blink_enabled = false;
                     }
                     25 => {
                         // DECTCEM - Hide Cursor (CSI ?25l)
@@ -3114,5 +3287,235 @@ mod alternate_screen_tests {
         let (restored_row, restored_col) = screen.cursor_position();
         assert_eq!(restored_row, 9); // 10th row (0-indexed)
         assert_eq!(restored_col, 19); // 20th column (0-indexed)
+    }
+
+    // Tests for new terminal sequences
+
+    #[test]
+    fn test_ansi_cursor_save_restore() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Move cursor to a specific position
+        screen.process(b"\x1b[10;20H");
+        let (row, col) = screen.cursor_position();
+        assert_eq!(row, 9); // 10th row (0-indexed)
+        assert_eq!(col, 19); // 20th column (0-indexed)
+
+        // Save cursor with ANSI.SYS style (CSI s)
+        screen.process(b"\x1b[s");
+
+        // Move cursor somewhere else
+        screen.process(b"\x1b[1;1H");
+        let (row, col) = screen.cursor_position();
+        assert_eq!(row, 0);
+        assert_eq!(col, 0);
+
+        // Restore cursor with ANSI.SYS style (CSI u)
+        screen.process(b"\x1b[u");
+        let (row, col) = screen.cursor_position();
+        assert_eq!(row, 9);
+        assert_eq!(col, 19);
+    }
+
+    #[test]
+    fn test_cursor_blink_enable_disable() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Default state - blink enabled
+        assert!(screen.cursor_blink_enabled());
+
+        // Disable cursor blink (CSI ?12l)
+        screen.process(b"\x1b[?12l");
+        assert!(!screen.cursor_blink_enabled());
+
+        // Enable cursor blink (CSI ?12h)
+        screen.process(b"\x1b[?12h");
+        assert!(screen.cursor_blink_enabled());
+    }
+
+    #[test]
+    fn test_osc_4_set_palette_color() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Set color palette entry 1 (red) to a custom color
+        screen.process(b"\x1b]4;1;rgb:ff/00/00\x07");
+
+        // Verify the color was set
+        let color = screen.get_palette_color(1);
+        assert_eq!(color, Some((255, 0, 0)));
+    }
+
+    #[test]
+    fn test_osc_4_query_palette_color() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Query color palette entry 0 (black)
+        screen.process(b"\x1b]4;0;?\x07");
+
+        // Should have a pending response
+        let responses = screen.take_pending_responses();
+        assert_eq!(responses.len(), 1);
+        assert!(responses[0].starts_with("\x1b]4;0;rgb:"));
+    }
+
+    #[test]
+    fn test_osc_10_set_default_foreground() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Set default foreground color to white
+        screen.process(b"\x1b]10;rgb:ff/ff/ff\x07");
+
+        // Verify the color was set
+        assert_eq!(screen.default_fg_color(), Some((255, 255, 255)));
+    }
+
+    #[test]
+    fn test_osc_10_query_default_foreground() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Query default foreground color
+        screen.process(b"\x1b]10;?\x07");
+
+        // Should have a pending response with default gray color
+        let responses = screen.take_pending_responses();
+        assert_eq!(responses.len(), 1);
+        assert!(responses[0].starts_with("\x1b]10;rgb:"));
+        assert!(responses[0].contains("cc/cc/cc")); // Default gray (204, 204, 204)
+    }
+
+    #[test]
+    fn test_osc_11_set_default_background() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Set default background color to dark blue
+        screen.process(b"\x1b]11;rgb:00/00/80\x07");
+
+        // Verify the color was set
+        assert_eq!(screen.default_bg_color(), Some((0, 0, 128)));
+    }
+
+    #[test]
+    fn test_osc_11_query_default_background() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Query default background color
+        screen.process(b"\x1b]11;?\x07");
+
+        // Should have a pending response with default black color
+        let responses = screen.take_pending_responses();
+        assert_eq!(responses.len(), 1);
+        assert!(responses[0].starts_with("\x1b]11;rgb:"));
+        assert!(responses[0].contains("00/00/00")); // Default black
+    }
+
+    #[test]
+    fn test_osc_52_clipboard_set() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Set clipboard content (base64 encoded "Hello")
+        screen.process(b"\x1b]52;c;SGVsbG8=\x07");
+
+        // Verify clipboard request was stored
+        let clipboard = screen.take_clipboard_request();
+        assert_eq!(clipboard, Some("SGVsbG8=".to_string()));
+    }
+
+    #[test]
+    fn test_osc_52_clipboard_query_ignored() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Query clipboard (should be ignored, not stored)
+        screen.process(b"\x1b]52;c;?\x07");
+
+        // No clipboard request should be stored for queries
+        let clipboard = screen.take_clipboard_request();
+        assert_eq!(clipboard, None);
+    }
+
+    #[test]
+    fn test_color_palette_initialization() {
+        let screen = TerminalScreen::new(80, 24);
+
+        // Test standard 16 colors
+        assert_eq!(screen.get_palette_color(0), Some((0, 0, 0))); // Black
+        assert_eq!(screen.get_palette_color(1), Some((204, 51, 51))); // Red
+        assert_eq!(screen.get_palette_color(7), Some((204, 204, 204))); // White
+        assert_eq!(screen.get_palette_color(15), Some((255, 255, 255))); // Bright White
+
+        // Test 6x6x6 color cube (index 16 should be 0,0,0)
+        assert_eq!(screen.get_palette_color(16), Some((0, 0, 0)));
+
+        // Test grayscale (index 232 should be first grayscale)
+        assert_eq!(screen.get_palette_color(232), Some((8, 8, 8)));
+    }
+
+    #[test]
+    fn test_parse_rgb_color_2_digit() {
+        let screen = TerminalScreen::new(80, 24);
+
+        // Test 2-digit hex format
+        let color = screen.parse_rgb_color("rgb:ff/00/80");
+        assert_eq!(color, Some((255, 0, 128)));
+    }
+
+    #[test]
+    fn test_parse_rgb_color_4_digit() {
+        let screen = TerminalScreen::new(80, 24);
+
+        // Test 4-digit hex format (should use first 2 digits)
+        let color = screen.parse_rgb_color("rgb:ff00/0080/8000");
+        assert_eq!(color, Some((255, 0, 128)));
+    }
+
+    #[test]
+    fn test_parse_rgb_color_invalid() {
+        let screen = TerminalScreen::new(80, 24);
+
+        // Test invalid formats
+        assert_eq!(screen.parse_rgb_color("rgb:ff/00"), None); // Too few components
+        assert_eq!(screen.parse_rgb_color("ff/00/80"), None); // Missing prefix
+        assert_eq!(screen.parse_rgb_color("rgb:gg/00/00"), None); // Invalid hex
+    }
+
+    #[test]
+    fn test_multiple_color_operations() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Set multiple palette colors
+        screen.process(b"\x1b]4;1;rgb:ff/00/00\x07"); // Red
+        screen.process(b"\x1b]4;2;rgb:00/ff/00\x07"); // Green
+        screen.process(b"\x1b]4;3;rgb:00/00/ff\x07"); // Blue
+
+        // Verify all were set correctly
+        assert_eq!(screen.get_palette_color(1), Some((255, 0, 0)));
+        assert_eq!(screen.get_palette_color(2), Some((0, 255, 0)));
+        assert_eq!(screen.get_palette_color(3), Some((0, 0, 255)));
+
+        // Set default colors
+        screen.process(b"\x1b]10;rgb:aa/bb/cc\x07"); // Foreground
+        screen.process(b"\x1b]11;rgb:11/22/33\x07"); // Background
+
+        assert_eq!(screen.default_fg_color(), Some((170, 187, 204)));
+        assert_eq!(screen.default_bg_color(), Some((17, 34, 51)));
+    }
+
+    #[test]
+    fn test_cursor_operations_combined() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Test combining cursor save/restore with blink control
+        screen.process(b"\x1b[10;20H"); // Move cursor
+        screen.process(b"\x1b[s"); // Save cursor (ANSI.SYS)
+        screen.process(b"\x1b[?12l"); // Disable blink
+
+        assert!(!screen.cursor_blink_enabled());
+
+        screen.process(b"\x1b[1;1H"); // Move cursor
+        screen.process(b"\x1b[u"); // Restore cursor
+
+        let (row, col) = screen.cursor_position();
+        assert_eq!(row, 9);
+        assert_eq!(col, 19);
+        assert!(!screen.cursor_blink_enabled()); // Blink state preserved
     }
 }

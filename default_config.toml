@@ -5,13 +5,111 @@
 [general]
 app_name = "agterm"
 # default_shell is auto-detected from $SHELL
-# default_working_dir = "/path/to/default"
+# default_shell = "/bin/zsh"
+# default_working_dir = "~"
+
+# ============================================================================
+# Appearance Settings
+# ============================================================================
+
+[appearance]
+font_family = "D2Coding"
+font_size = 14.0
+theme = "default"
+background_opacity = 1.0
+use_ligatures = true
+
+# Optional: Custom color scheme (overrides theme)
+# [appearance.color_scheme]
+# background = "#17171c"
+# foreground = "#edeff2"
+# cursor = "#5c8afa"
+# selection = "#383847"
+# # ANSI colors
+# black = "#000000"
+# red = "#eb6473"
+# green = "#59c78c"
+# yellow = "#f2c55c"
+# blue = "#5c8afa"
+# magenta = "#8c5cfa"
+# cyan = "#5cc8fa"
+# white = "#cccccc"
+# # Bright colors
+# bright_black = "#808080"
+# bright_red = "#ff6f7f"
+# bright_green = "#6fd398"
+# bright_yellow = "#ffd168"
+# bright_blue = "#68a0ff"
+# bright_magenta = "#9868ff"
+# bright_cyan = "#68d4ff"
+# bright_white = "#ffffff"
+
+# ============================================================================
+# Terminal Behavior
+# ============================================================================
+
+[terminal]
+scrollback_lines = 10000
+cursor_style = "block"           # block, underline, beam
+cursor_blink = true
+cursor_blink_interval_ms = 530
+bell_enabled = true
+bell_style = "visual"            # visual, sound, both, none
+bracketed_paste = true
+auto_scroll_on_output = true
+
+# ============================================================================
+# Keybindings
+# ============================================================================
+
+[keybindings]
+mode = "default"                 # default, vim, emacs
+
+# Custom keybindings (example)
+# [keybindings.custom]
+# "Ctrl+Shift+C" = "copy"
+# "Ctrl+Shift+V" = "paste"
+# "Ctrl+Shift+F" = "search"
+# "Ctrl+Shift+N" = "new_window"
+
+# ============================================================================
+# Shell Configuration
+# ============================================================================
+
+[shell]
+# program = "/bin/zsh"
+# args = ["--login"]
+login_shell = true
+
+# Environment variables to set for shell
+# [shell.env]
+# TERM = "xterm-256color"
+# COLORTERM = "truecolor"
+
+# ============================================================================
+# Mouse Configuration
+# ============================================================================
+
+[mouse]
+enabled = true
+reporting = true                 # Allow applications to receive mouse events
+selection_mode = "character"     # character, word, line
+copy_on_select = true
+middle_click_paste = true
+
+# ============================================================================
+# PTY Configuration
+# ============================================================================
 
 [pty]
 max_sessions = 32
 default_cols = 120
 default_rows = 40
 scrollback_lines = 10000
+
+# ============================================================================
+# MCP (Model Context Protocol) - Future feature
+# ============================================================================
 
 [mcp]
 timeout_secs = 30
@@ -35,6 +133,10 @@ retry_delay_secs = 5
 # [mcp.servers.env]
 # GITHUB_TOKEN = "${GITHUB_TOKEN}"
 
+# ============================================================================
+# Storage - Future feature
+# ============================================================================
+
 [storage]
 # database_path = "~/.local/share/agterm/agterm.db"
 # logs_dir = "~/.local/share/agterm/logs"
@@ -43,24 +145,37 @@ archive_retention_days = 90
 ai_summarization = false
 # ai_provider = "ollama"
 
+# ============================================================================
+# TUI Settings
+# ============================================================================
+
 [tui]
 target_fps = 60
 show_line_numbers = false
 theme = "default"
 mouse_support = true
-keybindings = "vim"  # vim, emacs
+keybindings = "default"          # default, vim, emacs
+
+# ============================================================================
+# Logging
+# ============================================================================
 
 [logging]
-level = "info"              # trace, debug, info, warn, error
-format = "pretty"           # pretty, compact, json
+level = "info"                   # trace, debug, info, warn, error
+format = "pretty"                # pretty, compact, json
 timestamps = true
 file_line = false
-file_output = true          # Enable file output
-# file_path = auto          # macOS: ~/Library/Application Support/agterm/logs
-                            # Linux: ~/.local/share/agterm/logs
+file_output = true               # Enable file output
+# file_path = auto               # macOS: ~/Library/Application Support/agterm/logs
+                                 # Linux: ~/.local/share/agterm/logs
+                                 # Windows: %APPDATA%\agterm\logs
+
+# ============================================================================
+# Debug Panel
+# ============================================================================
 
 [debug]
-enabled = false             # Enable debug panel on startup (or set AGTERM_DEBUG=1)
-show_fps = true             # Show FPS in debug panel
-show_pty_stats = true       # Show PTY statistics
-log_buffer_size = 50        # Number of log entries to keep in debug panel
+enabled = false                  # Enable debug panel on startup (or set AGTERM_DEBUG=1)
+show_fps = true                  # Show FPS in debug panel
+show_pty_stats = true            # Show PTY statistics
+log_buffer_size = 50             # Number of log entries to keep in debug panel
