@@ -19,7 +19,7 @@ iced = { version = "0.13", default-features = false, features = ["tokio", "advan
 
 # Terminal/PTY
 portable-pty = "0.8"
-# vte = "0.13"  # TODO: implement ANSI escape code parsing for enhanced terminal support
+vte = "0.13"  # ANSI escape code parsing for enhanced terminal support
 
 # TODO: implement async operations with tokio
 # tokio = { version = "1", features = ["full"] }

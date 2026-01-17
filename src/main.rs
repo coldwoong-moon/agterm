@@ -5,7 +5,7 @@
 
 use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::text_input::Id as TextInputId;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{button, column, container, row, text, text_input, Space};
 use iced::{Alignment, Border, Color, Element, Font, Length, Subscription, Task};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -19,7 +19,8 @@ use debug::{DebugPanel, DebugPanelMessage};
 use logging::{LogBuffer, LoggingConfig};
 use terminal_canvas::{TerminalCanvas, TerminalCanvasState};
 
-use terminal::pty::{PtyManager, MAX_OUTPUT_LINES};
+use terminal::pty::PtyManager;
+use terminal::screen::{Cell, TerminalScreen};
 
 // ============================================================================
 // Font Configuration - Embedded D2Coding for Korean/CJK support
@@ -238,6 +239,48 @@ pub struct StyledSpan {
     pub text: String,
     pub color: Option<Color>,
     pub bold: bool,
+}
+
+/// Convert terminal cells to styled spans
+fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
+    let mut spans = Vec::new();
+    let mut current_text = String::new();
+    let mut current_color: Option<Color> = None;
+    let mut current_bold = false;
+
+    for cell in cells {
+        let color = if let Some(fg) = &cell.fg {
+            Some(fg.to_color())
+        } else {
+            None
+        };
+
+        // If color or bold changes, push current span and start new one
+        if color != current_color || cell.bold != current_bold {
+            if !current_text.is_empty() {
+                spans.push(StyledSpan {
+                    text: std::mem::take(&mut current_text),
+                    color: current_color,
+                    bold: current_bold,
+                });
+            }
+            current_color = color;
+            current_bold = cell.bold;
+        }
+
+        current_text.push(cell.c);
+    }
+
+    // Push final span
+    if !current_text.is_empty() {
+        spans.push(StyledSpan {
+            text: current_text,
+            color: current_color,
+            bold: current_bold,
+        });
+    }
+
+    spans
 }
 
 /// Parse ANSI-colored text into styled spans
@@ -569,6 +612,7 @@ impl Default for AgTerm {
             cache_buffer_len: 0,
             canvas_state: TerminalCanvasState::new(),
             content_version: 0,
+            screen: TerminalScreen::new(80, 24),
         };
 
         let mut debug_panel = DebugPanel::new();
@@ -617,6 +661,8 @@ struct TerminalTab {
     canvas_state: TerminalCanvasState,
     /// Content version for cache invalidation
     content_version: u64,
+    /// Terminal screen buffer with VTE parser
+    screen: TerminalScreen,
 }
 
 /// Terminal input mode
@@ -734,6 +780,7 @@ impl AgTerm {
                     cache_buffer_len: 0,
                     canvas_state: TerminalCanvasState::new(),
                     content_version: 0,
+                    screen: TerminalScreen::new(80, 24),
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
@@ -945,11 +992,13 @@ impl AgTerm {
                 let cols = ((width as f32 / 8.0).max(80.0)) as u16;
                 let rows = ((height as f32 / 18.0).max(24.0)) as u16;
 
-                // Resize all active PTY sessions
-                for tab in &self.tabs {
+                // Resize all active PTY sessions and screen buffers
+                for tab in &mut self.tabs {
                     if let Some(session_id) = &tab.session_id {
                         let _ = self.pty_manager.resize(session_id, rows, cols);
                     }
+                    // Resize screen buffer
+                    tab.screen.resize(cols as usize, rows as usize);
                 }
                 Task::none()
             }
@@ -986,40 +1035,26 @@ impl AgTerm {
                     if let Some(session_id) = &tab.session_id {
                         if let Ok(data) = self.pty_manager.read(session_id) {
                             if !data.is_empty() {
-                                let raw_output = String::from_utf8_lossy(&data);
-
                                 // Update PTY activity timestamp for dynamic tick optimization
                                 self.last_pty_activity = Instant::now();
 
                                 // Record PTY read metrics
                                 self.debug_panel.metrics.record_pty_read(data.len());
 
-                                // Check if at bottom before adding new content
-                                let was_at_bottom = tab.canvas_state.is_at_bottom(tab.parsed_line_cache.len());
+                                // Process bytes through VTE parser
+                                tab.screen.process(&data);
 
-                                // Append to raw_output_buffer
-                                tab.raw_output_buffer.push_str(&raw_output);
-                                // Limit buffer size (keep last 100KB)
-                                const MAX_RAW_BUFFER: usize = 100 * 1024;
-                                if tab.raw_output_buffer.len() > MAX_RAW_BUFFER {
-                                    let excess =
-                                        tab.raw_output_buffer.len() - MAX_RAW_BUFFER;
-                                    tab.raw_output_buffer.drain(0..excess);
-                                    // Clear cache when buffer is truncated
-                                    tab.parsed_line_cache.clear();
-                                    tab.cache_buffer_len = 0;
-                                }
-
-                                // Update ANSI parsing cache for new content
-                                update_line_cache(tab);
+                                // Convert screen buffer to parsed line cache for rendering
+                                let all_lines = tab.screen.get_all_lines();
+                                tab.parsed_line_cache = all_lines.iter().map(|cells| {
+                                    cells_to_styled_spans(cells)
+                                }).collect();
 
                                 // Increment content version for canvas cache invalidation
                                 tab.content_version += 1;
 
-                                // Auto-scroll if was at bottom
-                                if was_at_bottom {
-                                    tab.canvas_state.scroll_to_bottom(tab.parsed_line_cache.len());
-                                }
+                                // Auto-scroll to bottom
+                                tab.canvas_state.scroll_to_bottom(tab.parsed_line_cache.len());
                             }
                         }
                     }
@@ -1649,6 +1684,7 @@ mod tests {
             cache_buffer_len: 0,
             canvas_state: TerminalCanvasState::new(),
             content_version: 0,
+            screen: TerminalScreen::new(80, 24),
         };
 
         AgTerm {
