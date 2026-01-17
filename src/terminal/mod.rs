@@ -4,4 +4,4 @@
 
 pub mod pty;
 
-pub use pty::{PtyManager, PtyId, PtyError};
+pub use pty::{PtyError, PtyId, PtyManager};

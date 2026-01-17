@@ -1,11 +1,11 @@
 //! PTY (Pseudo-Terminal) management
 
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use uuid::Uuid;
 
 pub type PtyId = Uuid;
@@ -64,7 +64,7 @@ enum PtyCommand {
 struct InternalPtySession {
     #[allow(dead_code)]
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,  // Cached writer for repeated writes
+    writer: Box<dyn Write + Send>, // Cached writer for repeated writes
     child: Box<dyn Child + Send + Sync>,
     output_buffer: Vec<u8>,
     reader_thread: Option<JoinHandle<()>>,
@@ -146,7 +146,7 @@ fn create_pty_session(rows: u16, cols: u16) -> Result<InternalPtySession, PtyErr
         master: pair.master,
         writer,
         child,
-        output_buffer: Vec::with_capacity(4096),  // Pre-allocate reasonable size
+        output_buffer: Vec::with_capacity(4096), // Pre-allocate reasonable size
         reader_thread: Some(reader_thread),
         output_receiver: output_rx,
     })
@@ -157,7 +157,12 @@ fn run_pty_thread(rx: Receiver<PtyCommand>) {
 
     loop {
         match rx.recv() {
-            Ok(PtyCommand::Create { id, rows, cols, response }) => {
+            Ok(PtyCommand::Create {
+                id,
+                rows,
+                cols,
+                response,
+            }) => {
                 let result = create_pty_session(rows, cols).map(|session| {
                     sessions.insert(id, session);
                 });
@@ -166,7 +171,11 @@ fn run_pty_thread(rx: Receiver<PtyCommand>) {
             Ok(PtyCommand::Write { id, data, response }) => {
                 let result = if let Some(session) = sessions.get_mut(&id) {
                     // Use cached writer instead of take_writer()
-                    match session.writer.write_all(&data).and_then(|_| session.writer.flush()) {
+                    match session
+                        .writer
+                        .write_all(&data)
+                        .and_then(|_| session.writer.flush())
+                    {
                         Ok(_) => Ok(()),
                         Err(e) => Err(PtyError::Io(e.to_string())),
                     }
@@ -184,7 +193,8 @@ fn run_pty_thread(rx: Receiver<PtyCommand>) {
                                 session.output_buffer.extend(data);
                                 // Enforce memory limit - keep only the tail if exceeded
                                 if session.output_buffer.len() > MAX_OUTPUT_BUFFER_SIZE {
-                                    let excess = session.output_buffer.len() - MAX_OUTPUT_BUFFER_SIZE;
+                                    let excess =
+                                        session.output_buffer.len() - MAX_OUTPUT_BUFFER_SIZE;
                                     session.output_buffer.drain(0..excess);
                                 }
                             }
@@ -200,7 +210,12 @@ fn run_pty_thread(rx: Receiver<PtyCommand>) {
                 };
                 let _ = response.send(result);
             }
-            Ok(PtyCommand::Resize { id, rows, cols, response }) => {
+            Ok(PtyCommand::Resize {
+                id,
+                rows,
+                cols,
+                response,
+            }) => {
                 let result = if let Some(session) = sessions.get(&id) {
                     let new_size = PtySize {
                         rows,
@@ -208,7 +223,9 @@ fn run_pty_thread(rx: Receiver<PtyCommand>) {
                         pixel_width: 0,
                         pixel_height: 0,
                     };
-                    session.master.resize(new_size)
+                    session
+                        .master
+                        .resize(new_size)
                         .map_err(|e| PtyError::Io(e.to_string()))
                 } else {
                     Err(PtyError::SessionNotFound(id.to_string()))
@@ -218,7 +235,10 @@ fn run_pty_thread(rx: Receiver<PtyCommand>) {
             Ok(PtyCommand::Close { id, response }) => {
                 let result = if let Some(mut session) = sessions.remove(&id) {
                     // Kill child process (this will also cause reader thread to terminate)
-                    let kill_result = session.child.kill().map_err(|e| PtyError::Io(e.to_string()));
+                    let kill_result = session
+                        .child
+                        .kill()
+                        .map_err(|e| PtyError::Io(e.to_string()));
                     // Wait for reader thread to finish
                     if let Some(handle) = session.reader_thread.take() {
                         let _ = handle.join();
@@ -274,21 +294,27 @@ impl PtyManager {
             run_pty_thread(rx);
         });
 
-        Self { tx, _thread: thread }
+        Self {
+            tx,
+            _thread: thread,
+        }
     }
 
     pub fn create_session(&self, rows: u16, cols: u16) -> Result<PtyId, PtyError> {
         let id = Uuid::new_v4();
         let (response_tx, response_rx) = mpsc::channel();
 
-        self.tx.send(PtyCommand::Create {
-            id,
-            rows,
-            cols,
-            response: response_tx,
-        }).map_err(|e| PtyError::Channel(e.to_string()))?;
+        self.tx
+            .send(PtyCommand::Create {
+                id,
+                rows,
+                cols,
+                response: response_tx,
+            })
+            .map_err(|e| PtyError::Channel(e.to_string()))?;
 
-        response_rx.recv()
+        response_rx
+            .recv()
             .map_err(|e| PtyError::Channel(e.to_string()))?
             .map(|_| id)
     }
@@ -296,51 +322,63 @@ impl PtyManager {
     pub fn write(&self, id: &PtyId, data: &[u8]) -> Result<(), PtyError> {
         let (response_tx, response_rx) = mpsc::channel();
 
-        self.tx.send(PtyCommand::Write {
-            id: *id,
-            data: data.to_vec(),
-            response: response_tx,
-        }).map_err(|e| PtyError::Channel(e.to_string()))?;
+        self.tx
+            .send(PtyCommand::Write {
+                id: *id,
+                data: data.to_vec(),
+                response: response_tx,
+            })
+            .map_err(|e| PtyError::Channel(e.to_string()))?;
 
-        response_rx.recv()
+        response_rx
+            .recv()
             .map_err(|e| PtyError::Channel(e.to_string()))?
     }
 
     pub fn read(&self, id: &PtyId) -> Result<Vec<u8>, PtyError> {
         let (response_tx, response_rx) = mpsc::channel();
 
-        self.tx.send(PtyCommand::Read {
-            id: *id,
-            response: response_tx,
-        }).map_err(|e| PtyError::Channel(e.to_string()))?;
+        self.tx
+            .send(PtyCommand::Read {
+                id: *id,
+                response: response_tx,
+            })
+            .map_err(|e| PtyError::Channel(e.to_string()))?;
 
-        response_rx.recv()
+        response_rx
+            .recv()
             .map_err(|e| PtyError::Channel(e.to_string()))?
     }
 
     pub fn resize(&self, id: &PtyId, rows: u16, cols: u16) -> Result<(), PtyError> {
         let (response_tx, response_rx) = mpsc::channel();
 
-        self.tx.send(PtyCommand::Resize {
-            id: *id,
-            rows,
-            cols,
-            response: response_tx,
-        }).map_err(|e| PtyError::Channel(e.to_string()))?;
+        self.tx
+            .send(PtyCommand::Resize {
+                id: *id,
+                rows,
+                cols,
+                response: response_tx,
+            })
+            .map_err(|e| PtyError::Channel(e.to_string()))?;
 
-        response_rx.recv()
+        response_rx
+            .recv()
             .map_err(|e| PtyError::Channel(e.to_string()))?
     }
 
     pub fn close_session(&self, id: &PtyId) -> Result<(), PtyError> {
         let (response_tx, response_rx) = mpsc::channel();
 
-        self.tx.send(PtyCommand::Close {
-            id: *id,
-            response: response_tx,
-        }).map_err(|e| PtyError::Channel(e.to_string()))?;
+        self.tx
+            .send(PtyCommand::Close {
+                id: *id,
+                response: response_tx,
+            })
+            .map_err(|e| PtyError::Channel(e.to_string()))?;
 
-        response_rx.recv()
+        response_rx
+            .recv()
             .map_err(|e| PtyError::Channel(e.to_string()))?
     }
 
@@ -353,12 +391,15 @@ impl PtyManager {
     pub fn check_status(&self, id: &PtyId) -> Result<Option<i32>, PtyError> {
         let (response_tx, response_rx) = mpsc::channel();
 
-        self.tx.send(PtyCommand::CheckStatus {
-            id: *id,
-            response: response_tx,
-        }).map_err(|e| PtyError::Channel(e.to_string()))?;
+        self.tx
+            .send(PtyCommand::CheckStatus {
+                id: *id,
+                response: response_tx,
+            })
+            .map_err(|e| PtyError::Channel(e.to_string()))?;
 
-        response_rx.recv()
+        response_rx
+            .recv()
             .map_err(|e| PtyError::Channel(e.to_string()))?
     }
 }

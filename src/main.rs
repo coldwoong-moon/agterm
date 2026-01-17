@@ -58,6 +58,130 @@ mod theme {
 
     // Prompt symbol
     pub const PROMPT: Color = Color::from_rgb(0.55, 0.36, 0.98);          // #8c5cfa (purple)
+
+    // ANSI colors (standard 16-color palette)
+    pub const ANSI_BLACK: Color = Color::from_rgb(0.0, 0.0, 0.0);
+    pub const ANSI_RED: Color = Color::from_rgb(0.8, 0.2, 0.2);
+    pub const ANSI_GREEN: Color = Color::from_rgb(0.2, 0.8, 0.2);
+    pub const ANSI_YELLOW: Color = Color::from_rgb(0.8, 0.8, 0.2);
+    pub const ANSI_BLUE: Color = Color::from_rgb(0.2, 0.2, 0.8);
+    pub const ANSI_MAGENTA: Color = Color::from_rgb(0.8, 0.2, 0.8);
+    pub const ANSI_CYAN: Color = Color::from_rgb(0.2, 0.8, 0.8);
+    pub const ANSI_WHITE: Color = Color::from_rgb(0.8, 0.8, 0.8);
+    // Bright variants
+    pub const ANSI_BRIGHT_BLACK: Color = Color::from_rgb(0.5, 0.5, 0.5);
+    pub const ANSI_BRIGHT_RED: Color = Color::from_rgb(1.0, 0.3, 0.3);
+    pub const ANSI_BRIGHT_GREEN: Color = Color::from_rgb(0.3, 1.0, 0.3);
+    pub const ANSI_BRIGHT_YELLOW: Color = Color::from_rgb(1.0, 1.0, 0.3);
+    pub const ANSI_BRIGHT_BLUE: Color = Color::from_rgb(0.3, 0.3, 1.0);
+    pub const ANSI_BRIGHT_MAGENTA: Color = Color::from_rgb(1.0, 0.3, 1.0);
+    pub const ANSI_BRIGHT_CYAN: Color = Color::from_rgb(0.3, 1.0, 1.0);
+    pub const ANSI_BRIGHT_WHITE: Color = Color::from_rgb(1.0, 1.0, 1.0);
+}
+
+// ============================================================================
+// ANSI Color Parsing
+// ============================================================================
+
+/// A styled text span with optional color
+#[derive(Clone, Debug)]
+struct StyledSpan {
+    text: String,
+    color: Option<Color>,
+    bold: bool,
+}
+
+/// Parse ANSI-colored text into styled spans
+fn parse_ansi_text(input: &str) -> Vec<StyledSpan> {
+    let mut spans = Vec::new();
+    let mut current_text = String::new();
+    let mut current_color: Option<Color> = None;
+    let mut bold = false;
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Save current text if any
+            if !current_text.is_empty() {
+                spans.push(StyledSpan {
+                    text: std::mem::take(&mut current_text),
+                    color: current_color,
+                    bold,
+                });
+            }
+
+            // Parse escape sequence
+            if chars.peek() == Some(&'[') {
+                chars.next(); // consume '['
+                let mut codes = String::new();
+                while let Some(&ch) = chars.peek() {
+                    if ch.is_ascii_digit() || ch == ';' {
+                        codes.push(ch);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                // Consume the command character (usually 'm')
+                if chars.peek() == Some(&'m') {
+                    chars.next();
+                }
+
+                // Parse SGR codes
+                for code_str in codes.split(';') {
+                    if let Ok(code) = code_str.parse::<u8>() {
+                        match code {
+                            0 => { current_color = None; bold = false; } // Reset
+                            1 => bold = true,
+                            22 => bold = false,
+                            30 => current_color = Some(theme::ANSI_BLACK),
+                            31 => current_color = Some(theme::ANSI_RED),
+                            32 => current_color = Some(theme::ANSI_GREEN),
+                            33 => current_color = Some(theme::ANSI_YELLOW),
+                            34 => current_color = Some(theme::ANSI_BLUE),
+                            35 => current_color = Some(theme::ANSI_MAGENTA),
+                            36 => current_color = Some(theme::ANSI_CYAN),
+                            37 => current_color = Some(theme::ANSI_WHITE),
+                            39 => current_color = None, // Default foreground
+                            90 => current_color = Some(theme::ANSI_BRIGHT_BLACK),
+                            91 => current_color = Some(theme::ANSI_BRIGHT_RED),
+                            92 => current_color = Some(theme::ANSI_BRIGHT_GREEN),
+                            93 => current_color = Some(theme::ANSI_BRIGHT_YELLOW),
+                            94 => current_color = Some(theme::ANSI_BRIGHT_BLUE),
+                            95 => current_color = Some(theme::ANSI_BRIGHT_MAGENTA),
+                            96 => current_color = Some(theme::ANSI_BRIGHT_CYAN),
+                            97 => current_color = Some(theme::ANSI_BRIGHT_WHITE),
+                            _ => {} // Ignore other codes
+                        }
+                    }
+                }
+            } else if chars.peek() == Some(&']') {
+                // OSC sequence - skip until BEL or ST
+                chars.next();
+                while let Some(&ch) = chars.peek() {
+                    chars.next();
+                    if ch == '\x07' || ch == '\\' {
+                        break;
+                    }
+                }
+            }
+        } else if c == '\r' {
+            // Skip carriage return
+        } else {
+            current_text.push(c);
+        }
+    }
+
+    // Don't forget the last span
+    if !current_text.is_empty() {
+        spans.push(StyledSpan {
+            text: current_text,
+            color: current_color,
+            bold,
+        });
+    }
+
+    spans
 }
 
 // ============================================================================
@@ -67,7 +191,7 @@ mod theme {
 #[derive(Clone)]
 struct CommandBlock {
     command: String,
-    output: Vec<String>,
+    output: Vec<String>,  // Raw output with ANSI codes preserved
     timestamp: Instant,
     completed_at: Option<Instant>,
     exit_code: Option<i32>,
@@ -209,13 +333,15 @@ impl Default for AgTerm {
             id: 0,
             session_id,
             blocks: Vec::new(),
-            pending_output: vec!["Welcome to AgTerm - AI Agent Terminal".to_string()],
+            pending_output: Vec::new(),
+            raw_output_buffer: String::new(),
             input: String::new(),
             cwd,
             error_message,
             history: Vec::new(),
             history_index: None,
             history_temp_input: String::new(),
+            mode: TerminalMode::Raw,  // Default to Raw mode for interactive apps
         };
 
         Self {
@@ -235,6 +361,7 @@ struct TerminalTab {
     session_id: Option<uuid::Uuid>,
     blocks: Vec<CommandBlock>,
     pending_output: Vec<String>,  // Output before first command
+    raw_output_buffer: String,    // Raw PTY output for Raw mode display
     input: String,
     cwd: String,  // Current working directory display
     error_message: Option<String>,  // PTY error message if creation failed
@@ -242,6 +369,37 @@ struct TerminalTab {
     history: Vec<String>,
     history_index: Option<usize>,  // Current position in history (None = not browsing)
     history_temp_input: String,    // Temporary storage for current input when browsing
+    // Terminal mode
+    mode: TerminalMode,
+}
+
+/// Terminal input mode
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum TerminalMode {
+    /// Raw mode: all key input goes directly to PTY (for interactive apps like vim, Claude Code)
+    #[default]
+    Raw,
+    /// Block mode: command input via text field, output in blocks (Warp-style)
+    Block,
+}
+
+/// Signal types for terminal control
+#[derive(Debug, Clone, Copy)]
+enum SignalType {
+    Interrupt,  // Ctrl+C (0x03)
+    EOF,        // Ctrl+D (0x04)
+    Suspend,    // Ctrl+Z (0x1A)
+}
+
+impl SignalType {
+    /// Convert signal type to its corresponding byte value
+    fn as_byte(self) -> u8 {
+        match self {
+            SignalType::Interrupt => 0x03,  // Ctrl+C
+            SignalType::EOF => 0x04,         // Ctrl+D
+            SignalType::Suspend => 0x1A,     // Ctrl+Z
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -254,10 +412,16 @@ enum Message {
     NextTab,
     PrevTab,
 
-    // Terminal input
+    // Terminal input (Block mode)
     InputChanged(String),
     SubmitInput,
     FocusInput,
+
+    // Raw input (Raw mode)
+    RawInput(String),
+
+    // Mode toggle
+    ToggleMode,
 
     // History navigation
     HistoryPrevious,
@@ -266,8 +430,15 @@ enum Message {
     // Keyboard events
     KeyPressed(Key, Modifiers),
 
+    // Signal sending
+    SendSignal(SignalType),
+
     // Clipboard
     CopyToClipboard(String),
+    ClipboardContent(Option<String>),
+
+    // Window resize
+    WindowResized { width: u32, height: u32 },
 
     // Tick for PTY polling
     Tick,
@@ -308,16 +479,18 @@ impl AgTerm {
                     session_id,
                     blocks: Vec::new(),
                     pending_output: Vec::new(),
+                    raw_output_buffer: String::new(),
                     input: String::new(),
                     cwd,
                     error_message,
                     history: Vec::new(),
                     history_index: None,
                     history_temp_input: String::new(),
+                    mode: TerminalMode::Raw,
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
-                text_input::focus(input_id())
+                Task::none()
             }
 
             Message::CloseTab(index) => {
@@ -471,8 +644,43 @@ impl AgTerm {
                 text_input::focus(input_id())
             }
 
+            Message::RawInput(input) => {
+                // Send raw input directly to PTY (Raw mode)
+                if let Some(tab) = self.tabs.get(self.active_tab) {
+                    if let Some(session_id) = &tab.session_id {
+                        let _ = self.pty_manager.write(session_id, input.as_bytes());
+                    }
+                }
+                Task::none()
+            }
+
+            Message::ToggleMode => {
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    tab.mode = match tab.mode {
+                        TerminalMode::Raw => TerminalMode::Block,
+                        TerminalMode::Block => TerminalMode::Raw,
+                    };
+                }
+                Task::none()
+            }
+
             Message::KeyPressed(key, modifiers) => {
-                // Handle keyboard shortcuts
+                // Get current mode
+                let current_mode = self.tabs.get(self.active_tab)
+                    .map(|t| t.mode)
+                    .unwrap_or(TerminalMode::Raw);
+
+                // Handle Ctrl key signals (both modes)
+                if modifiers.control() {
+                    match key.as_ref() {
+                        Key::Character("c") => return self.update(Message::SendSignal(SignalType::Interrupt)),
+                        Key::Character("d") => return self.update(Message::SendSignal(SignalType::EOF)),
+                        Key::Character("z") => return self.update(Message::SendSignal(SignalType::Suspend)),
+                        _ => {}
+                    }
+                }
+
+                // Handle keyboard shortcuts (Cmd key - both modes)
                 if modifiers.command() {
                     match key.as_ref() {
                         Key::Character("t") => return self.update(Message::NewTab),
@@ -484,21 +692,71 @@ impl AgTerm {
                         Key::Character("3") => return self.update(Message::SelectTab(2)),
                         Key::Character("4") => return self.update(Message::SelectTab(3)),
                         Key::Character("5") => return self.update(Message::SelectTab(4)),
+                        Key::Character("v") => return iced::clipboard::read().map(Message::ClipboardContent),
+                        Key::Character("m") => return self.update(Message::ToggleMode),  // Toggle mode
                         _ => {}
                     }
                 }
 
-                // History navigation with arrow keys (no modifiers needed)
-                match key.as_ref() {
-                    Key::Named(keyboard::key::Named::ArrowUp) => {
-                        return self.update(Message::HistoryPrevious);
+                // Raw mode: send all other keys directly to PTY
+                if current_mode == TerminalMode::Raw && !modifiers.command() {
+                    let input = match key.as_ref() {
+                        // Named keys
+                        Key::Named(keyboard::key::Named::Enter) => Some("\r".to_string()),
+                        Key::Named(keyboard::key::Named::Backspace) => Some("\x7f".to_string()),
+                        Key::Named(keyboard::key::Named::Tab) => Some("\t".to_string()),
+                        Key::Named(keyboard::key::Named::Escape) => Some("\x1b".to_string()),
+                        Key::Named(keyboard::key::Named::ArrowUp) => Some("\x1b[A".to_string()),
+                        Key::Named(keyboard::key::Named::ArrowDown) => Some("\x1b[B".to_string()),
+                        Key::Named(keyboard::key::Named::ArrowRight) => Some("\x1b[C".to_string()),
+                        Key::Named(keyboard::key::Named::ArrowLeft) => Some("\x1b[D".to_string()),
+                        Key::Named(keyboard::key::Named::Home) => Some("\x1b[H".to_string()),
+                        Key::Named(keyboard::key::Named::End) => Some("\x1b[F".to_string()),
+                        Key::Named(keyboard::key::Named::PageUp) => Some("\x1b[5~".to_string()),
+                        Key::Named(keyboard::key::Named::PageDown) => Some("\x1b[6~".to_string()),
+                        Key::Named(keyboard::key::Named::Delete) => Some("\x1b[3~".to_string()),
+                        Key::Named(keyboard::key::Named::Insert) => Some("\x1b[2~".to_string()),
+                        // Character keys
+                        Key::Character(c) => {
+                            if modifiers.control() {
+                                // Ctrl+key combinations (already handled above for c, d, z)
+                                None
+                            } else {
+                                Some(c.to_string())
+                            }
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(input_str) = input {
+                        return self.update(Message::RawInput(input_str));
                     }
-                    Key::Named(keyboard::key::Named::ArrowDown) => {
-                        return self.update(Message::HistoryNext);
-                    }
-                    _ => {}
                 }
 
+                // Block mode: history navigation with arrow keys
+                if current_mode == TerminalMode::Block {
+                    match key.as_ref() {
+                        Key::Named(keyboard::key::Named::ArrowUp) => {
+                            return self.update(Message::HistoryPrevious);
+                        }
+                        Key::Named(keyboard::key::Named::ArrowDown) => {
+                            return self.update(Message::HistoryNext);
+                        }
+                        _ => {}
+                    }
+                }
+
+                Task::none()
+            }
+
+            Message::SendSignal(signal_type) => {
+                // Send signal to active PTY session
+                if let Some(tab) = self.tabs.get(self.active_tab) {
+                    if let Some(session_id) = &tab.session_id {
+                        let signal_byte = signal_type.as_byte();
+                        let _ = self.pty_manager.write(session_id, &[signal_byte]);
+                    }
+                }
                 Task::none()
             }
 
@@ -506,14 +764,44 @@ impl AgTerm {
                 iced::clipboard::write(content)
             }
 
+            Message::ClipboardContent(clipboard_opt) => {
+                if let Some(content) = clipboard_opt {
+                    if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                        match tab.mode {
+                            TerminalMode::Raw => {
+                                // In Raw mode, send clipboard content directly to PTY
+                                if let Some(session_id) = &tab.session_id {
+                                    let _ = self.pty_manager.write(session_id, content.as_bytes());
+                                }
+                            }
+                            TerminalMode::Block => {
+                                // In Block mode, append to input field
+                                tab.input.push_str(&content);
+                            }
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::WindowResized { width, height } => {
+                // Calculate terminal dimensions based on approximate character size
+                // D2Coding at ~13px = roughly 8px width, 18px height per character
+                let cols = ((width as f32 / 8.0).max(80.0)) as u16;
+                let rows = ((height as f32 / 18.0).max(24.0)) as u16;
+
+                // Resize all active PTY sessions
+                for tab in &self.tabs {
+                    if let Some(session_id) = &tab.session_id {
+                        let _ = self.pty_manager.resize(session_id, rows, cols);
+                    }
+                }
+                Task::none()
+            }
+
             Message::Tick => {
-                // Auto-focus input on startup
-                let focus_task = if self.startup_focus_count > 0 {
-                    self.startup_focus_count -= 1;
-                    text_input::focus(input_id())
-                } else {
-                    Task::none()
-                };
+                // No auto-focus needed for Raw mode (we use keyboard events)
+                self.startup_focus_count = 0;
 
                 // Poll PTY output for all tabs
                 for tab in &mut self.tabs {
@@ -521,45 +809,54 @@ impl AgTerm {
                         if let Ok(data) = self.pty_manager.read(session_id) {
                             if !data.is_empty() {
                                 let raw_output = String::from_utf8_lossy(&data);
-                                let output = strip_ansi(&raw_output);
 
-                                // Find the last running block or use pending_output
-                                if let Some(block) = tab.blocks.iter_mut().rev().find(|b| b.is_running) {
-                                    // Add output to the current running block
-                                    for line in output.lines() {
-                                        let trimmed = line.trim();
-                                        // Skip the echo of the command itself
-                                        if !trimmed.is_empty() && trimmed != block.command {
-                                            block.output.push(trimmed.to_string());
-                                            // Enforce output line limit per block
-                                            if block.output.len() > MAX_OUTPUT_LINES {
-                                                block.output.drain(0..1000);  // Remove first 1000 lines
+                                match tab.mode {
+                                    TerminalMode::Raw => {
+                                        // In Raw mode, append to raw_output_buffer
+                                        tab.raw_output_buffer.push_str(&raw_output);
+                                        // Limit buffer size (keep last 100KB)
+                                        const MAX_RAW_BUFFER: usize = 100 * 1024;
+                                        if tab.raw_output_buffer.len() > MAX_RAW_BUFFER {
+                                            let excess = tab.raw_output_buffer.len() - MAX_RAW_BUFFER;
+                                            tab.raw_output_buffer.drain(0..excess);
+                                        }
+                                    }
+                                    TerminalMode::Block => {
+                                        // In Block mode, use existing block-based logic
+                                        let output = &raw_output;
+                                        let stripped = strip_ansi(&raw_output);
+
+                                        if let Some(block) = tab.blocks.iter_mut().rev().find(|b| b.is_running) {
+                                            for line in output.lines() {
+                                                let trimmed_stripped = strip_ansi(line).trim().to_string();
+                                                if !trimmed_stripped.is_empty() && trimmed_stripped != block.command {
+                                                    block.output.push(line.to_string());
+                                                    if block.output.len() > MAX_OUTPUT_LINES {
+                                                        block.output.drain(0..1000);
+                                                    }
+                                                }
                                             }
-                                        }
-                                    }
-                                    // Mark block as complete after a brief pause
-                                    // (PTY typically sends output quickly, so if we're getting data, command is running)
-                                    if block.timestamp.elapsed() > Duration::from_millis(500) && output.is_empty() {
-                                        if block.is_running {
-                                            block.completed_at = Some(Instant::now());
-                                        }
-                                        block.is_running = false;
-                                    }
-                                } else {
-                                    // No running block, add to pending output
-                                    for line in output.lines() {
-                                        let trimmed = line.trim();
-                                        if !trimmed.is_empty() {
-                                            tab.pending_output.push(trimmed.to_string());
-                                            // Limit pending output as well
-                                            if tab.pending_output.len() > 1000 {
-                                                tab.pending_output.drain(0..100);
+                                            if block.timestamp.elapsed() > Duration::from_millis(500) && stripped.is_empty() {
+                                                if block.is_running {
+                                                    block.completed_at = Some(Instant::now());
+                                                }
+                                                block.is_running = false;
+                                            }
+                                        } else {
+                                            for line in output.lines() {
+                                                let trimmed = line.trim();
+                                                if !trimmed.is_empty() {
+                                                    tab.pending_output.push(trimmed.to_string());
+                                                    if tab.pending_output.len() > 1000 {
+                                                        tab.pending_output.drain(0..100);
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
-                            } else {
-                                // No new output - mark running blocks as complete if enough time passed
+                            } else if tab.mode == TerminalMode::Block {
+                                // Block mode: mark running blocks as complete
                                 for block in &mut tab.blocks {
                                     if block.is_running && block.timestamp.elapsed() > Duration::from_millis(300) {
                                         if block.completed_at.is_none() {
@@ -572,13 +869,13 @@ impl AgTerm {
                         }
                     }
 
-                    // Enforce maximum blocks per tab
-                    if tab.blocks.len() > MAX_BLOCKS_PER_TAB {
+                    // Enforce maximum blocks per tab (Block mode)
+                    if tab.mode == TerminalMode::Block && tab.blocks.len() > MAX_BLOCKS_PER_TAB {
                         let excess = tab.blocks.len() - MAX_BLOCKS_PER_TAB;
                         tab.blocks.drain(0..excess);
                     }
                 }
-                focus_task
+                Task::none()
             }
         }
     }
@@ -605,22 +902,84 @@ impl AgTerm {
                 .map(|(i, _)| {
                     let is_active = i == self.active_tab;
                     let label = format!("Terminal {}", i + 1);
+                    let can_close = self.tabs.len() > 1;
 
                     let icon_color = if is_active { theme::TAB_ACTIVE } else { theme::TEXT_MUTED };
                     let label_color = if is_active { theme::TEXT_PRIMARY } else { theme::TEXT_SECONDARY };
 
+                    // Tab label button (clickable to select)
+                    let tab_label_button = button(
+                        row![
+                            text("▶").size(11).color(icon_color),
+                            Space::with_width(8),
+                            text(label.clone()).size(13).color(label_color)
+                        ]
+                        .align_y(Alignment::Center)
+                    )
+                    .padding([8, 12])
+                    .style(move |_, status| {
+                        let bg = match status {
+                            button::Status::Hovered => {
+                                if is_active { theme::BG_SECONDARY } else { theme::BG_BLOCK_HOVER }
+                            }
+                            _ => {
+                                if is_active { theme::BG_SECONDARY } else { theme::BG_PRIMARY }
+                            }
+                        };
+                        button::Style {
+                            background: Some(bg.into()),
+                            text_color: theme::TEXT_PRIMARY,
+                            border: Border {
+                                color: Color::TRANSPARENT,
+                                width: 0.0,
+                                radius: iced::border::Radius {
+                                    top_left: 6.0,
+                                    top_right: 0.0,
+                                    bottom_left: 0.0,
+                                    bottom_right: 0.0,
+                                },
+                            },
+                            ..Default::default()
+                        }
+                    })
+                    .on_press(Message::SelectTab(i));
+
+                    // Close button (separate, clickable to close)
+                    let close_button = button(
+                        text("×").size(14)
+                    )
+                    .padding([8, 10])
+                    .style(move |_, status| {
+                        let (bg, text_color) = match status {
+                            button::Status::Hovered => {
+                                (theme::BG_BLOCK_HOVER, theme::ACCENT_RED)
+                            }
+                            _ => {
+                                let bg = if is_active { theme::BG_SECONDARY } else { theme::BG_PRIMARY };
+                                (bg, theme::TEXT_MUTED)
+                            }
+                        };
+                        button::Style {
+                            background: Some(bg.into()),
+                            text_color,
+                            border: Border {
+                                color: Color::TRANSPARENT,
+                                width: 0.0,
+                                radius: iced::border::Radius {
+                                    top_left: 0.0,
+                                    top_right: 6.0,
+                                    bottom_left: 0.0,
+                                    bottom_right: 0.0,
+                                },
+                            },
+                            ..Default::default()
+                        }
+                    })
+                    .on_press_maybe(if can_close { Some(Message::CloseTab(i)) } else { None });
+
+                    // Tab content with accent line
                     let tab_content = column![
-                        // Tab content with icon
-                        container(
-                            row![
-                                text("▶").size(11).color(icon_color),
-                                Space::with_width(8),
-                                text(label.clone()).size(13).color(label_color),
-                                Space::with_width(8),
-                                text("×").size(14).color(theme::TEXT_MUTED)
-                            ]
-                            .align_y(Alignment::Center)
-                        ),
+                        row![tab_label_button, close_button],
                         // Active tab bottom accent line
                         container(Space::with_height(0))
                             .width(Length::Fill)
@@ -633,50 +992,9 @@ impl AgTerm {
                                 },
                                 ..Default::default()
                             })
-                    ]
-                    .spacing(6);
+                    ];
 
-                    let tab_button: Element<Message> = button(
-                        container(tab_content)
-                            .padding([8, 16])
-                    )
-                        .style(move |_, status| {
-                            let bg = match status {
-                                button::Status::Hovered => {
-                                    if is_active {
-                                        theme::BG_SECONDARY
-                                    } else {
-                                        theme::BG_BLOCK_HOVER
-                                    }
-                                }
-                                _ => {
-                                    if is_active {
-                                        theme::BG_SECONDARY
-                                    } else {
-                                        theme::BG_PRIMARY
-                                    }
-                                }
-                            };
-                            button::Style {
-                                background: Some(bg.into()),
-                                text_color: theme::TEXT_PRIMARY,
-                                border: Border {
-                                    color: Color::TRANSPARENT,
-                                    width: 0.0,
-                                    radius: iced::border::Radius {
-                                        top_left: 6.0,
-                                        top_right: 6.0,
-                                        bottom_left: 0.0,
-                                        bottom_right: 0.0,
-                                    },
-                                },
-                                ..Default::default()
-                            }
-                        })
-                        .on_press(Message::SelectTab(i))
-                        .into();
-
-                    tab_button
+                    container(tab_content).into()
                 })
                 .collect::<Vec<Element<Message>>>(),
         )
@@ -706,166 +1024,240 @@ impl AgTerm {
 
         // ========== Terminal Content ==========
         let content: Element<Message> = if let Some(tab) = self.tabs.get(self.active_tab) {
-            let mut blocks_column: Vec<Element<Message>> = Vec::new();
+            match tab.mode {
+                TerminalMode::Raw => {
+                    // ========== Raw Mode: Full terminal view ==========
+                    let terminal_output = self.render_raw_terminal(&tab.raw_output_buffer);
 
-            // Show error message if PTY creation failed
-            if let Some(error_msg) = &tab.error_message {
-                let error_block = self.render_error_block(error_msg);
-                blocks_column.push(error_block);
-            }
+                    // ========== Status Bar (Raw Mode) ==========
+                    let shell_name = self.get_shell_name();
+                    let mode_indicator = text("RAW")
+                        .size(11)
+                        .color(theme::ACCENT_GREEN);
+                    let tab_info = format!("Tab {} of {}", self.active_tab + 1, self.tabs.len());
 
-            // Show pending output (before first command)
-            if !tab.pending_output.is_empty() {
-                let welcome_block = self.render_welcome_block(&tab.pending_output);
-                blocks_column.push(welcome_block);
-            }
-
-            // Render command blocks
-            for block in &tab.blocks {
-                let block_element = self.render_command_block(block);
-                blocks_column.push(block_element);
-            }
-
-            // Add some spacing at the bottom
-            blocks_column.push(Space::with_height(20).into());
-
-            let terminal_content: Element<Message> = scrollable(
-                column(blocks_column)
-                    .spacing(12)
-                    .width(Length::Fill),
-            )
-            .height(Length::Fill)
-            .style(|_, _| scrollable::Style {
-                container: container::Style::default(),
-                vertical_rail: scrollable::Rail {
-                    background: Some(theme::BG_PRIMARY.into()),
-                    border: Border::default(),
-                    scroller: scrollable::Scroller {
-                        color: theme::BG_BLOCK_HOVER,
-                        border: Border {
-                            radius: 4.0.into(),
-                            ..Default::default()
-                        },
-                    },
-                },
-                horizontal_rail: scrollable::Rail {
-                    background: Some(theme::BG_PRIMARY.into()),
-                    border: Border::default(),
-                    scroller: scrollable::Scroller {
-                        color: theme::BG_BLOCK_HOVER,
-                        border: Border {
-                            radius: 4.0.into(),
-                            ..Default::default()
-                        },
-                    },
-                },
-                gap: None,
-            })
-            .into();
-
-            // ========== Input Area ==========
-            let prompt_symbol = text("❯").size(16).font(MONO_FONT).color(theme::PROMPT);
-            let cwd_display = text(shorten_path(&tab.cwd))
-                .size(12)
-                .font(MONO_FONT)
-                .color(theme::TEXT_MUTED);
-
-            let input_field = text_input("Type a command...", &tab.input)
-                .id(input_id())
-                .on_input(Message::InputChanged)
-                .on_submit(Message::SubmitInput)
-                .padding([12, 16])
-                .size(14)
-                .font(MONO_FONT)
-                .style(|_, _| text_input::Style {
-                    background: theme::BG_INPUT.into(),
-                    border: Border {
-                        color: theme::BORDER,
-                        width: 1.0,
-                        radius: 8.0.into(),
-                    },
-                    icon: theme::TEXT_MUTED,
-                    placeholder: theme::TEXT_MUTED,
-                    value: theme::TEXT_PRIMARY,
-                    selection: theme::ACCENT_BLUE,
-                });
-
-            let input_row: Element<Message> = container(
-                column![
-                    cwd_display,
-                    Space::with_height(6),
-                    row![
-                        prompt_symbol,
+                    let status_left = row![
+                        text(shell_name).size(12).color(theme::TEXT_MUTED),
                         Space::with_width(12),
-                        input_field
-                    ]
-                    .align_y(Alignment::Center)
-                ]
-                .width(Length::Fill),
-            )
-            .padding([16, 20])
-            .style(|_| container::Style {
-                background: Some(theme::BG_SECONDARY.into()),
-                border: Border {
-                    color: theme::BORDER,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into();
+                        mode_indicator
+                    ];
 
-            // ========== Status Bar ==========
-            let shell_name = self.get_shell_name();
-            let tab_info = format!("Tab {} of {}", self.active_tab + 1, self.tabs.len());
+                    let status_center = text(tab_info)
+                        .size(12)
+                        .color(theme::TEXT_MUTED);
 
-            let status_left = text(shell_name)
-                .size(12)
-                .color(theme::TEXT_MUTED);
+                    let status_right = text("⌘M Toggle | ⌘T New | ⌘W Close")
+                        .size(12)
+                        .color(theme::TEXT_MUTED);
 
-            let status_center = text(tab_info)
-                .size(12)
-                .color(theme::TEXT_MUTED);
-
-            let status_right = text("⌘T New | ⌘W Close")
-                .size(12)
-                .color(theme::TEXT_MUTED);
-
-            let status_bar: Element<Message> = container(
-                row![
-                    status_left,
-                    Space::with_width(Length::Fill),
-                    status_center,
-                    Space::with_width(Length::Fill),
-                    status_right
-                ]
-                .align_y(Alignment::Center)
-                .width(Length::Fill)
-            )
-            .padding([4, 12])
-            .width(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(theme::BG_PRIMARY.into()),
-                border: Border {
-                    color: theme::BORDER,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into();
-
-            column![
-                container(terminal_content)
-                    .padding([16, 20])
+                    let status_bar: Element<Message> = container(
+                        row![
+                            status_left,
+                            Space::with_width(Length::Fill),
+                            status_center,
+                            Space::with_width(Length::Fill),
+                            status_right
+                        ]
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill)
+                    )
+                    .padding([4, 12])
                     .width(Length::Fill)
-                    .height(Length::Fill),
-                input_row,
-                status_bar
-            ]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+                    .style(|_| container::Style {
+                        background: Some(theme::BG_PRIMARY.into()),
+                        border: Border {
+                            color: theme::BORDER,
+                            width: 1.0,
+                            radius: 0.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .into();
+
+                    column![
+                        container(terminal_output)
+                            .padding([8, 12])
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .style(|_| container::Style {
+                                background: Some(theme::BG_BLOCK.into()),
+                                ..Default::default()
+                            }),
+                        status_bar
+                    ]
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+                }
+                TerminalMode::Block => {
+                    // ========== Block Mode: Command blocks view ==========
+                    let mut blocks_column: Vec<Element<Message>> = Vec::new();
+
+                    // Show error message if PTY creation failed
+                    if let Some(error_msg) = &tab.error_message {
+                        let error_block = self.render_error_block(error_msg);
+                        blocks_column.push(error_block);
+                    }
+
+                    // Show pending output (before first command)
+                    if !tab.pending_output.is_empty() {
+                        let welcome_block = self.render_welcome_block(&tab.pending_output);
+                        blocks_column.push(welcome_block);
+                    }
+
+                    // Render command blocks
+                    for block in &tab.blocks {
+                        let block_element = self.render_command_block(block);
+                        blocks_column.push(block_element);
+                    }
+
+                    // Add some spacing at the bottom
+                    blocks_column.push(Space::with_height(20).into());
+
+                    let terminal_content: Element<Message> = scrollable(
+                        column(blocks_column)
+                            .spacing(12)
+                            .width(Length::Fill),
+                    )
+                    .height(Length::Fill)
+                    .style(|_, _| scrollable::Style {
+                        container: container::Style::default(),
+                        vertical_rail: scrollable::Rail {
+                            background: Some(theme::BG_PRIMARY.into()),
+                            border: Border::default(),
+                            scroller: scrollable::Scroller {
+                                color: theme::BG_BLOCK_HOVER,
+                                border: Border {
+                                    radius: 4.0.into(),
+                                    ..Default::default()
+                                },
+                            },
+                        },
+                        horizontal_rail: scrollable::Rail {
+                            background: Some(theme::BG_PRIMARY.into()),
+                            border: Border::default(),
+                            scroller: scrollable::Scroller {
+                                color: theme::BG_BLOCK_HOVER,
+                                border: Border {
+                                    radius: 4.0.into(),
+                                    ..Default::default()
+                                },
+                            },
+                        },
+                        gap: None,
+                    })
+                    .into();
+
+                    // ========== Input Area (Block Mode) ==========
+                    let prompt_symbol = text("❯").size(16).font(MONO_FONT).color(theme::PROMPT);
+                    let cwd_display = text(shorten_path(&tab.cwd))
+                        .size(12)
+                        .font(MONO_FONT)
+                        .color(theme::TEXT_MUTED);
+
+                    let input_field = text_input("Type a command...", &tab.input)
+                        .id(input_id())
+                        .on_input(Message::InputChanged)
+                        .on_submit(Message::SubmitInput)
+                        .padding([12, 16])
+                        .size(14)
+                        .font(MONO_FONT)
+                        .style(|_, _| text_input::Style {
+                            background: theme::BG_INPUT.into(),
+                            border: Border {
+                                color: theme::BORDER,
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            icon: theme::TEXT_MUTED,
+                            placeholder: theme::TEXT_MUTED,
+                            value: theme::TEXT_PRIMARY,
+                            selection: theme::ACCENT_BLUE,
+                        });
+
+                    let input_row: Element<Message> = container(
+                        column![
+                            cwd_display,
+                            Space::with_height(6),
+                            row![
+                                prompt_symbol,
+                                Space::with_width(12),
+                                input_field
+                            ]
+                        .align_y(Alignment::Center)
+                    ]
+                    .width(Length::Fill),
+                    )
+                    .padding([16, 20])
+                    .style(|_| container::Style {
+                        background: Some(theme::BG_SECONDARY.into()),
+                        border: Border {
+                            color: theme::BORDER,
+                            width: 1.0,
+                            radius: 0.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .into();
+
+                    // ========== Status Bar (Block Mode) ==========
+                    let shell_name = self.get_shell_name();
+                    let mode_indicator = text("BLOCK")
+                        .size(11)
+                        .color(theme::ACCENT_BLUE);
+                    let tab_info = format!("Tab {} of {}", self.active_tab + 1, self.tabs.len());
+
+                    let status_left = row![
+                        text(shell_name).size(12).color(theme::TEXT_MUTED),
+                        Space::with_width(12),
+                        mode_indicator
+                    ];
+
+                    let status_center = text(tab_info)
+                        .size(12)
+                        .color(theme::TEXT_MUTED);
+
+                    let status_right = text("⌘M Toggle | ⌘T New | ⌘W Close")
+                        .size(12)
+                        .color(theme::TEXT_MUTED);
+
+                    let status_bar: Element<Message> = container(
+                        row![
+                            status_left,
+                            Space::with_width(Length::Fill),
+                            status_center,
+                            Space::with_width(Length::Fill),
+                            status_right
+                        ]
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill)
+                    )
+                    .padding([4, 12])
+                    .width(Length::Fill)
+                    .style(|_| container::Style {
+                        background: Some(theme::BG_PRIMARY.into()),
+                        border: Border {
+                            color: theme::BORDER,
+                            width: 1.0,
+                            radius: 0.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .into();
+
+                    column![
+                        container(terminal_content)
+                            .padding([16, 20])
+                            .width(Length::Fill)
+                            .height(Length::Fill),
+                        input_row,
+                        status_bar
+                    ]
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+                }
+            }
         } else {
             column![text("No terminal open").color(theme::TEXT_PRIMARY)].into()
         };
@@ -899,6 +1291,90 @@ impl AgTerm {
             .style(|_| container::Style {
                 background: Some(theme::BG_PRIMARY.into()),
                 ..Default::default()
+            })
+            .into()
+    }
+
+    /// Render raw terminal output (for Raw mode)
+    fn render_raw_terminal(&self, buffer: &str) -> Element<Message> {
+        // Parse the buffer and render with ANSI colors
+        // Get the last N lines to display (terminal scrollback)
+        let lines: Vec<&str> = buffer.lines().collect();
+        let display_lines: Vec<&str> = if lines.len() > 100 {
+            lines[lines.len() - 100..].to_vec()
+        } else {
+            lines
+        };
+
+        let content: Element<Message> = if display_lines.is_empty() {
+            // Show cursor indicator when empty
+            text("█")
+                .size(14)
+                .font(MONO_FONT)
+                .color(theme::TEXT_PRIMARY)
+                .into()
+        } else {
+            column(
+                display_lines
+                    .iter()
+                    .map(|line| {
+                        // Parse ANSI codes for each line
+                        let spans = parse_ansi_text(line);
+                        if spans.is_empty() {
+                            text("").size(14).font(MONO_FONT).into()
+                        } else if spans.len() == 1 && spans[0].color.is_none() {
+                            text(spans[0].text.clone())
+                                .size(14)
+                                .font(MONO_FONT)
+                                .color(theme::TEXT_PRIMARY)
+                                .into()
+                        } else {
+                            row(
+                                spans.into_iter().map(|span| {
+                                    let color = span.color.unwrap_or(theme::TEXT_PRIMARY);
+                                    text(span.text)
+                                        .size(14)
+                                        .font(MONO_FONT)
+                                        .color(color)
+                                        .into()
+                                }).collect::<Vec<Element<Message>>>()
+                            ).into()
+                        }
+                    })
+                    .collect::<Vec<Element<Message>>>(),
+            )
+            .spacing(2)
+            .into()
+        };
+
+        scrollable(content)
+            .height(Length::Fill)
+            .width(Length::Fill)
+            .style(|_, _| scrollable::Style {
+                container: container::Style::default(),
+                vertical_rail: scrollable::Rail {
+                    background: Some(theme::BG_BLOCK.into()),
+                    border: Border::default(),
+                    scroller: scrollable::Scroller {
+                        color: theme::BG_BLOCK_HOVER,
+                        border: Border {
+                            radius: 4.0.into(),
+                            ..Default::default()
+                        },
+                    },
+                },
+                horizontal_rail: scrollable::Rail {
+                    background: Some(theme::BG_BLOCK.into()),
+                    border: Border::default(),
+                    scroller: scrollable::Scroller {
+                        color: theme::BG_BLOCK_HOVER,
+                        border: Border {
+                            radius: 4.0.into(),
+                            ..Default::default()
+                        },
+                    },
+                },
+                gap: None,
             })
             .into()
     }
@@ -1038,11 +1514,30 @@ impl AgTerm {
                     .output
                     .iter()
                     .map(|line| {
-                        text(line)
-                            .size(13)
-                            .font(MONO_FONT)
-                            .color(theme::TEXT_SECONDARY)
-                            .into()
+                        // Parse ANSI codes and render with colors
+                        let spans = parse_ansi_text(line);
+                        if spans.is_empty() {
+                            Space::with_height(0).into()
+                        } else if spans.len() == 1 && spans[0].color.is_none() {
+                            // Simple case: no colors, just text (clone to own)
+                            text(spans[0].text.clone())
+                                .size(13)
+                                .font(MONO_FONT)
+                                .color(theme::TEXT_SECONDARY)
+                                .into()
+                        } else {
+                            // Multiple spans with colors
+                            row(
+                                spans.into_iter().map(|span| {
+                                    let color = span.color.unwrap_or(theme::TEXT_SECONDARY);
+                                    text(span.text)
+                                        .size(13)
+                                        .font(MONO_FONT)
+                                        .color(color)
+                                        .into()
+                                }).collect::<Vec<Element<Message>>>()
+                            ).into()
+                        }
                     })
                     .collect::<Vec<Element<Message>>>(),
             )
@@ -1080,7 +1575,19 @@ impl AgTerm {
             Some(Message::KeyPressed(key, modifiers))
         });
 
-        Subscription::batch([timer, keyboard])
+        // Listen for window resize events
+        let window_events = iced::event::listen_with(|event, _status, _id| {
+            if let iced::Event::Window(iced::window::Event::Resized(size)) = event {
+                Some(Message::WindowResized {
+                    width: size.width as u32,
+                    height: size.height as u32,
+                })
+            } else {
+                None
+            }
+        });
+
+        Subscription::batch([timer, keyboard, window_events])
     }
 }
 
@@ -1198,12 +1705,14 @@ mod tests {
             session_id: None, // No actual PTY for tests
             blocks: Vec::new(),
             pending_output: vec!["Test Welcome".to_string()],
+            raw_output_buffer: String::new(),
             input: String::new(),
             cwd: "/test/path".to_string(),
             error_message: None,
             history: Vec::new(),
             history_index: None,
             history_temp_input: String::new(),
+            mode: TerminalMode::Block, // Use Block mode for tests to maintain compatibility
         };
 
         AgTerm {
