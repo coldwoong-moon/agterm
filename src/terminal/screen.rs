@@ -3,6 +3,7 @@
 use iced::Color;
 use std::cmp::{max, min};
 use vte::{Params, Parser, Perform};
+use std::collections::VecDeque;
 
 /// Maximum scrollback buffer lines
 const MAX_SCROLLBACK: usize = 10000;
@@ -132,7 +133,7 @@ pub struct TerminalScreen {
     /// Screen buffer (rows x cols) - only visible lines
     buffer: Vec<Vec<Cell>>,
     /// Scrollback buffer (historical lines)
-    scrollback: Vec<Vec<Cell>>,
+    scrollback: VecDeque<Vec<Cell>>,
     /// Cursor position
     cursor_row: usize,
     cursor_col: usize,
@@ -160,7 +161,7 @@ pub struct TerminalScreen {
     /// Alternate screen buffer (for applications like vim, less, etc.)
     alternate_buffer: Option<Vec<Vec<Cell>>>,
     /// Alternate scrollback buffer
-    alternate_scrollback: Option<Vec<Vec<Cell>>>,
+    alternate_scrollback: Option<VecDeque<Vec<Cell>>>,
     /// Whether we're currently using the alternate screen
     use_alternate_screen: bool,
     /// Saved cursor position for alternate screen
@@ -169,6 +170,8 @@ pub struct TerminalScreen {
     mouse_mode: MouseMode,
     /// Mouse encoding mode
     mouse_encoding: MouseEncoding,
+    /// Cursor visibility (DECTCEM)
+    cursor_visible: bool,
 }
 
 impl TerminalScreen {
@@ -181,7 +184,7 @@ impl TerminalScreen {
             cols,
             rows,
             buffer: vec![vec![Cell::default(); cols]; rows],
-            scrollback: Vec::new(),
+            scrollback: VecDeque::new(),
             cursor_row: 0,
             cursor_col: 0,
             current_fg: None,
@@ -202,6 +205,7 @@ impl TerminalScreen {
             alternate_saved_cursor: None,
             mouse_mode: MouseMode::None,
             mouse_encoding: MouseEncoding::Default,
+            cursor_visible: true,
         }
     }
 
@@ -229,7 +233,7 @@ impl TerminalScreen {
             let lines_to_save = self.rows - rows;
             for i in 0..lines_to_save {
                 if i < self.buffer.len() {
-                    self.scrollback.push(self.buffer[i].clone());
+                    self.scrollback.push_back(self.buffer[i].clone());
                 }
             }
             // Limit scrollback
@@ -254,7 +258,7 @@ impl TerminalScreen {
 
     /// Get all lines (scrollback + visible) for rendering
     pub fn get_all_lines(&self) -> Vec<Vec<Cell>> {
-        let mut all_lines = self.scrollback.clone();
+        let mut all_lines: Vec<Vec<Cell>> = self.scrollback.iter().cloned().collect();
         all_lines.extend(self.buffer.clone());
         all_lines
     }
@@ -326,6 +330,11 @@ impl TerminalScreen {
         self.mouse_mode != MouseMode::None
     }
 
+    /// Get cursor visibility state
+    pub fn cursor_visible(&self) -> bool {
+        self.cursor_visible
+    }
+
     /// Scroll screen up by n lines
     fn scroll_up(&mut self, n: usize) {
         let (top, bottom) = self.scroll_region.unwrap_or((0, self.rows - 1));
@@ -333,9 +342,9 @@ impl TerminalScreen {
         for _ in 0..n {
             // Save top line to scrollback
             if top == 0 {
-                self.scrollback.push(self.buffer[top].clone());
+                self.scrollback.push_back(self.buffer[top].clone());
                 if self.scrollback.len() > MAX_SCROLLBACK {
-                    self.scrollback.remove(0);
+                    self.scrollback.pop_front();
                 }
             }
 
@@ -464,7 +473,7 @@ impl TerminalScreen {
 
             // Create fresh alternate screen
             self.buffer = vec![vec![Cell::default(); self.cols]; self.rows];
-            self.scrollback = Vec::new();
+            self.scrollback = VecDeque::new();
             self.cursor_row = 0;
             self.cursor_col = 0;
             self.scroll_region = None;
@@ -710,6 +719,10 @@ impl Perform for TerminalScreen {
                         // Any-Event Mouse Tracking (CSI ?1003h)
                         self.mouse_mode = MouseMode::AnyEvent;
                     }
+                    25 => {
+                        // DECTCEM - Show Cursor (CSI ?25h)
+                        self.cursor_visible = true;
+                    }
                     1006 => {
                         // SGR Extended Mouse Mode (CSI ?1006h)
                         self.mouse_encoding = MouseEncoding::Sgr;
@@ -738,6 +751,10 @@ impl Perform for TerminalScreen {
                     9 | 1000 | 1002 | 1003 => {
                         // Disable mouse reporting (CSI ?9l, ?1000l, ?1002l, ?1003l)
                         self.mouse_mode = MouseMode::None;
+                    }
+                    25 => {
+                        // DECTCEM - Hide Cursor (CSI ?25l)
+                        self.cursor_visible = false;
                     }
                     1006 => {
                         // Disable SGR Extended Mouse Mode (CSI ?1006l)
@@ -944,5 +961,46 @@ mod tests {
         assert_eq!(screen.mouse_mode(), MouseMode::X10);
         screen.process(b"\x1b[?9l");
         assert_eq!(screen.mouse_mode(), MouseMode::None);
+    }
+
+    #[test]
+    fn test_cursor_visible_default() {
+        let screen = TerminalScreen::new(80, 24);
+        assert!(screen.cursor_visible());
+    }
+
+    #[test]
+    fn test_cursor_hide() {
+        let mut screen = TerminalScreen::new(80, 24);
+        // CSI ?25l - Hide cursor (DECTCEM)
+        screen.process(b"\x1b[?25l");
+        assert!(!screen.cursor_visible());
+    }
+
+    #[test]
+    fn test_cursor_show() {
+        let mut screen = TerminalScreen::new(80, 24);
+        // Hide first
+        screen.process(b"\x1b[?25l");
+        assert!(!screen.cursor_visible());
+        // CSI ?25h - Show cursor (DECTCEM)
+        screen.process(b"\x1b[?25h");
+        assert!(screen.cursor_visible());
+    }
+
+    #[test]
+    fn test_cursor_toggle() {
+        let mut screen = TerminalScreen::new(80, 24);
+        // Default is visible
+        assert!(screen.cursor_visible());
+        // Hide
+        screen.process(b"\x1b[?25l");
+        assert!(!screen.cursor_visible());
+        // Show
+        screen.process(b"\x1b[?25h");
+        assert!(screen.cursor_visible());
+        // Hide again
+        screen.process(b"\x1b[?25l");
+        assert!(!screen.cursor_visible());
     }
 }

@@ -185,31 +185,63 @@ impl<'a> TerminalCanvas<'a> {
     }
 
     fn draw_line(&self, frame: &mut Frame, spans: &[StyledSpan], y: f32) {
+        if spans.is_empty() {
+            return;
+        }
+
         let mut x = config::PADDING_LEFT;
+        let mut merged_text = String::new();
+        let mut current_color = spans[0].color;
+        let mut segment_start_x = x;
 
         for span in spans {
             if span.text.is_empty() {
                 continue;
             }
 
-            let color = span.color.unwrap_or(self.default_color);
+            let span_color = span.color.unwrap_or(self.default_color);
+            let current = current_color.unwrap_or(self.default_color);
 
-            let text = Text {
-                content: span.text.clone(),
-                position: Point::new(x, y),
-                color,
-                size: config::FONT_SIZE.into(),
-                font: self.font,
-                horizontal_alignment: iced::alignment::Horizontal::Left,
-                vertical_alignment: iced::alignment::Vertical::Top,
-                ..Default::default()
-            };
-
-            frame.fill_text(text);
+            if span_color == current {
+                // Same color - merge with current segment
+                if merged_text.is_empty() {
+                    current_color = span.color;
+                    segment_start_x = x;
+                }
+                merged_text.push_str(&span.text);
+            } else {
+                // Different color - draw accumulated segment and start new one
+                if !merged_text.is_empty() {
+                    self.draw_text_segment(frame, &merged_text, segment_start_x, y.round(), current);
+                }
+                merged_text = span.text.clone();
+                current_color = span.color;
+                segment_start_x = x;
+            }
 
             // Advance x position
             x += span.text.chars().count() as f32 * config::CHAR_WIDTH;
         }
+
+        // Draw final segment
+        if !merged_text.is_empty() {
+            let color = current_color.unwrap_or(self.default_color);
+            self.draw_text_segment(frame, &merged_text, segment_start_x, y.round(), color);
+        }
+    }
+
+    fn draw_text_segment(&self, frame: &mut Frame, text: &str, x: f32, y: f32, color: Color) {
+        let text_obj = Text {
+            content: text.to_string(),
+            position: Point::new(x, y),
+            color,
+            size: config::FONT_SIZE.into(),
+            font: self.font,
+            horizontal_alignment: iced::alignment::Horizontal::Left,
+            vertical_alignment: iced::alignment::Vertical::Top,
+            ..Default::default()
+        };
+        frame.fill_text(text_obj);
     }
 
     fn draw_cursor(&self, frame: &mut Frame, state: &TerminalCanvasState, bounds: Rectangle) {

@@ -956,7 +956,7 @@ impl AgTerm {
                     .width(Length::Fill)
                     .height(Length::Fill)
                 )
-                .padding([8, 12])
+                .padding([16, 12]) // Top padding for spacing from tab bar
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(|_| container::Style {
@@ -975,13 +975,13 @@ impl AgTerm {
         // ========== Main Layout ==========
         let terminal_area = column![
             container(tab_bar)
-                .padding([8, 12])
+                .padding([10, 16])
                 .width(Length::Fill)
                 .style(|_| container::Style {
                     background: Some(theme::BG_PRIMARY.into()),
                     border: Border {
                         color: theme::BORDER,
-                        width: 0.0,
+                        width: 1.0,
                         radius: 0.0.into(),
                     },
                     ..Default::default()
@@ -1027,7 +1027,7 @@ impl AgTerm {
             row: cursor_row,
             col: cursor_col,
             style: CursorStyle::Block,
-            visible: true,
+            visible: tab.screen.cursor_visible(),
             blink_on: tab.cursor_blink_on,
         };
 
