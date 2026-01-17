@@ -1,8 +1,8 @@
-//! SQLite Database
+//! `SQLite` Database
 //!
 //! Core database connection and configuration.
 
-use rusqlite::{Connection, OpenFlags, Result as SqliteResult};
+use rusqlite::{Connection, OpenFlags};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -58,6 +58,7 @@ impl Default for DatabaseConfig {
 
 impl DatabaseConfig {
     /// Create config for in-memory database
+    #[must_use]
     pub fn in_memory() -> Self {
         Self {
             path: PathBuf::from(":memory:"),
@@ -127,12 +128,12 @@ impl Database {
 
         // Set journal size limit
         if let Some(limit) = config.journal_size_limit {
-            conn.execute_batch(&format!("PRAGMA journal_size_limit = {};", limit))?;
+            conn.execute_batch(&format!("PRAGMA journal_size_limit = {limit};"))?;
         }
 
         // Set cache size
         if let Some(size) = config.cache_size {
-            conn.execute_batch(&format!("PRAGMA cache_size = {};", size))?;
+            conn.execute_batch(&format!("PRAGMA cache_size = {size};"))?;
         }
 
         // Performance optimizations
@@ -148,11 +149,13 @@ impl Database {
     }
 
     /// Get database path
+    #[must_use]
     pub fn path(&self) -> &Path {
         &self.config.path
     }
 
     /// Get config
+    #[must_use]
     pub fn config(&self) -> &DatabaseConfig {
         &self.config
     }
@@ -195,12 +198,10 @@ impl Database {
     }
 
     /// Check if database exists and is valid
+    #[must_use]
     pub fn is_valid(&self) -> bool {
-        self.with_connection(|conn| {
-            conn.execute_batch("SELECT 1;")
-                .map_err(DatabaseError::from)
-        })
-        .is_ok()
+        self.with_connection(|conn| conn.execute_batch("SELECT 1;").map_err(DatabaseError::from))
+            .is_ok()
     }
 
     /// Get database size in bytes
@@ -231,7 +232,7 @@ impl Database {
     pub fn table_count(&self, table: &str) -> DatabaseResult<i64> {
         self.with_connection(|conn| {
             let count: i64 =
-                conn.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| {
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                     row.get(0)
                 })?;
             Ok(count)

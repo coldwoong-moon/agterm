@@ -16,12 +16,13 @@ use std::collections::HashMap;
 pub struct TaskGraph {
     /// The underlying directed graph
     graph: DiGraph<TaskNode, TaskEdge>,
-    /// Map from TaskId to NodeIndex for fast lookup
+    /// Map from `TaskId` to `NodeIndex` for fast lookup
     id_to_index: HashMap<TaskId, NodeIndex>,
 }
 
 impl TaskGraph {
     /// Create a new empty task graph
+    #[must_use]
     pub fn new() -> Self {
         Self {
             graph: DiGraph::new(),
@@ -30,11 +31,13 @@ impl TaskGraph {
     }
 
     /// Get the number of tasks
+    #[must_use]
     pub fn task_count(&self) -> usize {
         self.graph.node_count()
     }
 
     /// Check if the graph is empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.graph.node_count() == 0
     }
@@ -58,6 +61,7 @@ impl TaskGraph {
     }
 
     /// Get a reference to a task
+    #[must_use]
     pub fn get_task(&self, task_id: &TaskId) -> Option<&TaskNode> {
         self.id_to_index
             .get(task_id)
@@ -83,11 +87,11 @@ impl TaskGraph {
         let from_idx = self
             .id_to_index
             .get(from)
-            .ok_or_else(|| TaskError::NotFound { id: *from })?;
+            .ok_or(TaskError::NotFound { id: *from })?;
         let to_idx = self
             .id_to_index
             .get(to)
-            .ok_or_else(|| TaskError::NotFound { id: *to })?;
+            .ok_or(TaskError::NotFound { id: *to })?;
 
         self.graph.add_edge(*from_idx, *to_idx, edge_type);
 
@@ -106,6 +110,7 @@ impl TaskGraph {
     }
 
     /// Check if the graph has a cycle
+    #[must_use]
     pub fn has_cycle(&self) -> bool {
         toposort(&self.graph, None).is_err()
     }
@@ -131,6 +136,7 @@ impl TaskGraph {
     }
 
     /// Get direct dependencies of a task (tasks that must complete before this one)
+    #[must_use]
     pub fn get_dependencies(&self, task_id: &TaskId) -> Vec<TaskId> {
         let Some(&index) = self.id_to_index.get(task_id) else {
             return Vec::new();
@@ -138,15 +144,12 @@ impl TaskGraph {
 
         self.graph
             .edges_directed(index, Direction::Incoming)
-            .filter_map(|edge| {
-                self.graph
-                    .node_weight(edge.source())
-                    .map(|task| task.id)
-            })
+            .filter_map(|edge| self.graph.node_weight(edge.source()).map(|task| task.id))
             .collect()
     }
 
     /// Get direct dependents of a task (tasks that depend on this one)
+    #[must_use]
     pub fn get_dependents(&self, task_id: &TaskId) -> Vec<TaskId> {
         let Some(&index) = self.id_to_index.get(task_id) else {
             return Vec::new();
@@ -154,25 +157,22 @@ impl TaskGraph {
 
         self.graph
             .edges_directed(index, Direction::Outgoing)
-            .filter_map(|edge| {
-                self.graph
-                    .node_weight(edge.target())
-                    .map(|task| task.id)
-            })
+            .filter_map(|edge| self.graph.node_weight(edge.target()).map(|task| task.id))
             .collect()
     }
 
     /// Check if all dependencies of a task are completed
+    #[must_use]
     pub fn dependencies_satisfied(&self, task_id: &TaskId) -> bool {
         let deps = self.get_dependencies(task_id);
         deps.iter().all(|dep_id| {
             self.get_task(dep_id)
-                .map(|t| t.status == TaskStatus::Completed)
-                .unwrap_or(false)
+                .is_some_and(|t| t.status == TaskStatus::Completed)
         })
     }
 
     /// Check if any dependency of a task has failed
+    #[must_use]
     pub fn has_failed_dependency(&self, task_id: &TaskId) -> bool {
         let Some(&index) = self.id_to_index.get(task_id) else {
             return false;
@@ -185,14 +185,14 @@ impl TaskGraph {
                 if *edge.weight() == TaskEdge::SoftDependsOn {
                     return false;
                 }
-                self.graph
-                    .node_weight(edge.source())
-                    .map(|t| t.status == TaskStatus::Failed || t.status == TaskStatus::Cancelled)
-                    .unwrap_or(false)
+                self.graph.node_weight(edge.source()).is_some_and(|t| {
+                    t.status == TaskStatus::Failed || t.status == TaskStatus::Cancelled
+                })
             })
     }
 
     /// Get all tasks that are ready to run (pending with satisfied dependencies)
+    #[must_use]
     pub fn get_ready_tasks(&self) -> Vec<TaskId> {
         self.graph
             .node_indices()
@@ -208,6 +208,7 @@ impl TaskGraph {
     }
 
     /// Get all tasks with a specific status
+    #[must_use]
     pub fn get_tasks_by_status(&self, status: TaskStatus) -> Vec<TaskId> {
         self.graph
             .node_indices()
@@ -223,13 +224,16 @@ impl TaskGraph {
     }
 
     /// Get all tasks
+    #[must_use]
     pub fn all_tasks(&self) -> Vec<&TaskNode> {
-        self.graph.node_indices()
+        self.graph
+            .node_indices()
             .filter_map(|idx| self.graph.node_weight(idx))
             .collect()
     }
 
     /// Get all task IDs
+    #[must_use]
     pub fn all_task_ids(&self) -> Vec<TaskId> {
         self.graph
             .node_indices()
@@ -241,7 +245,7 @@ impl TaskGraph {
     pub fn start_task(&mut self, task_id: &TaskId, pty_id: PtyId) -> TResult<()> {
         let task = self
             .get_task_mut(task_id)
-            .ok_or_else(|| TaskError::NotFound { id: *task_id })?;
+            .ok_or(TaskError::NotFound { id: *task_id })?;
 
         if !task.status.is_runnable() {
             return Err(TaskError::InvalidStateTransition {
@@ -258,7 +262,7 @@ impl TaskGraph {
     pub fn complete_task(&mut self, task_id: &TaskId, result: TaskResult) -> TResult<()> {
         let task = self
             .get_task_mut(task_id)
-            .ok_or_else(|| TaskError::NotFound { id: *task_id })?;
+            .ok_or(TaskError::NotFound { id: *task_id })?;
 
         task.complete(result);
         Ok(())
@@ -268,7 +272,7 @@ impl TaskGraph {
     pub fn cancel_task(&mut self, task_id: &TaskId) -> TResult<()> {
         let task = self
             .get_task_mut(task_id)
-            .ok_or_else(|| TaskError::NotFound { id: *task_id })?;
+            .ok_or(TaskError::NotFound { id: *task_id })?;
 
         if task.status.is_terminal() {
             return Err(TaskError::CannotCancel {
@@ -285,7 +289,7 @@ impl TaskGraph {
     pub fn skip_task(&mut self, task_id: &TaskId) -> TResult<()> {
         let task = self
             .get_task_mut(task_id)
-            .ok_or_else(|| TaskError::NotFound { id: *task_id })?;
+            .ok_or(TaskError::NotFound { id: *task_id })?;
 
         task.skip();
         Ok(())
@@ -311,46 +315,37 @@ impl TaskGraph {
     }
 
     /// Get root tasks (tasks with no dependencies)
+    #[must_use]
     pub fn get_root_tasks(&self) -> Vec<TaskId> {
         self.graph
             .node_indices()
-            .filter(|&idx| {
-                self.graph
-                    .edges_directed(idx, Direction::Incoming)
-                    .count()
-                    == 0
-            })
+            .filter(|&idx| self.graph.edges_directed(idx, Direction::Incoming).count() == 0)
             .filter_map(|idx| self.graph.node_weight(idx).map(|t| t.id))
             .collect()
     }
 
     /// Get leaf tasks (tasks with no dependents)
+    #[must_use]
     pub fn get_leaf_tasks(&self) -> Vec<TaskId> {
         self.graph
             .node_indices()
-            .filter(|&idx| {
-                self.graph
-                    .edges_directed(idx, Direction::Outgoing)
-                    .count()
-                    == 0
-            })
+            .filter(|&idx| self.graph.edges_directed(idx, Direction::Outgoing).count() == 0)
             .filter_map(|idx| self.graph.node_weight(idx).map(|t| t.id))
             .collect()
     }
 
     /// Check if all tasks are complete (terminal state)
+    #[must_use]
     pub fn is_complete(&self) -> bool {
-        self.graph
-            .node_indices()
-            .all(|idx| {
-                self.graph
-                    .node_weight(idx)
-                    .map(|t| t.status.is_terminal())
-                    .unwrap_or(true)
-            })
+        self.graph.node_indices().all(|idx| {
+            self.graph
+                .node_weight(idx)
+                .map_or(true, |t| t.status.is_terminal())
+        })
     }
 
     /// Get completion statistics
+    #[must_use]
     pub fn statistics(&self) -> TaskStatistics {
         let mut stats = TaskStatistics::default();
         for idx in self.graph.node_indices() {
@@ -400,6 +395,7 @@ pub struct TaskStatistics {
 
 impl TaskStatistics {
     /// Get progress as percentage (0-100)
+    #[must_use]
     pub fn progress_percent(&self) -> f32 {
         if self.total == 0 {
             return 100.0;
@@ -409,11 +405,13 @@ impl TaskStatistics {
     }
 
     /// Check if all tasks are done
+    #[must_use]
     pub fn is_done(&self) -> bool {
         self.pending == 0 && self.blocked == 0 && self.running == 0
     }
 
     /// Check if there are any failures
+    #[must_use]
     pub fn has_failures(&self) -> bool {
         self.failed > 0
     }

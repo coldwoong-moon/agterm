@@ -5,8 +5,8 @@
 use crate::infrastructure::mcp::server_config::{McpServerConfig, McpTransport};
 use rmcp::{
     model::{
-        CallToolRequestParam, CallToolResult, ClientInfo, ListToolsResult,
-        PaginatedRequestParam, ServerInfo, Tool,
+        CallToolRequestParam, CallToolResult, ClientInfo, ListToolsResult, PaginatedRequestParam,
+        ServerInfo, Tool,
     },
     service::{Peer, RunningService},
     transport::TokioChildProcess,
@@ -79,6 +79,7 @@ pub struct McpClient {
 
 impl McpClient {
     /// Create a new MCP client (not connected)
+    #[must_use]
     pub fn new(config: McpServerConfig) -> Self {
         Self {
             config,
@@ -90,26 +91,31 @@ impl McpClient {
     }
 
     /// Get the server configuration
+    #[must_use]
     pub fn config(&self) -> &McpServerConfig {
         &self.config
     }
 
     /// Get the connection status
+    #[must_use]
     pub fn status(&self) -> ConnectionStatus {
         self.status
     }
 
     /// Check if connected
+    #[must_use]
     pub fn is_connected(&self) -> bool {
         self.status == ConnectionStatus::Connected && self.service.is_some()
     }
 
     /// Get server info (if connected)
+    #[must_use]
     pub fn server_info(&self) -> Option<&ServerInfo> {
         self.server_info.as_ref()
     }
 
     /// Get cached tools
+    #[must_use]
     pub fn tools(&self) -> &[Tool] {
         &self.cached_tools
     }
@@ -118,7 +124,7 @@ impl McpClient {
     fn peer(&self) -> McpClientResult<&Peer<RoleClient>> {
         self.service
             .as_ref()
-            .map(|s| s.peer())
+            .map(rmcp::service::RunningService::peer)
             .ok_or(McpClientError::NotConnected)
     }
 
@@ -146,8 +152,7 @@ impl McpClient {
             McpTransport::Sse { url, .. } => {
                 // SSE transport not yet fully supported in this version
                 Err(McpClientError::InvalidConfig(format!(
-                    "SSE transport not yet supported. URL: {}",
-                    url
+                    "SSE transport not yet supported. URL: {url}"
                 )))
             }
         };
@@ -281,6 +286,7 @@ impl McpClient {
 pub type McpClientHandle = Arc<RwLock<McpClient>>;
 
 /// Create a new client handle
+#[must_use]
 pub fn create_client_handle(config: McpServerConfig) -> McpClientHandle {
     Arc::new(RwLock::new(McpClient::new(config)))
 }

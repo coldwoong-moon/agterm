@@ -99,28 +99,39 @@ impl McpServerConfig {
     }
 
     /// Set auto-connect
+    #[must_use]
     pub fn with_auto_connect(mut self, auto_connect: bool) -> Self {
         self.auto_connect = auto_connect;
         self
     }
 
     /// Set timeout
+    #[must_use]
     pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
         self.timeout_ms = timeout_ms;
         self
     }
 
     /// Add command arguments (for stdio transport)
+    #[must_use]
     pub fn with_args(mut self, args: Vec<String>) -> Self {
-        if let McpTransport::Stdio { args: ref mut a, .. } = self.transport {
+        if let McpTransport::Stdio {
+            args: ref mut a, ..
+        } = self.transport
+        {
             *a = args;
         }
         self
     }
 
     /// Set working directory (for stdio transport)
+    #[must_use]
     pub fn with_working_dir(mut self, dir: PathBuf) -> Self {
-        if let McpTransport::Stdio { working_dir: ref mut w, .. } = self.transport {
+        if let McpTransport::Stdio {
+            working_dir: ref mut w,
+            ..
+        } = self.transport
+        {
             *w = Some(dir);
         }
         self
@@ -136,18 +147,24 @@ impl McpServerConfig {
 
     /// Set auth token (for SSE transport)
     pub fn with_auth_token(mut self, token: impl Into<String>) -> Self {
-        if let McpTransport::Sse { auth_token: ref mut t, .. } = self.transport {
+        if let McpTransport::Sse {
+            auth_token: ref mut t,
+            ..
+        } = self.transport
+        {
             *t = Some(token.into());
         }
         self
     }
 
     /// Check if this is a stdio transport
+    #[must_use]
     pub fn is_stdio(&self) -> bool {
         matches!(self.transport, McpTransport::Stdio { .. })
     }
 
     /// Check if this is an SSE transport
+    #[must_use]
     pub fn is_sse(&self) -> bool {
         matches!(self.transport, McpTransport::Sse { .. })
     }
@@ -192,8 +209,7 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let config = McpServerConfig::stdio("test", "echo")
-            .with_args(vec!["hello".to_string()]);
+        let config = McpServerConfig::stdio("test", "echo").with_args(vec!["hello".to_string()]);
 
         let json = serde_json::to_string(&config).unwrap();
         let parsed: McpServerConfig = serde_json::from_str(&json).unwrap();

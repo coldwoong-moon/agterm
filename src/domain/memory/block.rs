@@ -50,6 +50,7 @@ pub struct MemoryBlock {
 
 impl MemoryBlock {
     /// Create a new memory block
+    #[must_use]
     pub fn new(label: MemoryBlockLabel, token_limit: usize) -> Self {
         Self {
             label,
@@ -75,16 +76,19 @@ impl MemoryBlock {
     }
 
     /// Check if the block is over the token limit
+    #[must_use]
     pub fn is_over_limit(&self) -> bool {
         self.current_tokens > self.token_limit
     }
 
     /// Get remaining token capacity
+    #[must_use]
     pub fn remaining_tokens(&self) -> usize {
         self.token_limit.saturating_sub(self.current_tokens)
     }
 
     /// Get usage ratio (0.0 - 1.0+)
+    #[must_use]
     pub fn usage_ratio(&self) -> f64 {
         if self.token_limit == 0 {
             0.0
@@ -126,6 +130,7 @@ impl MemoryBlock {
 
 /// Estimate token count from string
 /// Uses a simple heuristic: ~4 characters per token for English text
+#[must_use]
 pub fn estimate_tokens(text: &str) -> usize {
     // More accurate heuristic:
     // - Words + punctuation + special characters
@@ -141,6 +146,7 @@ pub fn estimate_tokens(text: &str) -> usize {
 }
 
 /// Default token limits for each block type
+#[must_use]
 pub fn default_token_limit(label: MemoryBlockLabel) -> usize {
     match label {
         MemoryBlockLabel::WorkingContext => 500,
@@ -159,11 +165,13 @@ pub struct MemoryBlocks {
 
 impl MemoryBlocks {
     /// Create a new empty collection
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Create with default blocks
+    #[must_use]
     pub fn with_defaults() -> Self {
         let mut blocks = Self::new();
 
@@ -197,6 +205,7 @@ impl MemoryBlocks {
     }
 
     /// Get a block by label
+    #[must_use]
     pub fn get(&self, label: MemoryBlockLabel) -> Option<&MemoryBlock> {
         self.blocks.get(&label)
     }
@@ -214,6 +223,7 @@ impl MemoryBlocks {
     }
 
     /// Get total token count across all blocks
+    #[must_use]
     pub fn total_tokens(&self) -> usize {
         self.blocks.values().map(|b| b.current_tokens).sum()
     }
@@ -224,15 +234,13 @@ impl MemoryBlocks {
     }
 
     /// Render all blocks as formatted string
+    #[must_use]
     pub fn render(&self) -> String {
         let mut output = String::new();
 
         for block in self.blocks.values() {
             if !block.value.is_empty() {
-                output.push_str(&format!(
-                    "## {}\n{}\n\n",
-                    block.label, block.value
-                ));
+                output.push_str(&format!("## {}\n{}\n\n", block.label, block.value));
             }
         }
 

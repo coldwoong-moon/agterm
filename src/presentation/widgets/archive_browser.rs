@@ -37,6 +37,7 @@ pub struct ArchiveBrowserState {
 
 impl ArchiveBrowserState {
     /// Create new state
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -50,11 +51,13 @@ impl ArchiveBrowserState {
     }
 
     /// Get all archives
+    #[must_use]
     pub fn archives(&self) -> &[SessionArchive] {
         &self.archives
     }
 
     /// Get filtered archives
+    #[must_use]
     pub fn filtered_archives(&self) -> Vec<&SessionArchive> {
         self.filtered_indices
             .iter()
@@ -63,6 +66,7 @@ impl ArchiveBrowserState {
     }
 
     /// Get currently selected archive
+    #[must_use]
     pub fn selected_archive(&self) -> Option<&SessionArchive> {
         self.filtered_indices
             .get(self.selected)
@@ -175,7 +179,7 @@ pub struct ArchiveBrowser<'a> {
     show_search: bool,
 }
 
-impl<'a> Default for ArchiveBrowser<'a> {
+impl Default for ArchiveBrowser<'_> {
     fn default() -> Self {
         Self {
             title: "Archives",
@@ -189,32 +193,37 @@ impl<'a> Default for ArchiveBrowser<'a> {
 }
 
 impl<'a> ArchiveBrowser<'a> {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn title(mut self, title: &'a str) -> Self {
         self.title = title;
         self
     }
 
+    #[must_use]
     pub fn border_style(mut self, style: Style) -> Self {
         self.border_style = style;
         self
     }
 
+    #[must_use]
     pub fn selected_style(mut self, style: Style) -> Self {
         self.selected_style = style;
         self
     }
 
+    #[must_use]
     pub fn show_search(mut self, show: bool) -> Self {
         self.show_search = show;
         self
     }
 }
 
-impl<'a> StatefulWidget for ArchiveBrowser<'a> {
+impl StatefulWidget for ArchiveBrowser<'_> {
     type State = ArchiveBrowserState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
@@ -251,18 +260,16 @@ impl<'a> StatefulWidget for ArchiveBrowser<'a> {
                 &state.search_query
             };
 
-            let search = Paragraph::new(search_text)
-                .style(search_style)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Search")
-                        .border_style(if state.search_focused {
-                            Style::default().fg(Color::Yellow)
-                        } else {
-                            Style::default()
-                        }),
-                );
+            let search = Paragraph::new(search_text).style(search_style).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Search")
+                    .border_style(if state.search_focused {
+                        Style::default().fg(Color::Yellow)
+                    } else {
+                        Style::default()
+                    }),
+            );
 
             search.render(search_area, buf);
         }
@@ -280,11 +287,10 @@ impl<'a> StatefulWidget for ArchiveBrowser<'a> {
                 };
 
                 let date = archive.period.0.format("%Y-%m-%d %H:%M");
-                let dir = archive
-                    .working_dir
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| archive.working_dir.to_string_lossy().to_string());
+                let dir = archive.working_dir.file_name().map_or_else(
+                    || archive.working_dir.to_string_lossy().to_string(),
+                    |n| n.to_string_lossy().to_string(),
+                );
 
                 // Truncate summary
                 let summary: String = archive
@@ -296,11 +302,11 @@ impl<'a> StatefulWidget for ArchiveBrowser<'a> {
 
                 let line = Line::from(vec![
                     Span::styled(
-                        format!("{} ", compression_icon),
+                        format!("{compression_icon} "),
                         Style::default().fg(Color::Cyan),
                     ),
-                    Span::styled(format!("{} ", date), Style::default().fg(Color::DarkGray)),
-                    Span::styled(format!("[{}] ", dir), Style::default().fg(Color::Green)),
+                    Span::styled(format!("{date} "), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("[{dir}] "), Style::default().fg(Color::Green)),
                     Span::raw(summary),
                 ]);
 
@@ -354,8 +360,8 @@ impl<'a> StatefulWidget for ArchiveBrowser<'a> {
 /// Render archive detail popup
 fn render_archive_detail(archive: &SessionArchive, area: Rect, buf: &mut Buffer) {
     // Calculate popup area (centered, 80% width, 70% height)
-    let popup_width = (area.width as f32 * 0.8) as u16;
-    let popup_height = (area.height as f32 * 0.7) as u16;
+    let popup_width = (f32::from(area.width) * 0.8) as u16;
+    let popup_height = (f32::from(area.height) * 0.7) as u16;
     let popup_x = (area.width - popup_width) / 2;
     let popup_y = (area.height - popup_height) / 2;
 
@@ -374,7 +380,7 @@ fn render_archive_detail(archive: &SessionArchive, area: Rect, buf: &mut Buffer)
 
     let duration = archive.duration_secs();
     let duration_str = if duration < 60.0 {
-        format!("{:.1}s", duration)
+        format!("{duration:.1}s")
     } else if duration < 3600.0 {
         format!("{:.1}m", duration / 60.0)
     } else {
@@ -396,11 +402,17 @@ fn render_archive_detail(archive: &SessionArchive, area: Rect, buf: &mut Buffer)
 
     let content = vec![
         Line::from(vec![
-            Span::styled("Session ID: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Session ID: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(archive.session_id.to_string()),
         ]),
         Line::from(vec![
-            Span::styled("Working Dir: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Working Dir: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(archive.working_dir.to_string_lossy()),
         ]),
         Line::from(vec![
@@ -413,7 +425,10 @@ fn render_archive_detail(archive: &SessionArchive, area: Rect, buf: &mut Buffer)
             )),
         ]),
         Line::from(vec![
-            Span::styled("Compression: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Compression: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(compression_str),
         ]),
         Line::from(vec![
@@ -436,9 +451,12 @@ fn render_archive_detail(archive: &SessionArchive, area: Rect, buf: &mut Buffer)
             )),
         ]),
         Line::from(vec![
-            Span::styled("Success Rate: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::styled(
-                format!("{}%", success_rate),
+                "Success Rate: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{success_rate}%"),
                 if success_rate >= 80 {
                     Style::default().fg(Color::Green)
                 } else if success_rate >= 50 {
@@ -449,7 +467,10 @@ fn render_archive_detail(archive: &SessionArchive, area: Rect, buf: &mut Buffer)
             ),
         ]),
         Line::from(vec![
-            Span::styled("Compression Ratio: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Compression Ratio: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(format!("{:.1}%", metrics.compression_ratio() * 100.0)),
         ]),
         Line::from(""),
@@ -468,10 +489,7 @@ fn render_archive_detail(archive: &SessionArchive, area: Rect, buf: &mut Buffer)
     let inner_layout = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
-        .constraints([
-            Constraint::Length(content.len() as u16),
-            Constraint::Min(3),
-        ])
+        .constraints([Constraint::Length(content.len() as u16), Constraint::Min(3)])
         .split(layout[0]);
 
     // Render popup border
@@ -500,6 +518,7 @@ pub struct CompressionIndicator {
 }
 
 impl CompressionIndicator {
+    #[must_use]
     pub fn new(level: CompressionLevel) -> Self {
         Self { level }
     }

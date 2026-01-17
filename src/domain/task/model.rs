@@ -33,6 +33,7 @@ pub enum TaskStatus {
 
 impl TaskStatus {
     /// Check if the task is in a terminal state
+    #[must_use]
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
@@ -44,11 +45,13 @@ impl TaskStatus {
     }
 
     /// Check if the task is runnable
+    #[must_use]
     pub fn is_runnable(&self) -> bool {
         matches!(self, TaskStatus::Pending)
     }
 
     /// Check if the task is active (running or blocked)
+    #[must_use]
     pub fn is_active(&self) -> bool {
         matches!(self, TaskStatus::Running | TaskStatus::Blocked)
     }
@@ -85,6 +88,7 @@ pub struct TaskResult {
 
 impl TaskResult {
     /// Create a successful result
+    #[must_use]
     pub fn success(stdout: String, duration_ms: u64) -> Self {
         Self {
             exit_code: 0,
@@ -96,6 +100,7 @@ impl TaskResult {
     }
 
     /// Create a failed result
+    #[must_use]
     pub fn failure(exit_code: i32, stderr: String, duration_ms: u64) -> Self {
         Self {
             exit_code,
@@ -107,6 +112,7 @@ impl TaskResult {
     }
 
     /// Check if the result indicates success
+    #[must_use]
     pub fn is_success(&self) -> bool {
         self.exit_code == 0
     }
@@ -185,12 +191,14 @@ impl TaskNode {
     }
 
     /// Builder: set arguments
+    #[must_use]
     pub fn with_args(mut self, args: Vec<String>) -> Self {
         self.args = args;
         self
     }
 
     /// Builder: set working directory
+    #[must_use]
     pub fn with_working_dir(mut self, dir: PathBuf) -> Self {
         self.working_dir = dir;
         self
@@ -203,12 +211,14 @@ impl TaskNode {
     }
 
     /// Builder: set error policy
+    #[must_use]
     pub fn with_error_policy(mut self, policy: ErrorPolicy) -> Self {
         self.error_policy = policy;
         self
     }
 
     /// Builder: set parent task
+    #[must_use]
     pub fn with_parent(mut self, parent_id: TaskId) -> Self {
         self.parent_id = Some(parent_id);
         self
@@ -263,6 +273,7 @@ impl TaskNode {
     }
 
     /// Get execution duration in milliseconds
+    #[must_use]
     pub fn duration_ms(&self) -> Option<u64> {
         match (self.started_at, self.completed_at) {
             (Some(start), Some(end)) => {
@@ -278,9 +289,10 @@ impl TaskNode {
     }
 
     /// Format duration as human-readable string
+    #[must_use]
     pub fn duration_str(&self) -> String {
         match self.duration_ms() {
-            Some(ms) if ms < 1000 => format!("{}ms", ms),
+            Some(ms) if ms < 1000 => format!("{ms}ms"),
             Some(ms) if ms < 60000 => format!("{:.1}s", ms as f64 / 1000.0),
             Some(ms) => format!("{}m {}s", ms / 60000, (ms % 60000) / 1000),
             None => "N/A".to_string(),
@@ -288,6 +300,7 @@ impl TaskNode {
     }
 
     /// Get the full command string
+    #[must_use]
     pub fn full_command(&self) -> String {
         if self.args.is_empty() {
             self.command.clone()

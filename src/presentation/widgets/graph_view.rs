@@ -2,13 +2,12 @@
 //!
 //! A full-screen ASCII art visualization of the task dependency graph.
 
-use crate::domain::task::{TaskGraph, TaskId, TaskNode, TaskStatistics, TaskStatus};
+use crate::domain::task::{TaskGraph, TaskId, TaskNode, TaskStatus};
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget, Wrap},
+    widgets::{Block, Borders, Widget},
 };
 use std::collections::HashMap;
 
@@ -49,6 +48,7 @@ pub struct GraphView<'a> {
 
 impl<'a> GraphView<'a> {
     /// Create a new graph view
+    #[must_use]
     pub fn new(graph: &'a TaskGraph) -> Self {
         Self {
             graph,
@@ -62,12 +62,14 @@ impl<'a> GraphView<'a> {
     }
 
     /// Set the block for borders/title
+    #[must_use]
     pub fn block(mut self, block: Block<'a>) -> Self {
         self.block = Some(block);
         self
     }
 
     /// Set the selected task
+    #[must_use]
     pub fn selected(mut self, task_id: Option<TaskId>) -> Self {
         self.selected = task_id;
         self
@@ -124,8 +126,7 @@ impl<'a> GraphView<'a> {
                 deps.iter()
                     .filter_map(|d| layers.get(d))
                     .max()
-                    .map(|m| m + 1)
-                    .unwrap_or(0)
+                    .map_or(0, |m| m + 1)
             };
             layers.insert(*task_id, layer);
         }
@@ -182,7 +183,9 @@ impl<'a> GraphView<'a> {
         let status_color = Self::status_color(task.status);
 
         let border_style = if is_selected {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(status_color)
         };
@@ -214,16 +217,16 @@ impl<'a> GraphView<'a> {
         };
 
         let icon = Self::status_icon(task.status);
-        let name_line = format!("{} {}", icon, name);
+        let name_line = format!("{icon} {name}");
 
         if inner_rect.y < area.y + area.height {
-            let name_style = Style::default()
-                .fg(status_color)
-                .add_modifier(if task.status == TaskStatus::Running {
+            let name_style = Style::default().fg(status_color).add_modifier(
+                if task.status == TaskStatus::Running {
                     Modifier::BOLD
                 } else {
                     Modifier::empty()
-                });
+                },
+            );
 
             buf.set_string(inner_rect.x, inner_rect.y, &name_line, name_style);
         }
@@ -237,7 +240,12 @@ impl<'a> GraphView<'a> {
                 let bar_width = inner_rect.width as usize;
                 let filled = (bar_width / 2).min(bar_width); // Placeholder progress
                 let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
-                buf.set_string(inner_rect.x, progress_y, &bar, Style::default().fg(Color::Yellow));
+                buf.set_string(
+                    inner_rect.x,
+                    progress_y,
+                    &bar,
+                    Style::default().fg(Color::Yellow),
+                );
             } else {
                 // Duration
                 let duration = task.duration_str();
@@ -252,12 +260,7 @@ impl<'a> GraphView<'a> {
     }
 
     /// Render connection lines between nodes
-    fn render_connections(
-        &self,
-        layouts: &[NodeLayout],
-        area: Rect,
-        buf: &mut Buffer,
-    ) {
+    fn render_connections(&self, layouts: &[NodeLayout], area: Rect, buf: &mut Buffer) {
         let layout_map: HashMap<TaskId, &NodeLayout> =
             layouts.iter().map(|l| (l.task_id, l)).collect();
 
@@ -273,13 +276,7 @@ impl<'a> GraphView<'a> {
     }
 
     /// Render a single connection line
-    fn render_connection(
-        &self,
-        from: &NodeLayout,
-        to: &NodeLayout,
-        area: Rect,
-        buf: &mut Buffer,
-    ) {
+    fn render_connection(&self, from: &NodeLayout, to: &NodeLayout, area: Rect, buf: &mut Buffer) {
         let from_x = from.x + from.width / 2;
         let from_y = from.y + from.height;
         let to_x = to.x + to.width / 2;
@@ -327,14 +324,21 @@ impl<'a> GraphView<'a> {
 
             // Vertical from mid to target
             for y in mid_y..to_y {
-                if y >= area.y && y < area.y + area.height && to_x >= area.x && to_x < area.x + area.width {
+                if y >= area.y
+                    && y < area.y + area.height
+                    && to_x >= area.x
+                    && to_x < area.x + area.width
+                {
                     buf.set_string(to_x, y, "│", line_style);
                 }
             }
 
             // Arrow at target
-            if to_y > 0 && to_y - 1 >= area.y && to_y - 1 < area.y + area.height
-                && to_x >= area.x && to_x < area.x + area.width
+            if to_y > 0
+                && to_y > area.y
+                && to_y - 1 < area.y + area.height
+                && to_x >= area.x
+                && to_x < area.x + area.width
             {
                 buf.set_string(to_x, to_y - 1, "▼", line_style);
             }
@@ -355,7 +359,7 @@ impl<'a> GraphView<'a> {
     }
 }
 
-impl<'a> Widget for GraphView<'a> {
+impl Widget for GraphView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Render block if present
         let inner_area = if let Some(ref block) = self.block {
@@ -417,6 +421,7 @@ pub struct TaskProgressBar<'a> {
 
 impl<'a> TaskProgressBar<'a> {
     /// Create a new progress bar
+    #[must_use]
     pub fn new(task: &'a TaskNode) -> Self {
         Self {
             task,
@@ -427,19 +432,21 @@ impl<'a> TaskProgressBar<'a> {
     }
 
     /// Set the progress (0.0 - 1.0)
+    #[must_use]
     pub fn progress(mut self, progress: f32) -> Self {
         self.progress = Some(progress.clamp(0.0, 1.0));
         self
     }
 
     /// Set filled style
+    #[must_use]
     pub fn filled_style(mut self, style: Style) -> Self {
         self.filled_style = style;
         self
     }
 }
 
-impl<'a> Widget for TaskProgressBar<'a> {
+impl Widget for TaskProgressBar<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.width == 0 || area.height == 0 {
             return;
@@ -447,18 +454,15 @@ impl<'a> Widget for TaskProgressBar<'a> {
 
         let width = area.width as usize;
 
-        let bar = match self.progress {
-            Some(p) => {
-                let filled = (width as f32 * p) as usize;
-                format!("{}{}", "█".repeat(filled), "░".repeat(width - filled))
-            }
-            None => {
-                // Indeterminate: show animated pattern based on time
-                let pattern: String = (0..width)
-                    .map(|i| if i % 3 == 0 { '█' } else { '░' })
-                    .collect();
-                pattern
-            }
+        let bar = if let Some(p) = self.progress {
+            let filled = (width as f32 * p) as usize;
+            format!("{}{}", "█".repeat(filled), "░".repeat(width - filled))
+        } else {
+            // Indeterminate: show animated pattern based on time
+            let pattern: String = (0..width)
+                .map(|i| if i % 3 == 0 { '█' } else { '░' })
+                .collect();
+            pattern
         };
 
         let style = if self.task.status == TaskStatus::Running {
@@ -491,8 +495,12 @@ mod tests {
         let test_id = graph.add_task(test);
         let lint_id = graph.add_task(lint);
 
-        graph.add_dependency(&build_id, &test_id, TaskEdge::DependsOn).unwrap();
-        graph.add_dependency(&build_id, &lint_id, TaskEdge::DependsOn).unwrap();
+        graph
+            .add_dependency(&build_id, &test_id, TaskEdge::DependsOn)
+            .unwrap();
+        graph
+            .add_dependency(&build_id, &lint_id, TaskEdge::DependsOn)
+            .unwrap();
 
         graph
     }

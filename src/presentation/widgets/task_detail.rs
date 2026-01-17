@@ -2,13 +2,13 @@
 //!
 //! A popup widget for displaying detailed information about a task.
 
-use crate::domain::task::{TaskNode, TaskResult, TaskStatus};
+use crate::domain::task::{TaskNode, TaskStatus};
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
+    widgets::{Block, Clear, Paragraph, Widget, Wrap},
 };
 
 /// Task detail popup widget
@@ -21,11 +21,13 @@ pub struct TaskDetail<'a> {
 
 impl<'a> TaskDetail<'a> {
     /// Create a new task detail popup
+    #[must_use]
     pub fn new(task: &'a TaskNode) -> Self {
         Self { task, block: None }
     }
 
     /// Set the block for borders/title
+    #[must_use]
     pub fn block(mut self, block: Block<'a>) -> Self {
         self.block = Some(block);
         self
@@ -58,7 +60,10 @@ impl<'a> TaskDetail<'a> {
 
         lines.push(Line::from(vec![
             Span::styled("Status: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(format!("{}", task.status), Style::default().fg(status_color)),
+            Span::styled(
+                format!("{}", task.status),
+                Style::default().fg(status_color),
+            ),
         ]));
 
         lines.push(Line::default()); // Empty line
@@ -71,7 +76,10 @@ impl<'a> TaskDetail<'a> {
 
         // Working directory
         lines.push(Line::from(vec![
-            Span::styled("Working Dir: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Working Dir: ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(task.working_dir.display().to_string()),
         ]));
 
@@ -166,7 +174,7 @@ impl<'a> TaskDetail<'a> {
 
                 for line in result.stdout.lines().take(5) {
                     lines.push(Line::from(Span::styled(
-                        format!("  {}", line),
+                        format!("  {line}"),
                         Style::default().fg(Color::Gray),
                     )));
                 }
@@ -189,7 +197,7 @@ impl<'a> TaskDetail<'a> {
 
                 for line in result.stderr.lines().take(5) {
                     lines.push(Line::from(Span::styled(
-                        format!("  {}", line),
+                        format!("  {line}"),
                         Style::default().fg(Color::Red),
                     )));
                 }
@@ -206,7 +214,7 @@ impl<'a> TaskDetail<'a> {
 
             for (key, value) in &task.metadata {
                 lines.push(Line::from(vec![
-                    Span::raw(format!("  {}: ", key)),
+                    Span::raw(format!("  {key}: ")),
                     Span::styled(value, Style::default().fg(Color::Gray)),
                 ]));
             }
@@ -216,7 +224,7 @@ impl<'a> TaskDetail<'a> {
     }
 }
 
-impl<'a> Widget for TaskDetail<'a> {
+impl Widget for TaskDetail<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Clear the area first (for popup effect)
         Widget::render(Clear, area, buf);
@@ -244,6 +252,7 @@ pub struct TaskTimer<'a> {
 
 impl<'a> TaskTimer<'a> {
     /// Create a new timer display
+    #[must_use]
     pub fn new(task: &'a TaskNode) -> Self {
         Self {
             task,
@@ -252,6 +261,7 @@ impl<'a> TaskTimer<'a> {
     }
 
     /// Set the style
+    #[must_use]
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
         self
@@ -265,14 +275,14 @@ impl<'a> TaskTimer<'a> {
         let seconds = total_secs % 60;
 
         if hours > 0 {
-            format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+            format!("{hours:02}:{minutes:02}:{seconds:02}")
         } else {
-            format!("{:02}:{:02}", minutes, seconds)
+            format!("{minutes:02}:{seconds:02}")
         }
     }
 }
 
-impl<'a> Widget for TaskTimer<'a> {
+impl Widget for TaskTimer<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.width == 0 || area.height == 0 {
             return;
@@ -304,6 +314,7 @@ pub struct TaskEta {
 
 impl TaskEta {
     /// Create a new ETA calculator
+    #[must_use]
     pub fn new(total: usize, completed: usize, avg_duration_ms: u64) -> Self {
         Self {
             total,
@@ -313,26 +324,24 @@ impl TaskEta {
     }
 
     /// Calculate ETA in milliseconds
+    #[must_use]
     pub fn eta_ms(&self) -> u64 {
         let remaining = self.total.saturating_sub(self.completed);
         remaining as u64 * self.avg_duration_ms
     }
 
     /// Format ETA as human-readable string
+    #[must_use]
     pub fn format(&self) -> String {
         let eta_ms = self.eta_ms();
         let total_secs = eta_ms / 1000;
 
         if total_secs < 60 {
-            format!("~{}s", total_secs)
+            format!("~{total_secs}s")
         } else if total_secs < 3600 {
             format!("~{}m {}s", total_secs / 60, total_secs % 60)
         } else {
-            format!(
-                "~{}h {}m",
-                total_secs / 3600,
-                (total_secs % 3600) / 60
-            )
+            format!("~{}h {}m", total_secs / 3600, (total_secs % 3600) / 60)
         }
     }
 }
@@ -351,6 +360,7 @@ impl Widget for TaskEta {
 }
 
 /// Calculate centered popup rect
+#[must_use]
 pub fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)

@@ -22,6 +22,7 @@ pub struct StatusBar<'a> {
 
 impl<'a> StatusBar<'a> {
     /// Create a new status bar with default hints
+    #[must_use]
     pub fn new() -> Self {
         Self {
             hints: vec![
@@ -39,18 +40,21 @@ impl<'a> StatusBar<'a> {
     }
 
     /// Set custom key hints
+    #[must_use]
     pub fn hints(mut self, hints: Vec<(&'a str, &'a str)>) -> Self {
         self.hints = hints;
         self
     }
 
     /// Set a status message
+    #[must_use]
     pub fn message(mut self, message: &'a str) -> Self {
         self.message = Some(message);
         self
     }
 
     /// Set the background style
+    #[must_use]
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
         self
@@ -63,7 +67,7 @@ impl Default for StatusBar<'_> {
     }
 }
 
-impl<'a> Widget for StatusBar<'a> {
+impl Widget for StatusBar<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Fill background
         for x in area.x..area.x + area.width {
@@ -80,13 +84,11 @@ impl<'a> Widget for StatusBar<'a> {
             .bg(Color::Gray)
             .add_modifier(Modifier::BOLD);
 
-        let desc_style = Style::default()
-            .fg(Color::White)
-            .bg(Color::DarkGray);
+        let desc_style = Style::default().fg(Color::White).bg(Color::DarkGray);
 
         for (key, desc) in &self.hints {
-            spans.push(Span::styled(format!("[{}]", key), key_style));
-            spans.push(Span::styled(format!("{} ", desc), desc_style));
+            spans.push(Span::styled(format!("[{key}]"), key_style));
+            spans.push(Span::styled(format!("{desc} "), desc_style));
         }
 
         // Add message if present
@@ -99,9 +101,7 @@ impl<'a> Widget for StatusBar<'a> {
                 spans.push(Span::styled(" | ", desc_style));
                 spans.push(Span::styled(
                     msg,
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .bg(Color::DarkGray),
+                    Style::default().fg(Color::Yellow).bg(Color::DarkGray),
                 ));
             }
         }

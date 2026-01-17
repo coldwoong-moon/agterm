@@ -120,7 +120,7 @@ async fn main() -> Result<()> {
         AppConfig::load_with_file(config_path)?
     } else {
         AppConfig::load().unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to load config, using defaults: {}", e);
+            eprintln!("Warning: Failed to load config, using defaults: {e}");
             AppConfig::default()
         })
     };

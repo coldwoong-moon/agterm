@@ -111,7 +111,7 @@ pub enum Action {
 
 impl std::fmt::Display for Action {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -126,11 +126,13 @@ pub struct KeyCombination {
 
 impl KeyCombination {
     /// Create a new key combination
+    #[must_use]
     pub fn new(code: KeyCode, modifiers: KeyModifiers) -> Self {
         Self { code, modifiers }
     }
 
     /// Create a key combination without modifiers
+    #[must_use]
     pub fn simple(code: KeyCode) -> Self {
         Self {
             code,
@@ -139,6 +141,7 @@ impl KeyCombination {
     }
 
     /// Create a key combination with Ctrl
+    #[must_use]
     pub fn ctrl(code: KeyCode) -> Self {
         Self {
             code,
@@ -147,6 +150,7 @@ impl KeyCombination {
     }
 
     /// Create a key combination with Alt
+    #[must_use]
     pub fn alt(code: KeyCode) -> Self {
         Self {
             code,
@@ -155,6 +159,7 @@ impl KeyCombination {
     }
 
     /// Create a key combination with Shift
+    #[must_use]
     pub fn shift(code: KeyCode) -> Self {
         Self {
             code,
@@ -163,13 +168,15 @@ impl KeyCombination {
     }
 
     /// Check if this combination matches a key event
+    #[must_use]
     pub fn matches(&self, event: &KeyEvent) -> bool {
         event.code == self.code && event.modifiers == self.modifiers
     }
 
     /// Parse from string representation
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
-        let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
+        let parts: Vec<&str> = s.split('+').map(str::trim).collect();
         if parts.is_empty() {
             return None;
         }
@@ -191,6 +198,7 @@ impl KeyCombination {
     }
 
     /// Format as string
+    #[must_use]
     pub fn to_string_repr(&self) -> String {
         let mut parts = Vec::new();
 
@@ -271,7 +279,7 @@ fn format_key_code(code: &KeyCode) -> String {
         KeyCode::Down => "Down".to_string(),
         KeyCode::Left => "Left".to_string(),
         KeyCode::Right => "Right".to_string(),
-        KeyCode::F(n) => format!("F{}", n),
+        KeyCode::F(n) => format!("F{n}"),
         _ => "?".to_string(),
     }
 }
@@ -304,6 +312,7 @@ impl Keybindings {
     }
 
     /// Create vim-style keybindings
+    #[must_use]
     pub fn vim() -> Self {
         let mut kb = Self::new("vim");
 
@@ -325,9 +334,15 @@ impl Keybindings {
 
         // Focus
         kb.bind(KeyCombination::simple(KeyCode::Tab), Action::FocusNext);
-        kb.bind(KeyCombination::shift(KeyCode::BackTab), Action::FocusPrevious);
+        kb.bind(
+            KeyCombination::shift(KeyCode::BackTab),
+            Action::FocusPrevious,
+        );
         kb.bind(KeyCombination::ctrl(KeyCode::Char('t')), Action::FocusTree);
-        kb.bind(KeyCombination::ctrl(KeyCode::Char('p')), Action::FocusTerminal);
+        kb.bind(
+            KeyCombination::ctrl(KeyCode::Char('p')),
+            Action::FocusTerminal,
+        );
 
         // Views
         kb.bind(KeyCombination::simple(KeyCode::F(1)), Action::Help);
@@ -340,21 +355,42 @@ impl Keybindings {
 
         // Terminal
         kb.bind(KeyCombination::simple(KeyCode::F(3)), Action::SplitVertical);
-        kb.bind(KeyCombination::shift(KeyCode::F(3)), Action::SplitHorizontal);
-        kb.bind(KeyCombination::ctrl(KeyCode::Char('w')), Action::CloseTerminal);
-        kb.bind(KeyCombination::simple(KeyCode::F(11)), Action::ToggleFullscreen);
+        kb.bind(
+            KeyCombination::shift(KeyCode::F(3)),
+            Action::SplitHorizontal,
+        );
+        kb.bind(
+            KeyCombination::ctrl(KeyCode::Char('w')),
+            Action::CloseTerminal,
+        );
+        kb.bind(
+            KeyCombination::simple(KeyCode::F(11)),
+            Action::ToggleFullscreen,
+        );
 
         // Tasks
         kb.bind(KeyCombination::simple(KeyCode::Char('a')), Action::AddTask);
-        kb.bind(KeyCombination::simple(KeyCode::Char('d')), Action::DeleteTask);
+        kb.bind(
+            KeyCombination::simple(KeyCode::Char('d')),
+            Action::DeleteTask,
+        );
         kb.bind(KeyCombination::ctrl(KeyCode::Char('c')), Action::CancelTask);
-        kb.bind(KeyCombination::simple(KeyCode::Char('r')), Action::RetryTask);
+        kb.bind(
+            KeyCombination::simple(KeyCode::Char('r')),
+            Action::RetryTask,
+        );
         kb.bind(KeyCombination::simple(KeyCode::Enter), Action::Select);
 
         // Search
         kb.bind(KeyCombination::simple(KeyCode::Char('/')), Action::Search);
-        kb.bind(KeyCombination::simple(KeyCode::Char('n')), Action::NextResult);
-        kb.bind(KeyCombination::shift(KeyCode::Char('N')), Action::PrevResult);
+        kb.bind(
+            KeyCombination::simple(KeyCode::Char('n')),
+            Action::NextResult,
+        );
+        kb.bind(
+            KeyCombination::shift(KeyCode::Char('N')),
+            Action::PrevResult,
+        );
 
         // Application
         kb.bind(KeyCombination::ctrl(KeyCode::Char('q')), Action::Quit);
@@ -363,12 +399,16 @@ impl Keybindings {
         // Scrolling
         kb.bind(KeyCombination::ctrl(KeyCode::Char('e')), Action::ScrollDown);
         kb.bind(KeyCombination::ctrl(KeyCode::Char('y')), Action::ScrollUp);
-        kb.bind(KeyCombination::shift(KeyCode::Char('G')), Action::ScrollBottom);
+        kb.bind(
+            KeyCombination::shift(KeyCode::Char('G')),
+            Action::ScrollBottom,
+        );
 
         kb
     }
 
     /// Create emacs-style keybindings
+    #[must_use]
     pub fn emacs() -> Self {
         let mut kb = Self::new("emacs");
 
@@ -390,7 +430,10 @@ impl Keybindings {
 
         // Focus
         kb.bind(KeyCombination::ctrl(KeyCode::Char('o')), Action::FocusNext);
-        kb.bind(KeyCombination::alt(KeyCode::Char('o')), Action::FocusPrevious);
+        kb.bind(
+            KeyCombination::alt(KeyCode::Char('o')),
+            Action::FocusPrevious,
+        );
 
         // Views
         kb.bind(KeyCombination::simple(KeyCode::F(1)), Action::Help);
@@ -418,6 +461,7 @@ impl Keybindings {
     }
 
     /// Create arrow-based keybindings (for beginners)
+    #[must_use]
     pub fn arrows() -> Self {
         let mut kb = Self::new("arrows");
 
@@ -433,7 +477,10 @@ impl Keybindings {
 
         // Focus
         kb.bind(KeyCombination::simple(KeyCode::Tab), Action::FocusNext);
-        kb.bind(KeyCombination::shift(KeyCode::BackTab), Action::FocusPrevious);
+        kb.bind(
+            KeyCombination::shift(KeyCode::BackTab),
+            Action::FocusPrevious,
+        );
 
         // Views
         kb.bind(KeyCombination::simple(KeyCode::F(1)), Action::Help);
@@ -464,6 +511,7 @@ impl Keybindings {
     }
 
     /// Get keybindings by name
+    #[must_use]
     pub fn by_name(name: &str) -> Self {
         match name.to_lowercase().as_str() {
             "vim" => Self::vim(),
@@ -489,12 +537,14 @@ impl Keybindings {
     }
 
     /// Get the action for a key event
+    #[must_use]
     pub fn get_action(&self, event: &KeyEvent) -> Option<Action> {
         let key = KeyCombination::new(event.code, event.modifiers);
         self.bindings.get(&key).copied()
     }
 
     /// Get all key combinations for an action
+    #[must_use]
     pub fn get_keys(&self, action: Action) -> Vec<&KeyCombination> {
         self.reverse
             .get(&action)
@@ -503,6 +553,7 @@ impl Keybindings {
     }
 
     /// Get a formatted string for an action's keys
+    #[must_use]
     pub fn format_keys(&self, action: Action) -> String {
         let keys = self.get_keys(action);
         if keys.is_empty() {
@@ -516,6 +567,7 @@ impl Keybindings {
     }
 
     /// Get all bindings for help display
+    #[must_use]
     pub fn all_bindings(&self) -> Vec<(Action, String)> {
         let mut result: Vec<(Action, String)> = self
             .reverse
@@ -523,7 +575,7 @@ impl Keybindings {
             .map(|(action, keys)| {
                 let keys_str = keys
                     .iter()
-                    .map(|k| k.to_string_repr())
+                    .map(KeyCombination::to_string_repr)
                     .collect::<Vec<_>>()
                     .join(" / ");
                 (*action, keys_str)

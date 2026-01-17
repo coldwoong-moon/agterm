@@ -47,6 +47,7 @@ pub enum LayoutNode {
 
 impl LayoutNode {
     /// Create a new terminal node
+    #[must_use]
     pub fn terminal(pty_id: PtyId) -> Self {
         LayoutNode::Terminal {
             id: Uuid::new_v4(),
@@ -55,6 +56,7 @@ impl LayoutNode {
     }
 
     /// Create a new split node
+    #[must_use]
     pub fn split(direction: SplitDirection, first: LayoutNode, second: LayoutNode) -> Self {
         LayoutNode::Split {
             id: Uuid::new_v4(),
@@ -66,6 +68,7 @@ impl LayoutNode {
     }
 
     /// Get the node ID
+    #[must_use]
     pub fn id(&self) -> NodeId {
         match self {
             LayoutNode::Terminal { id, .. } => *id,
@@ -74,11 +77,13 @@ impl LayoutNode {
     }
 
     /// Check if this is a terminal node
+    #[must_use]
     pub fn is_terminal(&self) -> bool {
         matches!(self, LayoutNode::Terminal { .. })
     }
 
     /// Get PTY ID if this is a terminal node
+    #[must_use]
     pub fn pty_id(&self) -> Option<PtyId> {
         match self {
             LayoutNode::Terminal { pty_id, .. } => Some(*pty_id),
@@ -87,6 +92,7 @@ impl LayoutNode {
     }
 
     /// Count terminal nodes
+    #[must_use]
     pub fn terminal_count(&self) -> usize {
         match self {
             LayoutNode::Terminal { .. } => 1,
@@ -97,6 +103,7 @@ impl LayoutNode {
     }
 
     /// Get all PTY IDs in this subtree
+    #[must_use]
     pub fn all_pty_ids(&self) -> Vec<PtyId> {
         match self {
             LayoutNode::Terminal { pty_id, .. } => vec![*pty_id],
@@ -109,6 +116,7 @@ impl LayoutNode {
     }
 
     /// Find a node by its ID
+    #[must_use]
     pub fn find_node(&self, node_id: &NodeId) -> Option<&LayoutNode> {
         if &self.id() == node_id {
             return Some(self);
@@ -123,12 +131,10 @@ impl LayoutNode {
     }
 
     /// Find a node by PTY ID
+    #[must_use]
     pub fn find_by_pty(&self, pty_id: &PtyId) -> Option<&LayoutNode> {
         match self {
-            LayoutNode::Terminal {
-                pty_id: pid,
-                id: _,
-            } if pid == pty_id => Some(self),
+            LayoutNode::Terminal { pty_id: pid, id: _ } if pid == pty_id => Some(self),
             LayoutNode::Terminal { .. } => None,
             LayoutNode::Split { first, second, .. } => first
                 .find_by_pty(pty_id)
@@ -137,6 +143,7 @@ impl LayoutNode {
     }
 
     /// Find parent of a node
+    #[must_use]
     pub fn find_parent(&self, node_id: &NodeId) -> Option<&LayoutNode> {
         match self {
             LayoutNode::Terminal { .. } => None,
@@ -160,10 +167,7 @@ impl LayoutNode {
         new_first: bool,
     ) -> bool {
         match self {
-            LayoutNode::Terminal {
-                pty_id: pid,
-                id: _,
-            } if pid == pty_id => {
+            LayoutNode::Terminal { pty_id: pid, id: _ } if pid == pty_id => {
                 let existing = LayoutNode::terminal(*pid);
                 let new_terminal = LayoutNode::terminal(new_pty_id);
 
@@ -191,22 +195,14 @@ impl LayoutNode {
             LayoutNode::Terminal { .. } => None, // Cannot remove from single terminal
             LayoutNode::Split { first, second, .. } => {
                 // Check if first child is the target
-                if let LayoutNode::Terminal {
-                    pty_id: pid,
-                    id: _,
-                } = first.as_ref()
-                {
+                if let LayoutNode::Terminal { pty_id: pid, id: _ } = first.as_ref() {
                     if pid == pty_id {
                         return Some(second.as_ref().clone());
                     }
                 }
 
                 // Check if second child is the target
-                if let LayoutNode::Terminal {
-                    pty_id: pid,
-                    id: _,
-                } = second.as_ref()
-                {
+                if let LayoutNode::Terminal { pty_id: pid, id: _ } = second.as_ref() {
                     if pid == pty_id {
                         return Some(first.as_ref().clone());
                     }
@@ -259,6 +255,7 @@ pub struct ComputedLayout {
 
 impl ComputedLayout {
     /// Create a new empty computed layout
+    #[must_use]
     pub fn new() -> Self {
         Self {
             rects: HashMap::new(),
@@ -267,6 +264,7 @@ impl ComputedLayout {
     }
 
     /// Compute layout for a node tree within a given area
+    #[must_use]
     pub fn compute(node: &LayoutNode, area: Rect) -> Self {
         let mut layout = Self::new();
         layout.compute_recursive(node, area);
@@ -289,7 +287,7 @@ impl ComputedLayout {
             } => {
                 let (first_area, second_area) = match direction {
                     SplitDirection::Horizontal => {
-                        let first_width = (area.width as f32 * ratio) as u16;
+                        let first_width = (f32::from(area.width) * ratio) as u16;
                         let second_width = area.width.saturating_sub(first_width).saturating_sub(1); // -1 for separator
 
                         let first_rect = Rect {
@@ -307,7 +305,7 @@ impl ComputedLayout {
                         (first_rect, second_rect)
                     }
                     SplitDirection::Vertical => {
-                        let first_height = (area.height as f32 * ratio) as u16;
+                        let first_height = (f32::from(area.height) * ratio) as u16;
                         let second_height =
                             area.height.saturating_sub(first_height).saturating_sub(1); // -1 for separator
 
@@ -334,6 +332,7 @@ impl ComputedLayout {
     }
 
     /// Get rect for a PTY
+    #[must_use]
     pub fn get_pty_rect(&self, pty_id: &PtyId) -> Option<&Rect> {
         self.pty_rects.get(pty_id)
     }
@@ -360,6 +359,7 @@ pub struct LayoutManager {
 
 impl LayoutManager {
     /// Create a new layout manager
+    #[must_use]
     pub fn new() -> Self {
         Self {
             root: None,
@@ -370,16 +370,19 @@ impl LayoutManager {
     }
 
     /// Check if the layout is empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.root.is_none()
     }
 
     /// Get the root node
+    #[must_use]
     pub fn root(&self) -> Option<&LayoutNode> {
         self.root.as_ref()
     }
 
     /// Get the focused PTY ID
+    #[must_use]
     pub fn focused_pty(&self) -> Option<PtyId> {
         self.focused_pty
     }
@@ -411,7 +414,9 @@ impl LayoutManager {
             }
             Some(root) => {
                 // Split the focused terminal (or first terminal if none focused)
-                let target_pty = self.focused_pty.or_else(|| root.all_pty_ids().first().copied());
+                let target_pty = self
+                    .focused_pty
+                    .or_else(|| root.all_pty_ids().first().copied());
 
                 if let Some(target) = target_pty {
                     let dir = direction.unwrap_or(SplitDirection::Horizontal);
@@ -431,11 +436,7 @@ impl LayoutManager {
         };
 
         // Check if root is the terminal to remove
-        if let LayoutNode::Terminal {
-            pty_id: pid,
-            id: _,
-        } = root
-        {
+        if let LayoutNode::Terminal { pty_id: pid, id: _ } = root {
             if pid == pty_id {
                 self.root = None;
                 self.focused_pty = None;
@@ -450,7 +451,10 @@ impl LayoutManager {
 
             // Update focus if removed terminal was focused
             if self.focused_pty == Some(*pty_id) {
-                self.focused_pty = self.root.as_ref().and_then(|r| r.all_pty_ids().first().copied());
+                self.focused_pty = self
+                    .root
+                    .as_ref()
+                    .and_then(|r| r.all_pty_ids().first().copied());
             }
             return true;
         }
@@ -459,10 +463,11 @@ impl LayoutManager {
     }
 
     /// Get all PTY IDs in the layout
+    #[must_use]
     pub fn all_pty_ids(&self) -> Vec<PtyId> {
         self.root
             .as_ref()
-            .map(|r| r.all_pty_ids())
+            .map(LayoutNode::all_pty_ids)
             .unwrap_or_default()
     }
 
@@ -497,9 +502,7 @@ impl LayoutManager {
 
     /// Navigate focus in a direction (vim-style)
     pub fn navigate(&mut self, direction: NavigateDirection) -> Option<PtyId> {
-        if self.root.is_none() {
-            return None;
-        }
+        self.root.as_ref()?;
 
         let Some(current_pty) = self.focused_pty else {
             return None;
@@ -516,36 +519,32 @@ impl LayoutManager {
             .pty_rects
             .iter()
             .filter(|(id, _)| **id != current_pty)
-            .filter(|(_, rect)| {
-                match direction {
-                    NavigateDirection::Left => {
-                        rect.x + rect.width <= current_rect.x
-                            && rects_overlap_vertically(rect, current_rect)
-                    }
-                    NavigateDirection::Right => {
-                        rect.x >= current_rect.x + current_rect.width
-                            && rects_overlap_vertically(rect, current_rect)
-                    }
-                    NavigateDirection::Up => {
-                        rect.y + rect.height <= current_rect.y
-                            && rects_overlap_horizontally(rect, current_rect)
-                    }
-                    NavigateDirection::Down => {
-                        rect.y >= current_rect.y + current_rect.height
-                            && rects_overlap_horizontally(rect, current_rect)
-                    }
+            .filter(|(_, rect)| match direction {
+                NavigateDirection::Left => {
+                    rect.x + rect.width <= current_rect.x
+                        && rects_overlap_vertically(rect, current_rect)
+                }
+                NavigateDirection::Right => {
+                    rect.x >= current_rect.x + current_rect.width
+                        && rects_overlap_vertically(rect, current_rect)
+                }
+                NavigateDirection::Up => {
+                    rect.y + rect.height <= current_rect.y
+                        && rects_overlap_horizontally(rect, current_rect)
+                }
+                NavigateDirection::Down => {
+                    rect.y >= current_rect.y + current_rect.height
+                        && rects_overlap_horizontally(rect, current_rect)
                 }
             })
             .collect();
 
         // Find closest candidate
-        let best = candidates.iter().min_by_key(|(_, rect)| {
-            match direction {
-                NavigateDirection::Left => current_rect.x.saturating_sub(rect.x + rect.width),
-                NavigateDirection::Right => rect.x.saturating_sub(current_rect.x + current_rect.width),
-                NavigateDirection::Up => current_rect.y.saturating_sub(rect.y + rect.height),
-                NavigateDirection::Down => rect.y.saturating_sub(current_rect.y + current_rect.height),
-            }
+        let best = candidates.iter().min_by_key(|(_, rect)| match direction {
+            NavigateDirection::Left => current_rect.x.saturating_sub(rect.x + rect.width),
+            NavigateDirection::Right => rect.x.saturating_sub(current_rect.x + current_rect.width),
+            NavigateDirection::Up => current_rect.y.saturating_sub(rect.y + rect.height),
+            NavigateDirection::Down => rect.y.saturating_sub(current_rect.y + current_rect.height),
         });
 
         if let Some((pty_id, _)) = best {
@@ -597,8 +596,9 @@ impl LayoutManager {
     }
 
     /// Get terminal count
+    #[must_use]
     pub fn terminal_count(&self) -> usize {
-        self.root.as_ref().map(|r| r.terminal_count()).unwrap_or(0)
+        self.root.as_ref().map_or(0, LayoutNode::terminal_count)
     }
 
     /// Resize the split containing the focused terminal

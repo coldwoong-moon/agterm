@@ -2,7 +2,7 @@
 //!
 //! A tree view widget for displaying task hierarchy in the sidebar.
 
-use crate::domain::task::{TaskGraph, TaskId, TaskNode, TaskStatus};
+use crate::domain::task::{TaskGraph, TaskId, TaskStatus};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -27,6 +27,7 @@ pub struct TaskTree<'a> {
 
 impl<'a> TaskTree<'a> {
     /// Create a new task tree widget
+    #[must_use]
     pub fn new(graph: &'a TaskGraph) -> Self {
         Self {
             graph,
@@ -40,24 +41,28 @@ impl<'a> TaskTree<'a> {
     }
 
     /// Set the block for borders/title
+    #[must_use]
     pub fn block(mut self, block: Block<'a>) -> Self {
         self.block = Some(block);
         self
     }
 
     /// Set the base style
+    #[must_use]
     pub fn style(mut self, style: Style) -> Self {
         self.style = style;
         self
     }
 
     /// Set the highlight style for selected items
+    #[must_use]
     pub fn highlight_style(mut self, style: Style) -> Self {
         self.highlight_style = style;
         self
     }
 
     /// Set the focused task
+    #[must_use]
     pub fn focused_task(mut self, task_id: Option<TaskId>) -> Self {
         self.focused_task = task_id;
         self
@@ -124,7 +129,7 @@ impl<'a> TaskTree<'a> {
         let line = Line::from(vec![
             Span::raw(indent),
             Span::raw(prefix),
-            Span::styled(format!("{} ", icon), Style::default().fg(color)),
+            Span::styled(format!("{icon} "), Style::default().fg(color)),
             Span::styled(
                 task.name.clone(),
                 Style::default().fg(if task.status == TaskStatus::Running {
@@ -146,7 +151,7 @@ impl<'a> TaskTree<'a> {
     }
 }
 
-impl<'a> Widget for TaskTree<'a> {
+impl Widget for TaskTree<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let items = self.build_items();
 
@@ -174,6 +179,7 @@ pub struct StatefulTaskTree<'a> {
 
 impl<'a> StatefulTaskTree<'a> {
     /// Create a new stateful task tree
+    #[must_use]
     pub fn new(graph: &'a TaskGraph) -> Self {
         let inner = TaskTree::new(graph);
 
@@ -197,28 +203,32 @@ impl<'a> StatefulTaskTree<'a> {
     }
 
     /// Set the block
+    #[must_use]
     pub fn block(mut self, block: Block<'a>) -> Self {
         self.inner = self.inner.block(block);
         self
     }
 
     /// Get task ID at the given index
+    #[must_use]
     pub fn task_at(&self, index: usize) -> Option<TaskId> {
         self.task_ids.get(index).copied()
     }
 
     /// Get the number of tasks
+    #[must_use]
     pub fn len(&self) -> usize {
         self.task_ids.len()
     }
 
     /// Check if empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.task_ids.is_empty()
     }
 }
 
-impl<'a> StatefulWidget for StatefulTaskTree<'a> {
+impl StatefulWidget for StatefulTaskTree<'_> {
     type State = ListState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
@@ -255,8 +265,12 @@ mod tests {
         let lint_id = graph.add_task(lint);
 
         // Test and Lint depend on Build
-        graph.add_dependency(&build_id, &test_id, TaskEdge::DependsOn).unwrap();
-        graph.add_dependency(&build_id, &lint_id, TaskEdge::DependsOn).unwrap();
+        graph
+            .add_dependency(&build_id, &test_id, TaskEdge::DependsOn)
+            .unwrap();
+        graph
+            .add_dependency(&build_id, &lint_id, TaskEdge::DependsOn)
+            .unwrap();
 
         graph
     }

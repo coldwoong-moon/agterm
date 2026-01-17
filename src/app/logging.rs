@@ -14,8 +14,8 @@ use tracing_subscriber::{
 
 /// Initialize the logging system based on configuration
 pub fn init_logging(config: &LoggingConfig) -> Result<()> {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&config.level));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.level));
 
     // Create the subscriber based on format
     match config.format.as_str() {
@@ -45,7 +45,7 @@ fn init_pretty_logging(config: &LoggingConfig, env_filter: EnvFilter) -> Result<
         .with_ansi(true);
 
     let fmt_layer = if config.timestamps {
-        fmt_layer.with_timer(SystemTime::default()).boxed()
+        fmt_layer.with_timer(SystemTime).boxed()
     } else {
         fmt_layer.without_time().boxed()
     };
@@ -68,7 +68,7 @@ fn init_compact_logging(config: &LoggingConfig, env_filter: EnvFilter) -> Result
         .with_ansi(true);
 
     let fmt_layer = if config.timestamps {
-        fmt_layer.with_timer(SystemTime::default()).boxed()
+        fmt_layer.with_timer(SystemTime).boxed()
     } else {
         fmt_layer.without_time().boxed()
     };
@@ -91,7 +91,7 @@ fn init_json_logging(config: &LoggingConfig, env_filter: EnvFilter) -> Result<()
         .with_current_span(true);
 
     let fmt_layer = if config.timestamps {
-        fmt_layer.with_timer(SystemTime::default()).boxed()
+        fmt_layer.with_timer(SystemTime).boxed()
     } else {
         fmt_layer.without_time().boxed()
     };

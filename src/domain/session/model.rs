@@ -25,7 +25,7 @@ pub struct McpConnectionState {
     pub last_error: Option<String>,
 }
 
-/// Session - a single AgTerm execution unit
+/// Session - a single `AgTerm` execution unit
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     /// Unique session ID
@@ -60,6 +60,7 @@ pub enum SessionStatus {
 
 impl Session {
     /// Create a new session
+    #[must_use]
     pub fn new(working_dir: PathBuf) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -92,6 +93,7 @@ impl Session {
     }
 
     /// Check if session is active
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.status == SessionStatus::Active
     }
@@ -122,6 +124,7 @@ pub struct SessionMetrics {
 
 impl SessionMetrics {
     /// Calculate compression ratio
+    #[must_use]
     pub fn compression_ratio(&self) -> f64 {
         if self.total_output_bytes == 0 {
             1.0
@@ -192,18 +195,21 @@ impl SessionArchive {
     }
 
     /// Set metrics
+    #[must_use]
     pub fn with_metrics(mut self, metrics: SessionMetrics) -> Self {
         self.metrics = metrics;
         self
     }
 
     /// Set compression level
+    #[must_use]
     pub fn with_compression_level(mut self, level: CompressionLevel) -> Self {
         self.compression_level = level;
         self
     }
 
     /// Get duration in seconds
+    #[must_use]
     pub fn duration_secs(&self) -> f64 {
         (self.period.1 - self.period.0).num_milliseconds() as f64 / 1000.0
     }

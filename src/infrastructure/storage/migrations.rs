@@ -67,7 +67,7 @@ fn set_schema_version(conn: &Connection, version: i32) -> DatabaseResult<()> {
 /// Migration v1: Initial schema
 fn migrate_v1(conn: &Connection) -> DatabaseResult<()> {
     conn.execute_batch(
-        r#"
+        r"
         -- Sessions table
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
@@ -199,7 +199,7 @@ fn migrate_v1(conn: &Connection) -> DatabaseResult<()> {
         );
 
         CREATE INDEX IF NOT EXISTS idx_mcp_session ON mcp_connections(session_id);
-        "#,
+        ",
     )?;
 
     Ok(())
@@ -216,9 +216,8 @@ pub fn check_migrations(db: &Database) -> DatabaseResult<bool> {
 /// Get applied migrations
 pub fn get_applied_migrations(db: &Database) -> DatabaseResult<Vec<(i32, String)>> {
     db.with_connection(|conn| {
-        let mut stmt = conn.prepare(
-            "SELECT version, applied_at FROM schema_migrations ORDER BY version",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT version, applied_at FROM schema_migrations ORDER BY version")?;
 
         let migrations = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?

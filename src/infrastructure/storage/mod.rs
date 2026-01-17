@@ -1,6 +1,6 @@
 //! Storage Backend
 //!
-//! SQLite implementation, migrations, and archive management.
+//! `SQLite` implementation, migrations, and archive management.
 
 pub mod archive;
 pub mod migrations;

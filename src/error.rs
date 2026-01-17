@@ -1,4 +1,4 @@
-//! AgTerm Error Types
+//! `AgTerm` Error Types
 //!
 //! Centralized error handling using thiserror for type-safe errors.
 
@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Top-level error type for AgTerm
+/// Top-level error type for `AgTerm`
 #[derive(Error, Debug)]
 pub enum AgTermError {
     #[error("PTY error: {0}")]
@@ -175,7 +175,7 @@ pub enum TuiError {
     Crossterm(#[from] std::io::Error),
 }
 
-/// Result type alias for AgTerm operations
+/// Result type alias for `AgTerm` operations
 pub type Result<T> = std::result::Result<T, AgTermError>;
 
 /// Result type alias for PTY operations
@@ -199,11 +199,11 @@ mod tests {
 
     #[test]
     fn test_error_display() {
-        let err = PtyError::PoolExhausted { max: 32, current: 32 };
-        assert_eq!(
-            err.to_string(),
-            "PTY pool exhausted (max: 32, current: 32)"
-        );
+        let err = PtyError::PoolExhausted {
+            max: 32,
+            current: 32,
+        };
+        assert_eq!(err.to_string(), "PTY pool exhausted (max: 32, current: 32)");
     }
 
     #[test]

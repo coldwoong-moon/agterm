@@ -2,7 +2,7 @@
 //!
 //! Helper types and functions for working with MCP tools.
 
-use rmcp::model::{CallToolResult, Content, RawContent, Tool};
+use rmcp::model::{CallToolResult, RawContent, Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -26,12 +26,16 @@ impl ToolInfo {
         Self {
             server: server.into(),
             name: tool.name.to_string(),
-            description: tool.description.as_ref().map(|s| s.to_string()),
+            description: tool
+                .description
+                .as_ref()
+                .map(std::string::ToString::to_string),
             input_schema: Some(serde_json::to_value(&tool.input_schema).unwrap_or(Value::Null)),
         }
     }
 
-    /// Get fully qualified name (server:tool_name)
+    /// Get fully qualified name (`server:tool_name`)
+    #[must_use]
     pub fn qualified_name(&self) -> String {
         format!("{}:{}", self.server, self.name)
     }
@@ -66,6 +70,7 @@ impl ToolCallRequest {
     }
 
     /// Set arguments from JSON value
+    #[must_use]
     pub fn with_args_json(mut self, args: Value) -> Self {
         if let Some(obj) = args.as_object() {
             self.arguments = obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -73,7 +78,8 @@ impl ToolCallRequest {
         self
     }
 
-    /// Convert arguments to serde_json::Map
+    /// Convert arguments to `serde_json::Map`
+    #[must_use]
     pub fn arguments_as_map(&self) -> Option<serde_json::Map<String, Value>> {
         if self.arguments.is_empty() {
             None
@@ -112,7 +118,8 @@ pub enum ContentItem {
 }
 
 impl ToolCallResponse {
-    /// Create from rmcp CallToolResult
+    /// Create from rmcp `CallToolResult`
+    #[must_use]
     pub fn from_result(result: &CallToolResult) -> Self {
         let success = !result.is_error.unwrap_or(false);
         let mut text = Vec::new();
@@ -133,7 +140,9 @@ impl ToolCallResponse {
                 }
                 RawContent::Resource(res) => {
                     let uri = match &res.resource {
-                        rmcp::model::ResourceContents::TextResourceContents { uri, text, .. } => {
+                        rmcp::model::ResourceContents::TextResourceContents {
+                            uri, text, ..
+                        } => {
                             content.push(ContentItem::Resource {
                                 uri: uri.clone(),
                                 text: Some(text.clone()),
@@ -184,11 +193,13 @@ impl ToolCallResponse {
     }
 
     /// Get combined text content
+    #[must_use]
     pub fn text_content(&self) -> String {
         self.text.join("\n")
     }
 
     /// Check if there's any text content
+    #[must_use]
     pub fn has_text(&self) -> bool {
         !self.text.is_empty()
     }
@@ -217,12 +228,13 @@ pub fn parse_tool_arguments(input: &str) -> Result<HashMap<String, Value>, serde
 }
 
 /// Format tool result for display
+#[must_use]
 pub fn format_tool_result(response: &ToolCallResponse) -> String {
     let mut output = String::new();
 
     if !response.success {
         if let Some(ref err) = response.error {
-            output.push_str(&format!("Error: {}\n", err));
+            output.push_str(&format!("Error: {err}\n"));
         }
     }
 
@@ -236,16 +248,16 @@ pub fn format_tool_result(response: &ToolCallResponse) -> String {
                 output.push_str(text);
             }
             ContentItem::Image { mime_type, .. } => {
-                output.push_str(&format!("[Image: {}]", mime_type));
+                output.push_str(&format!("[Image: {mime_type}]"));
             }
             ContentItem::Resource { uri, text } => {
-                output.push_str(&format!("[Resource: {}]", uri));
+                output.push_str(&format!("[Resource: {uri}]"));
                 if let Some(t) = text {
-                    output.push_str(&format!("\n{}", t));
+                    output.push_str(&format!("\n{t}"));
                 }
             }
             ContentItem::Audio { mime_type, .. } => {
-                output.push_str(&format!("[Audio: {}]", mime_type));
+                output.push_str(&format!("[Audio: {mime_type}]"));
             }
         }
     }
@@ -284,7 +296,10 @@ mod tests {
     fn test_parse_arguments_json() {
         let args = parse_tool_arguments(r#"{"key": "value", "num": 42}"#).unwrap();
 
-        assert_eq!(args.get("key").unwrap(), &Value::String("value".to_string()));
+        assert_eq!(
+            args.get("key").unwrap(),
+            &Value::String("value".to_string())
+        );
         assert_eq!(args.get("num").unwrap(), &Value::Number(42.into()));
     }
 

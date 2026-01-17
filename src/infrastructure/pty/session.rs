@@ -7,7 +7,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize,
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// PTY session identifier
@@ -83,11 +83,11 @@ impl PtySession {
         let pty_system = native_pty_system();
 
         // Create the PTY pair
-        let pair = pty_system.openpty(config.size.clone()).map_err(|e| {
-            PtyError::SpawnFailed {
-                reason: format!("Failed to open PTY: {}", e),
-            }
-        })?;
+        let pair = pty_system
+            .openpty(config.size)
+            .map_err(|e| PtyError::SpawnFailed {
+                reason: format!("Failed to open PTY: {e}"),
+            })?;
 
         // Build the command
         let mut cmd = CommandBuilder::new(&config.shell);
@@ -100,11 +100,12 @@ impl PtySession {
         }
 
         // Spawn the child process
-        let child = pair.slave.spawn_command(cmd).map_err(|e| {
-            PtyError::SpawnFailed {
-                reason: format!("Failed to spawn command: {}", e),
-            }
-        })?;
+        let child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| PtyError::SpawnFailed {
+                reason: format!("Failed to spawn command: {e}"),
+            })?;
 
         // Drop the slave to avoid blocking reads
         drop(pair.slave);
@@ -114,7 +115,7 @@ impl PtySession {
             state: Arc::new(Mutex::new(PtyState::Running)),
             master: Arc::new(Mutex::new(pair.master)),
             child: Arc::new(Mutex::new(child)),
-            size: Arc::new(Mutex::new(config.size.clone())),
+            size: Arc::new(Mutex::new(config.size)),
             config,
         })
     }
@@ -139,11 +140,11 @@ impl PtySession {
         };
 
         let master = self.master.lock().await;
-        master.resize(new_size.clone()).map_err(|e| {
-            PtyError::ResizeFailed {
+        master
+            .resize(new_size)
+            .map_err(|e| PtyError::ResizeFailed {
                 reason: e.to_string(),
-            }
-        })?;
+            })?;
 
         *self.size.lock().await = new_size;
         Ok(())
@@ -151,18 +152,15 @@ impl PtySession {
 
     /// Get the current terminal size
     pub async fn size(&self) -> PtySize {
-        self.size.lock().await.clone()
+        *self.size.lock().await
     }
 
     /// Write data to the PTY (user input)
     pub async fn write(&self, data: &[u8]) -> PtyResult<usize> {
-        let mut master = self.master.lock().await;
-        let mut writer = master.take_writer().map_err(|e| {
-            PtyError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            ))
-        })?;
+        let master = self.master.lock().await;
+        let mut writer = master
+            .take_writer()
+            .map_err(|e| PtyError::Io(std::io::Error::other(e.to_string())))?;
 
         let written = writer.write(data)?;
         writer.flush()?;
@@ -178,12 +176,9 @@ impl PtySession {
     pub fn read_blocking(&self, buf: &mut [u8]) -> PtyResult<usize> {
         // This is a synchronous read - use in a blocking task
         let master = self.master.blocking_lock();
-        let mut reader = master.try_clone_reader().map_err(|e| {
-            PtyError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            ))
-        })?;
+        let mut reader = master
+            .try_clone_reader()
+            .map_err(|e| PtyError::Io(std::io::Error::other(e.to_string())))?;
 
         match reader.read(buf) {
             Ok(n) => Ok(n),
@@ -204,10 +199,7 @@ impl PtySession {
             Ok(None) => Ok(None),
             Err(e) => {
                 *self.state.lock().await = PtyState::Error;
-                Err(PtyError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )))
+                Err(PtyError::Io(std::io::Error::other(e.to_string())))
             }
         }
     }
@@ -215,12 +207,9 @@ impl PtySession {
     /// Kill the child process
     pub async fn kill(&self) -> PtyResult<()> {
         let mut child = self.child.lock().await;
-        child.kill().map_err(|e| {
-            PtyError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            ))
-        })?;
+        child
+            .kill()
+            .map_err(|e| PtyError::Io(std::io::Error::other(e.to_string())))?;
         *self.state.lock().await = PtyState::Exited;
         Ok(())
     }
@@ -228,12 +217,9 @@ impl PtySession {
     /// Get a reader for the PTY output
     pub async fn get_reader(&self) -> PtyResult<Box<dyn Read + Send>> {
         let master = self.master.lock().await;
-        master.try_clone_reader().map_err(|e| {
-            PtyError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            ))
-        })
+        master
+            .try_clone_reader()
+            .map_err(|e| PtyError::Io(std::io::Error::other(e.to_string())))
     }
 }
 

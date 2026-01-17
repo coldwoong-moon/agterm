@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Application configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     /// General settings
     #[serde(default)]
@@ -119,7 +119,7 @@ pub struct McpServerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
-    /// Database file path (SQLite)
+    /// Database file path (`SQLite`)
     pub database_path: Option<PathBuf>,
 
     /// Log files directory
@@ -330,19 +330,6 @@ impl Default for LoggingConfig {
     }
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            general: GeneralConfig::default(),
-            pty: PtyConfig::default(),
-            mcp: McpConfig::default(),
-            storage: StorageConfig::default(),
-            tui: TuiConfig::default(),
-            logging: LoggingConfig::default(),
-        }
-    }
-}
-
 impl AppConfig {
     /// Load configuration from files and environment
     ///
@@ -356,31 +343,29 @@ impl AppConfig {
         let mut builder = Config::builder();
 
         // 1. Start with defaults
-        builder = builder.add_source(config::File::from_str(
-            include_str!("../../default_config.toml"),
-            config::FileFormat::Toml,
-        ).required(false));
+        builder = builder.add_source(
+            config::File::from_str(
+                include_str!("../../default_config.toml"),
+                config::FileFormat::Toml,
+            )
+            .required(false),
+        );
 
         // 2. System config (optional)
         #[cfg(unix)]
         {
-            builder = builder.add_source(
-                File::with_name("/etc/agterm/config").required(false),
-            );
+            builder = builder.add_source(File::with_name("/etc/agterm/config").required(false));
         }
 
         // 3. User config (XDG)
         if let Some(proj_dirs) = ProjectDirs::from("com", "agterm", "agterm") {
             let config_path = proj_dirs.config_dir().join("config");
-            builder = builder.add_source(
-                File::with_name(config_path.to_str().unwrap_or("")).required(false),
-            );
+            builder = builder
+                .add_source(File::with_name(config_path.to_str().unwrap_or("")).required(false));
         }
 
         // 4. Local config
-        builder = builder.add_source(
-            File::with_name(".agterm/config").required(false),
-        );
+        builder = builder.add_source(File::with_name(".agterm/config").required(false));
 
         // 5. Environment variables (AGTERM_*)
         builder = builder.add_source(
@@ -391,9 +376,9 @@ impl AppConfig {
 
         // Build and deserialize
         let config = builder.build()?;
-        let app_config: AppConfig = config.try_deserialize().map_err(|e| {
-            ConfigError::ParseError(e.to_string())
-        })?;
+        let app_config: AppConfig = config
+            .try_deserialize()
+            .map_err(|e| ConfigError::ParseError(e.to_string()))?;
 
         Ok(app_config)
     }
@@ -407,15 +392,16 @@ impl AppConfig {
         let mut builder = Config::builder();
 
         // Start with defaults
-        builder = builder.add_source(config::File::from_str(
-            include_str!("../../default_config.toml"),
-            config::FileFormat::Toml,
-        ).required(false));
+        builder = builder.add_source(
+            config::File::from_str(
+                include_str!("../../default_config.toml"),
+                config::FileFormat::Toml,
+            )
+            .required(false),
+        );
 
         // Add custom file
-        builder = builder.add_source(
-            File::from(path.clone()).required(true),
-        );
+        builder = builder.add_source(File::from(path.clone()).required(true));
 
         // Environment variables
         builder = builder.add_source(
@@ -425,14 +411,15 @@ impl AppConfig {
         );
 
         let config = builder.build()?;
-        let app_config: AppConfig = config.try_deserialize().map_err(|e| {
-            ConfigError::ParseError(e.to_string())
-        })?;
+        let app_config: AppConfig = config
+            .try_deserialize()
+            .map_err(|e| ConfigError::ParseError(e.to_string()))?;
 
         Ok(app_config)
     }
 
     /// Get the data directory path
+    #[must_use]
     pub fn data_dir(&self) -> PathBuf {
         if let Some(proj_dirs) = ProjectDirs::from("com", "agterm", &self.general.app_name) {
             proj_dirs.data_dir().to_path_buf()
@@ -442,6 +429,7 @@ impl AppConfig {
     }
 
     /// Get the database path
+    #[must_use]
     pub fn database_path(&self) -> PathBuf {
         self.storage
             .database_path
@@ -450,6 +438,7 @@ impl AppConfig {
     }
 
     /// Get the logs directory
+    #[must_use]
     pub fn logs_dir(&self) -> PathBuf {
         self.storage
             .logs_dir

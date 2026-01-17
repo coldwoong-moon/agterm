@@ -38,15 +38,15 @@ pub mod tools;
 
 // Re-export main types
 pub use client::{
-    ConnectionStatus, McpClient, McpClientError, McpClientHandle, McpClientResult,
-    create_client_handle,
+    create_client_handle, ConnectionStatus, McpClient, McpClientError, McpClientHandle,
+    McpClientResult,
 };
 pub use registry::{
-    McpRegistry, McpRegistryHandle, RegistryEvent,
-    create_registry_handle, create_registry_handle_with_events,
+    create_registry_handle, create_registry_handle_with_events, McpRegistry, McpRegistryHandle,
+    RegistryEvent,
 };
 pub use server_config::{McpServerConfig, McpTransport};
 pub use tools::{
-    ContentItem, ToolCallRequest, ToolCallResponse, ToolInfo,
-    format_tool_result, parse_tool_arguments,
+    format_tool_result, parse_tool_arguments, ContentItem, ToolCallRequest, ToolCallResponse,
+    ToolInfo,
 };

@@ -89,6 +89,7 @@ pub struct TerminalScreen {
 
 impl TerminalScreen {
     /// Create a new terminal screen
+    #[must_use]
     pub fn new(cols: usize, rows: usize) -> Self {
         let cells = vec![vec![Cell::default(); cols]; rows];
 
@@ -128,6 +129,7 @@ impl TerminalScreen {
     }
 
     /// Get a cell at the given position
+    #[must_use]
     pub fn get_cell(&self, row: usize, col: usize) -> Option<&Cell> {
         self.cells.get(row).and_then(|r| r.get(col))
     }
@@ -242,6 +244,7 @@ impl TerminalScreen {
     }
 
     /// Get the content as a string (for display)
+    #[must_use]
     pub fn to_string_content(&self) -> String {
         let mut result = String::new();
         for (i, row) in self.cells.iter().enumerate() {
@@ -255,10 +258,11 @@ impl TerminalScreen {
     }
 
     /// Get a specific row as a string
+    #[must_use]
     pub fn get_row_string(&self, row: usize) -> Option<String> {
-        self.cells.get(row).map(|r| {
-            r.iter().map(|c| c.char).collect::<String>()
-        })
+        self.cells
+            .get(row)
+            .map(|r| r.iter().map(|c| c.char).collect::<String>())
     }
 
     /// Process raw output bytes
@@ -272,6 +276,7 @@ impl TerminalScreen {
     }
 
     /// Get raw output buffer
+    #[must_use]
     pub fn raw_output(&self) -> &[u8] {
         &self.raw_output
     }
@@ -287,7 +292,7 @@ impl fmt::Debug for TerminalScreen {
     }
 }
 
-/// ANSI parser that updates a TerminalScreen
+/// ANSI parser that updates a `TerminalScreen`
 pub struct AnsiParser {
     parser: Parser,
     screen: TerminalScreen,
@@ -295,6 +300,7 @@ pub struct AnsiParser {
 
 impl AnsiParser {
     /// Create a new ANSI parser
+    #[must_use]
     pub fn new(cols: usize, rows: usize) -> Self {
         Self {
             parser: Parser::new(),
@@ -312,6 +318,7 @@ impl AnsiParser {
     }
 
     /// Get the screen
+    #[must_use]
     pub fn screen(&self) -> &TerminalScreen {
         &self.screen
     }
@@ -346,7 +353,7 @@ impl Perform for TerminalScreen {
                 self.cursor_col = next_tab.min(self.cols - 1);
             }
             // Line Feed / Vertical Tab / Form Feed
-            0x0A | 0x0B | 0x0C => {
+            0x0A..=0x0C => {
                 self.cursor_row += 1;
                 if self.cursor_row > self.scroll_bottom {
                     self.scroll_up(1);
@@ -382,7 +389,13 @@ impl Perform for TerminalScreen {
         }
     }
 
-    fn csi_dispatch(&mut self, params: &Params, _intermediates: &[u8], _ignore: bool, action: char) {
+    fn csi_dispatch(
+        &mut self,
+        params: &Params,
+        _intermediates: &[u8],
+        _ignore: bool,
+        action: char,
+    ) {
         let params: Vec<u16> = params.iter().flatten().copied().collect();
 
         match action {

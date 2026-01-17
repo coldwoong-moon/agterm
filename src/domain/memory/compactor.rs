@@ -7,7 +7,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Compacted output result
@@ -29,6 +29,7 @@ pub struct CompactedOutput {
 
 impl CompactedOutput {
     /// Get compression ratio (0.0 - 1.0)
+    #[must_use]
     pub fn compression_ratio(&self) -> f64 {
         if self.original_size == 0 {
             1.0
@@ -38,6 +39,7 @@ impl CompactedOutput {
     }
 
     /// Format as display string
+    #[must_use]
     pub fn to_display_string(&self) -> String {
         let mut output = self.summary.clone();
 
@@ -49,10 +51,7 @@ impl CompactedOutput {
             }
         }
 
-        output.push_str(&format!(
-            "\n[Full log: {}]",
-            self.full_log_path.display()
-        ));
+        output.push_str(&format!("\n[Full log: {}]", self.full_log_path.display()));
 
         output
     }
@@ -89,16 +88,19 @@ pub struct Compactor {
 
 impl Compactor {
     /// Create a new compactor with configuration
+    #[must_use]
     pub fn new(config: CompactionConfig) -> Self {
         Self { config }
     }
 
     /// Create with default configuration
+    #[must_use]
     pub fn with_defaults() -> Self {
         Self::new(CompactionConfig::default())
     }
 
     /// Set log directory
+    #[must_use]
     pub fn with_log_dir(mut self, dir: PathBuf) -> Self {
         self.config.log_dir = dir;
         self
@@ -116,7 +118,7 @@ impl Compactor {
             .lines()
             .rev()
             .take(self.config.last_lines_count)
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
@@ -125,7 +127,11 @@ impl Compactor {
         // Extract key information
         let summary = self.extract_summary(output);
 
-        let compacted_size = summary.len() + last_lines.iter().map(|s| s.len()).sum::<usize>();
+        let compacted_size = summary.len()
+            + last_lines
+                .iter()
+                .map(std::string::String::len)
+                .sum::<usize>();
 
         Ok(CompactedOutput {
             summary,
@@ -143,7 +149,7 @@ impl Compactor {
         std::fs::create_dir_all(&self.config.log_dir)?;
 
         // Generate filename
-        let filename = format!("{}.log", task_id);
+        let filename = format!("{task_id}.log");
         let path = self.config.log_dir.join(filename);
 
         // Write log
@@ -167,7 +173,7 @@ impl Compactor {
         if !errors.is_empty() {
             summary.push_str("Errors:\n");
             for error in errors.iter().take(5) {
-                summary.push_str(&format!("  - {}\n", error));
+                summary.push_str(&format!("  - {error}\n"));
             }
             if errors.len() > 5 {
                 summary.push_str(&format!("  ... and {} more\n", errors.len() - 5));
@@ -187,7 +193,8 @@ impl Compactor {
         }
 
         if summary.is_empty() {
-            summary = format!("Output: {} lines, {} bytes",
+            summary = format!(
+                "Output: {} lines, {} bytes",
                 output.lines().count(),
                 output.len()
             );
@@ -209,10 +216,10 @@ impl Compactor {
                 .skip(10)
                 .take_while(|c| c.is_ascii_digit() || *c == '-')
                 .collect();
-            if !code.is_empty() {
-                Some(format!("Exit: {}", code))
-            } else {
+            if code.is_empty() {
                 None
+            } else {
+                Some(format!("Exit: {code}"))
             }
         } else {
             None
@@ -270,6 +277,7 @@ impl Compactor {
     }
 
     /// Check if output needs compaction
+    #[must_use]
     pub fn needs_compaction(&self, output: &str) -> bool {
         output.len() > self.config.max_output_size
     }
@@ -313,11 +321,12 @@ pub struct SummaryResponse {
 }
 
 /// Summary prompt template
+#[must_use]
 pub fn generate_summary_prompt(request: &SummaryRequest) -> String {
     match request.summary_type {
         SummaryType::Session => {
             format!(
-                r#"다음 터미널 세션 로그를 요약해주세요.
+                r"다음 터미널 세션 로그를 요약해주세요.
 - 실행된 주요 명령어
 - 성공/실패 여부 및 핵심 결과
 - 발생한 에러 메시지 (있는 경우)
@@ -326,37 +335,37 @@ pub fn generate_summary_prompt(request: &SummaryRequest) -> String {
 로그:
 {}
 
-최대 {} 토큰으로 요약해주세요."#,
+최대 {} 토큰으로 요약해주세요.",
                 request.content, request.max_tokens
             )
         }
         SummaryType::TaskOutput => {
             format!(
-                r#"다음 명령어 출력을 한 문장으로 요약해주세요.
+                r"다음 명령어 출력을 한 문장으로 요약해주세요.
 - 성공 여부
 - 핵심 결과
 
 출력:
 {}
 
-최대 {} 토큰으로 요약해주세요."#,
+최대 {} 토큰으로 요약해주세요.",
                 request.content, request.max_tokens
             )
         }
         SummaryType::Error => {
             format!(
-                r#"다음 에러 메시지를 분석하고 해결 방법을 제안해주세요.
+                r"다음 에러 메시지를 분석하고 해결 방법을 제안해주세요.
 
 에러:
 {}
 
-최대 {} 토큰으로 답변해주세요."#,
+최대 {} 토큰으로 답변해주세요.",
                 request.content, request.max_tokens
             )
         }
         SummaryType::Rolling => {
             format!(
-                r#"다음 여러 세션 요약들을 하나의 상위 요약으로 통합해주세요.
+                r"다음 여러 세션 요약들을 하나의 상위 요약으로 통합해주세요.
 - 주요 작업 트렌드
 - 반복되는 패턴
 - 주요 성과 및 문제점
@@ -364,7 +373,7 @@ pub fn generate_summary_prompt(request: &SummaryRequest) -> String {
 세션 요약들:
 {}
 
-최대 {} 토큰으로 요약해주세요."#,
+최대 {} 토큰으로 요약해주세요.",
                 request.content, request.max_tokens
             )
         }
@@ -386,13 +395,13 @@ mod tests {
     #[test]
     fn test_extract_errors() {
         let compactor = Compactor::with_defaults();
-        let output = r#"
+        let output = r"
 Building...
 error: cannot find module 'foo'
 error: type mismatch
 warning: unused variable
 Done.
-"#;
+";
 
         let errors = compactor.detect_errors(output);
         assert_eq!(errors.len(), 2);
@@ -401,12 +410,12 @@ Done.
     #[test]
     fn test_extract_warnings() {
         let compactor = Compactor::with_defaults();
-        let output = r#"
+        let output = r"
 Compiling...
 warning: unused import
 warning: deprecated function
 Finished.
-"#;
+";
 
         let warnings = compactor.detect_warnings(output);
         assert_eq!(warnings.len(), 2);
@@ -416,7 +425,9 @@ Finished.
     fn test_detect_success() {
         let compactor = Compactor::with_defaults();
 
-        assert!(compactor.detect_success("Build completed successfully").is_some());
+        assert!(compactor
+            .detect_success("Build completed successfully")
+            .is_some());
         assert!(compactor.detect_success("All tests passed").is_some());
         assert!(compactor.detect_success("random text").is_none());
     }

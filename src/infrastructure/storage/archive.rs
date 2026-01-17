@@ -30,6 +30,7 @@ pub struct ArchiveQuery {
 }
 
 impl ArchiveQuery {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -44,11 +45,13 @@ impl ArchiveQuery {
         self
     }
 
+    #[must_use]
     pub fn date_range(mut self, start: DateTime<Utc>, end: DateTime<Utc>) -> Self {
         self.date_range = Some((start, end));
         self
     }
 
+    #[must_use]
     pub fn compression_level(mut self, level: CompressionLevel) -> Self {
         self.compression_level = Some(level);
         self
@@ -59,11 +62,13 @@ impl ArchiveQuery {
         self
     }
 
+    #[must_use]
     pub fn limit(mut self, limit: usize) -> Self {
         self.limit = Some(limit);
         self
     }
 
+    #[must_use]
     pub fn offset(mut self, offset: usize) -> Self {
         self.offset = Some(offset);
         self
@@ -88,6 +93,7 @@ pub struct ArchiveRepository {
 
 impl ArchiveRepository {
     /// Create new repository
+    #[must_use]
     pub fn new(db: Database) -> Self {
         Self { db }
     }
@@ -100,11 +106,11 @@ impl ArchiveRepository {
             let compression = format!("{:?}", archive.compression_level).to_lowercase();
 
             conn.execute(
-                r#"
+                r"
                 INSERT INTO session_archives
                 (id, session_id, working_dir, period_start, period_end, summary, tags, metrics, compression_level, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                "#,
+                ",
                 params![
                     archive.id.to_string(),
                     archive.session_id.to_string(),
@@ -126,13 +132,9 @@ impl ArchiveRepository {
     /// Get archive by ID
     pub fn get(&self, id: &Uuid) -> DatabaseResult<Option<SessionArchive>> {
         self.db.with_connection(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT * FROM session_archives WHERE id = ?",
-            )?;
+            let mut stmt = conn.prepare("SELECT * FROM session_archives WHERE id = ?")?;
 
-            let result = stmt.query_row([id.to_string()], |row| {
-                Self::row_to_archive(row)
-            });
+            let result = stmt.query_row([id.to_string()], Self::row_to_archive);
 
             match result {
                 Ok(archive) => Ok(Some(archive)),
@@ -181,14 +183,14 @@ impl ArchiveRepository {
         query: &ArchiveQuery,
     ) -> DatabaseResult<Vec<ArchiveSearchResult>> {
         let mut sql = String::from(
-            r#"
+            r"
             SELECT sa.*,
                    bm25(archives_fts) as score,
                    snippet(archives_fts, 0, '<b>', '</b>', '...', 32) as snippet
             FROM session_archives sa
             JOIN archives_fts ON sa.rowid = archives_fts.rowid
             WHERE archives_fts MATCH ?
-            "#,
+            ",
         );
 
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(search_text.to_string())];
@@ -202,7 +204,8 @@ impl ArchiveRepository {
         self.add_pagination(&mut sql, &mut params, query);
 
         let mut stmt = conn.prepare(&sql)?;
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(std::convert::AsRef::as_ref).collect();
 
         let results = stmt
             .query_map(param_refs.as_slice(), |row| {
@@ -239,7 +242,8 @@ impl ArchiveRepository {
         self.add_pagination(&mut sql, &mut params, query);
 
         let mut stmt = conn.prepare(&sql)?;
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(std::convert::AsRef::as_ref).collect();
 
         let results = stmt
             .query_map(param_refs.as_slice(), |row| {
@@ -275,13 +279,13 @@ impl ArchiveRepository {
 
         if let Some(ref level) = query.compression_level {
             sql.push_str(" AND compression_level = ?");
-            params.push(Box::new(format!("{:?}", level).to_lowercase()));
+            params.push(Box::new(format!("{level:?}").to_lowercase()));
         }
 
         // Tag filtering (JSON contains)
         for tag in &query.tags {
             sql.push_str(" AND tags LIKE ?");
-            params.push(Box::new(format!("%\"{}\"", tag)));
+            params.push(Box::new(format!("%\"{tag}\"")));
         }
     }
 
@@ -303,7 +307,7 @@ impl ArchiveRepository {
         }
     }
 
-    /// Convert row to SessionArchive
+    /// Convert row to `SessionArchive`
     fn row_to_archive(row: &Row) -> rusqlite::Result<SessionArchive> {
         let id_str: String = row.get("id")?;
         let session_id_str: String = row.get("session_id")?;
@@ -320,11 +324,9 @@ impl ArchiveRepository {
         let session_id = Uuid::parse_str(&session_id_str).unwrap_or_else(|_| Uuid::new_v4());
         let working_dir = PathBuf::from(working_dir_str);
         let period_start = DateTime::parse_from_rfc3339(&period_start_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+            .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc));
         let period_end = DateTime::parse_from_rfc3339(&period_end_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+            .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc));
         let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
         let metrics: SessionMetrics = serde_json::from_str(&metrics_json).unwrap_or_default();
         let compression_level = match compression_str.as_str() {
@@ -334,8 +336,7 @@ impl ArchiveRepository {
             _ => CompressionLevel::Raw,
         };
         let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+            .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc));
 
         Ok(SessionArchive {
             id,
@@ -358,11 +359,11 @@ impl ArchiveRepository {
             let compression = format!("{:?}", archive.compression_level).to_lowercase();
 
             conn.execute(
-                r#"
+                r"
                 UPDATE session_archives
                 SET summary = ?, tags = ?, metrics = ?, compression_level = ?
                 WHERE id = ?
-                "#,
+                ",
                 params![
                     archive.summary,
                     tags_json,
@@ -390,12 +391,11 @@ impl ArchiveRepository {
     /// Get recent archives
     pub fn recent(&self, limit: usize) -> DatabaseResult<Vec<SessionArchive>> {
         self.db.with_connection(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT * FROM session_archives ORDER BY created_at DESC LIMIT ?",
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT * FROM session_archives ORDER BY created_at DESC LIMIT ?")?;
 
             let archives = stmt
-                .query_map([limit as i64], |row| Self::row_to_archive(row))?
+                .query_map([limit as i64], Self::row_to_archive)?
                 .collect::<Result<Vec<_>, _>>()?;
 
             Ok(archives)
@@ -410,7 +410,7 @@ impl ArchiveRepository {
             )?;
 
             let archives = stmt
-                .query_map([dir.to_string_lossy()], |row| Self::row_to_archive(row))?
+                .query_map([dir.to_string_lossy()], Self::row_to_archive)?
                 .collect::<Result<Vec<_>, _>>()?;
 
             Ok(archives)
@@ -529,14 +529,10 @@ mod tests {
         let (db, repo) = setup_test_db();
 
         for i in 0..5 {
-            let session = Session::new(PathBuf::from(format!("/tmp/test{}", i)));
+            let session = Session::new(PathBuf::from(format!("/tmp/test{i}")));
             insert_session(&db, &session);
 
-            let archive = SessionArchive::from_session(
-                &session,
-                format!("Summary {}", i),
-                vec![],
-            );
+            let archive = SessionArchive::from_session(&session, format!("Summary {i}"), vec![]);
             repo.insert(&archive).unwrap();
         }
 
@@ -551,11 +547,7 @@ mod tests {
         let session = Session::new(PathBuf::from("/tmp/test"));
         insert_session(&db, &session);
 
-        let mut archive = SessionArchive::from_session(
-            &session,
-            "Original".to_string(),
-            vec![],
-        );
+        let mut archive = SessionArchive::from_session(&session, "Original".to_string(), vec![]);
 
         repo.insert(&archive).unwrap();
 

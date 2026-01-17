@@ -16,29 +16,15 @@ use tokio::sync::mpsc;
 #[derive(Debug, Clone)]
 pub enum ExecutorEvent {
     /// Task started execution
-    TaskStarted {
-        task_id: TaskId,
-        pty_id: PtyId,
-    },
+    TaskStarted { task_id: TaskId, pty_id: PtyId },
     /// Task output received
-    TaskOutput {
-        task_id: TaskId,
-        data: String,
-    },
+    TaskOutput { task_id: TaskId, data: String },
     /// Task completed
-    TaskCompleted {
-        task_id: TaskId,
-        result: TaskResult,
-    },
+    TaskCompleted { task_id: TaskId, result: TaskResult },
     /// Task failed
-    TaskFailed {
-        task_id: TaskId,
-        error: String,
-    },
+    TaskFailed { task_id: TaskId, error: String },
     /// Task was skipped
-    TaskSkipped {
-        task_id: TaskId,
-    },
+    TaskSkipped { task_id: TaskId },
     /// All tasks complete
     AllComplete {
         total: usize,
@@ -98,9 +84,9 @@ pub struct TaskExecutor {
     pty_pool: PtyPool,
     /// Executor configuration
     config: ExecutorConfig,
-    /// Running tasks (pty_id -> running task info)
+    /// Running tasks (`pty_id` -> running task info)
     running_tasks: HashMap<PtyId, RunningTask>,
-    /// Reverse lookup (task_id -> pty_id)
+    /// Reverse lookup (`task_id` -> `pty_id`)
     task_to_pty: HashMap<TaskId, PtyId>,
     /// Event sender
     event_tx: Option<mpsc::UnboundedSender<ExecutorEvent>>,
@@ -108,6 +94,7 @@ pub struct TaskExecutor {
 
 impl TaskExecutor {
     /// Create a new executor
+    #[must_use]
     pub fn new(graph: TaskGraph, config: ExecutorConfig) -> Self {
         let scheduler_config = SchedulerConfig {
             max_concurrent: config.max_concurrent,
@@ -129,7 +116,11 @@ impl TaskExecutor {
     }
 
     /// Create executor with event channel
-    pub fn with_events(graph: TaskGraph, config: ExecutorConfig) -> (Self, mpsc::UnboundedReceiver<ExecutorEvent>) {
+    #[must_use]
+    pub fn with_events(
+        graph: TaskGraph,
+        config: ExecutorConfig,
+    ) -> (Self, mpsc::UnboundedReceiver<ExecutorEvent>) {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut executor = Self::new(graph, config);
         executor.event_tx = Some(tx);
@@ -182,7 +173,11 @@ impl TaskExecutor {
 
         for event in scheduler_events {
             match event {
-                SchedulerEvent::TaskReady { task_id, command, args } => {
+                SchedulerEvent::TaskReady {
+                    task_id,
+                    command,
+                    args,
+                } => {
                     // Start the task
                     match self.start_task(task_id, &command, &args) {
                         Ok(pty_id) => {
@@ -196,8 +191,16 @@ impl TaskExecutor {
                         }
                     }
                 }
-                SchedulerEvent::Progress { completed, total, running } => {
-                    events.push(ExecutorEvent::Progress { completed, total, running });
+                SchedulerEvent::Progress {
+                    completed,
+                    total,
+                    running,
+                } => {
+                    events.push(ExecutorEvent::Progress {
+                        completed,
+                        total,
+                        running,
+                    });
                 }
                 other => {
                     events.push(ExecutorEvent::Scheduler(other));
@@ -226,14 +229,13 @@ impl TaskExecutor {
         let shell_args = vec!["-c".to_string(), full_command];
 
         // Spawn PTY using sync wrapper
-        let pty_id = self.pty_pool.spawn_with_command_sync(
-            &self.config.shell,
-            &shell_args,
-            &self.config.working_dir,
-        ).map_err(|_e| TaskError::ExecutionFailed {
-            id: task_id,
-            exit_code: -1,
-        })?;
+        let pty_id = self
+            .pty_pool
+            .spawn_with_command_sync(&self.config.shell, &shell_args, &self.config.working_dir)
+            .map_err(|_e| TaskError::ExecutionFailed {
+                id: task_id,
+                exit_code: -1,
+            })?;
 
         // Register with scheduler
         self.scheduler.task_started(task_id, pty_id)?;
@@ -297,7 +299,10 @@ impl TaskExecutor {
             };
 
             // Notify scheduler
-            if let Ok(scheduler_events) = self.scheduler.task_completed(running.task_id, result.clone()) {
+            if let Ok(scheduler_events) = self
+                .scheduler
+                .task_completed(running.task_id, result.clone())
+            {
                 events.extend(self.process_scheduler_events(scheduler_events));
             }
 
@@ -341,7 +346,11 @@ impl TaskExecutor {
 
         for event in events {
             match event {
-                SchedulerEvent::TaskReady { task_id, command, args } => {
+                SchedulerEvent::TaskReady {
+                    task_id,
+                    command,
+                    args,
+                } => {
                     // Start the task
                     match self.start_task(task_id, &command, &args) {
                         Ok(pty_id) => {
@@ -365,8 +374,16 @@ impl TaskExecutor {
                         failed: stats.failed,
                     });
                 }
-                SchedulerEvent::Progress { completed, total, running } => {
-                    result.push(ExecutorEvent::Progress { completed, total, running });
+                SchedulerEvent::Progress {
+                    completed,
+                    total,
+                    running,
+                } => {
+                    result.push(ExecutorEvent::Progress {
+                        completed,
+                        total,
+                        running,
+                    });
                 }
                 other => {
                     result.push(ExecutorEvent::Scheduler(other));
@@ -477,16 +494,16 @@ mod tests {
     fn create_test_graph() -> TaskGraph {
         let mut graph = TaskGraph::new();
 
-        let task1 = TaskNode::new("Echo 1", "echo")
-            .with_args(vec!["Hello".to_string()]);
-        let task2 = TaskNode::new("Echo 2", "echo")
-            .with_args(vec!["World".to_string()]);
+        let task1 = TaskNode::new("Echo 1", "echo").with_args(vec!["Hello".to_string()]);
+        let task2 = TaskNode::new("Echo 2", "echo").with_args(vec!["World".to_string()]);
 
         let id1 = graph.add_task(task1);
         let id2 = graph.add_task(task2);
 
         // task2 depends on task1
-        graph.add_dependency(&id1, &id2, TaskEdge::DependsOn).unwrap();
+        graph
+            .add_dependency(&id1, &id2, TaskEdge::DependsOn)
+            .unwrap();
 
         graph
     }

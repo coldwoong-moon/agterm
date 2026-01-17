@@ -1,6 +1,6 @@
 //! TUI Widgets
 //!
-//! Custom ratatui widgets for AgTerm.
+//! Custom ratatui widgets for `AgTerm`.
 
 pub mod archive_browser;
 pub mod graph_view;

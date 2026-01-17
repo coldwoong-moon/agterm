@@ -62,8 +62,7 @@ pub enum ActiveView {
 impl AppState {
     /// Create a new application state with the given configuration
     pub fn new(config: AppConfig) -> Result<Self> {
-        let working_dir = std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
         Ok(Self {
             session_id: Uuid::new_v4(),
@@ -101,6 +100,7 @@ impl AppState {
     }
 
     /// Check if application is running
+    #[must_use]
     pub fn is_running(&self) -> bool {
         self.running_state == RunningState::Running
     }
@@ -112,6 +112,7 @@ impl AppState {
     }
 
     /// Get the current working directory
+    #[must_use]
     pub fn cwd(&self) -> &std::path::Path {
         &self.working_dir
     }
@@ -127,7 +128,7 @@ impl AppState {
     }
 }
 
-/// Thread-safe wrapper for AppState
+/// Thread-safe wrapper for `AppState`
 pub type SharedAppState = Arc<RwLock<AppState>>;
 
 /// Create a new shared application state

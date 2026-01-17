@@ -3,8 +3,7 @@
 //! Manages multiple MCP server connections.
 
 use crate::infrastructure::mcp::client::{
-    create_client_handle, ConnectionStatus, McpClient, McpClientError, McpClientHandle,
-    McpClientResult,
+    create_client_handle, ConnectionStatus, McpClientError, McpClientHandle, McpClientResult,
 };
 use crate::infrastructure::mcp::server_config::McpServerConfig;
 use rmcp::model::Tool;
@@ -42,6 +41,7 @@ pub struct McpRegistry {
 
 impl McpRegistry {
     /// Create a new empty registry
+    #[must_use]
     pub fn new() -> Self {
         Self {
             servers: HashMap::new(),
@@ -50,6 +50,7 @@ impl McpRegistry {
     }
 
     /// Create a new registry with event channel
+    #[must_use]
     pub fn with_events() -> (Self, tokio::sync::mpsc::UnboundedReceiver<RegistryEvent>) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let registry = Self {
@@ -85,21 +86,25 @@ impl McpRegistry {
     }
 
     /// Get a server handle by name
+    #[must_use]
     pub fn get(&self, name: &str) -> Option<&McpClientHandle> {
         self.servers.get(name)
     }
 
     /// Get all server names
+    #[must_use]
     pub fn server_names(&self) -> Vec<String> {
         self.servers.keys().cloned().collect()
     }
 
     /// Get number of registered servers
+    #[must_use]
     pub fn server_count(&self) -> usize {
         self.servers.len()
     }
 
     /// Check if a server is registered
+    #[must_use]
     pub fn contains(&self, name: &str) -> bool {
         self.servers.contains_key(name)
     }
@@ -109,7 +114,7 @@ impl McpRegistry {
         let handle = self
             .servers
             .get(name)
-            .ok_or_else(|| McpClientError::InvalidConfig(format!("Server not found: {}", name)))?;
+            .ok_or_else(|| McpClientError::InvalidConfig(format!("Server not found: {name}")))?;
 
         let old_status = handle.read().await.status();
         handle.write().await.connect().await?;
@@ -129,7 +134,7 @@ impl McpRegistry {
         let handle = self
             .servers
             .get(name)
-            .ok_or_else(|| McpClientError::InvalidConfig(format!("Server not found: {}", name)))?;
+            .ok_or_else(|| McpClientError::InvalidConfig(format!("Server not found: {name}")))?;
 
         let old_status = handle.read().await.status();
         handle.write().await.disconnect().await?;
@@ -144,7 +149,7 @@ impl McpRegistry {
         Ok(())
     }
 
-    /// Connect to all servers that have auto_connect enabled
+    /// Connect to all servers that have `auto_connect` enabled
     pub async fn connect_auto(&self) -> Vec<(String, McpClientResult<()>)> {
         let mut results = Vec::new();
 
@@ -246,7 +251,7 @@ impl McpRegistry {
         arguments: Option<serde_json::Map<String, serde_json::Value>>,
     ) -> McpClientResult<rmcp::model::CallToolResult> {
         let handle = self.servers.get(server_name).ok_or_else(|| {
-            McpClientError::InvalidConfig(format!("Server not found: {}", server_name))
+            McpClientError::InvalidConfig(format!("Server not found: {server_name}"))
         })?;
 
         let client = handle.read().await;
@@ -282,13 +287,17 @@ impl Default for McpRegistry {
 pub type McpRegistryHandle = Arc<RwLock<McpRegistry>>;
 
 /// Create a new registry handle
+#[must_use]
 pub fn create_registry_handle() -> McpRegistryHandle {
     Arc::new(RwLock::new(McpRegistry::new()))
 }
 
 /// Create a new registry handle with events
-pub fn create_registry_handle_with_events(
-) -> (McpRegistryHandle, tokio::sync::mpsc::UnboundedReceiver<RegistryEvent>) {
+#[must_use]
+pub fn create_registry_handle_with_events() -> (
+    McpRegistryHandle,
+    tokio::sync::mpsc::UnboundedReceiver<RegistryEvent>,
+) {
     let (registry, rx) = McpRegistry::with_events();
     (Arc::new(RwLock::new(registry)), rx)
 }
@@ -333,7 +342,10 @@ mod tests {
 
         registry.register(McpServerConfig::stdio("server-a", "echo"));
         registry.register(McpServerConfig::stdio("server-b", "echo"));
-        registry.register(McpServerConfig::sse("server-c", "http://localhost:8000/sse"));
+        registry.register(McpServerConfig::sse(
+            "server-c",
+            "http://localhost:8000/sse",
+        ));
 
         let names = registry.server_names();
         assert_eq!(names.len(), 3);

@@ -4,7 +4,7 @@
 
 use crate::error::{PtyError, PtyResult};
 use crate::infrastructure::pty::parser::AnsiParser;
-use crate::infrastructure::pty::session::{PtyId, PtySession, PtySessionConfig, PtyState};
+use crate::infrastructure::pty::session::{PtyId, PtySession, PtySessionConfig};
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Arc;
@@ -71,6 +71,7 @@ impl ManagedSession {
     }
 
     /// Get the reader reference
+    #[must_use]
     pub fn reader(&self) -> Option<&Arc<Mutex<Box<dyn Read + Send>>>> {
         self.reader.as_ref()
     }
@@ -81,6 +82,7 @@ impl ManagedSession {
     }
 
     /// Check if the session is idle
+    #[must_use]
     pub fn idle_duration(&self) -> std::time::Duration {
         self.last_activity.elapsed()
     }
@@ -111,6 +113,7 @@ pub struct PtyPool {
 
 impl PtyPool {
     /// Create a new PTY pool with the given configuration
+    #[must_use]
     pub fn new(config: PtyPoolConfig) -> Self {
         Self {
             config,
@@ -121,6 +124,7 @@ impl PtyPool {
     }
 
     /// Create a new PTY pool with default configuration
+    #[must_use]
     pub fn with_defaults() -> Self {
         Self::new(PtyPoolConfig::default())
     }
@@ -246,9 +250,9 @@ impl PtyPool {
         F: FnOnce(&ManagedSession) -> R,
     {
         let sessions = self.sessions.read().await;
-        let session = sessions.get(id).ok_or_else(|| PtyError::NotFound {
-            id: id.to_string(),
-        })?;
+        let session = sessions
+            .get(id)
+            .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
         Ok(f(session))
     }
 
@@ -258,9 +262,9 @@ impl PtyPool {
         F: FnOnce(&mut ManagedSession) -> R,
     {
         let mut sessions = self.sessions.write().await;
-        let session = sessions.get_mut(id).ok_or_else(|| PtyError::NotFound {
-            id: id.to_string(),
-        })?;
+        let session = sessions
+            .get_mut(id)
+            .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
         Ok(f(session))
     }
 
@@ -273,9 +277,7 @@ impl PtyPool {
         };
 
         let Some(managed) = session else {
-            return Err(PtyError::NotFound {
-                id: id.to_string(),
-            });
+            return Err(PtyError::NotFound { id: id.to_string() });
         };
 
         // Kill the PTY process
@@ -336,9 +338,7 @@ impl PtyPool {
     pub async fn set_focus(&self, id: PtyId) -> PtyResult<()> {
         let sessions = self.sessions.read().await;
         if !sessions.contains_key(&id) {
-            return Err(PtyError::NotFound {
-                id: id.to_string(),
-            });
+            return Err(PtyError::NotFound { id: id.to_string() });
         }
 
         *self.focused_id.write().await = Some(id);
@@ -463,9 +463,11 @@ impl PtyPool {
         })?;
 
         let sessions = self.sessions.read().await;
-        let session = sessions.get(&focused_id).ok_or_else(|| PtyError::NotFound {
-            id: focused_id.to_string(),
-        })?;
+        let session = sessions
+            .get(&focused_id)
+            .ok_or_else(|| PtyError::NotFound {
+                id: focused_id.to_string(),
+            })?;
 
         session.session.write(data).await
     }
@@ -476,9 +478,9 @@ impl PtyPool {
         id: &PtyId,
     ) -> PtyResult<(crate::infrastructure::pty::parser::TerminalScreen, String)> {
         let sessions = self.sessions.read().await;
-        let session = sessions.get(id).ok_or_else(|| PtyError::NotFound {
-            id: id.to_string(),
-        })?;
+        let session = sessions
+            .get(id)
+            .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
 
         let screen = session.parser.screen().clone();
         let label = session.label.clone();
@@ -516,7 +518,7 @@ impl PtyPool {
         outputs
     }
 
-    /// Synchronous wrapper for spawn_with_command
+    /// Synchronous wrapper for `spawn_with_command`
     pub fn spawn_with_command_sync(
         &self,
         command: &str,

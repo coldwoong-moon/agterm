@@ -7,8 +7,8 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget, Wrap},
+    text::Line,
+    widgets::{Block, Paragraph, Widget, Wrap},
 };
 
 /// Terminal pane widget for displaying PTY output
@@ -25,6 +25,7 @@ pub struct TerminalPane<'a> {
 
 impl<'a> TerminalPane<'a> {
     /// Create a new terminal pane widget
+    #[must_use]
     pub fn new(screen: &'a TerminalScreen) -> Self {
         Self {
             screen,
@@ -35,18 +36,21 @@ impl<'a> TerminalPane<'a> {
     }
 
     /// Set the block decoration
+    #[must_use]
     pub fn block(mut self, block: Block<'a>) -> Self {
         self.block = Some(block);
         self
     }
 
     /// Set whether this pane is focused
+    #[must_use]
     pub fn focused(mut self, focused: bool) -> Self {
         self.focused = focused;
         self
     }
 
     /// Set whether to show the cursor
+    #[must_use]
     pub fn show_cursor(mut self, show: bool) -> Self {
         self.show_cursor = show;
         self
@@ -114,7 +118,7 @@ impl<'a> TerminalPane<'a> {
     }
 }
 
-impl<'a> Widget for TerminalPane<'a> {
+impl Widget for TerminalPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Render block if present
         let inner_area = if let Some(block) = &self.block {
@@ -158,7 +162,9 @@ impl<'a> Widget for TerminalPane<'a> {
                         style
                     };
 
-                    buf.get_mut(buf_x, buf_y).set_char(cell.char).set_style(final_style);
+                    buf.get_mut(buf_x, buf_y)
+                        .set_char(cell.char)
+                        .set_style(final_style);
                 }
             }
         }
@@ -175,6 +181,7 @@ pub struct SimpleTerminalOutput<'a> {
 
 impl<'a> SimpleTerminalOutput<'a> {
     /// Create from raw bytes
+    #[must_use]
     pub fn from_bytes(data: &'a [u8]) -> Self {
         let text = String::from_utf8_lossy(data);
         let lines: Vec<Line<'a>> = text
@@ -186,6 +193,7 @@ impl<'a> SimpleTerminalOutput<'a> {
     }
 
     /// Create from string
+    #[must_use]
     pub fn from_str(text: &'a str) -> Self {
         let lines: Vec<Line<'a>> = text
             .lines()
@@ -196,16 +204,16 @@ impl<'a> SimpleTerminalOutput<'a> {
     }
 
     /// Set the block decoration
+    #[must_use]
     pub fn block(mut self, block: Block<'a>) -> Self {
         self.block = Some(block);
         self
     }
 }
 
-impl<'a> Widget for SimpleTerminalOutput<'a> {
+impl Widget for SimpleTerminalOutput<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let paragraph = Paragraph::new(self.lines)
-            .wrap(Wrap { trim: false });
+        let paragraph = Paragraph::new(self.lines).wrap(Wrap { trim: false });
 
         let paragraph = if let Some(block) = self.block {
             paragraph.block(block)

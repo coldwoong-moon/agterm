@@ -36,6 +36,7 @@ pub struct App {
 
 impl App {
     /// Create a new application
+    #[must_use]
     pub fn new(state: AppState) -> Self {
         let pool_config = PtyPoolConfig {
             max_sessions: state.config.pty.max_sessions,
@@ -70,7 +71,7 @@ impl App {
             },
         };
 
-        let label = format!("Shell {}", session_num);
+        let label = format!("Shell {session_num}");
         let id = self.pty_pool.spawn(config, label).await?;
 
         // Add to layout
@@ -179,9 +180,8 @@ impl App {
                             }
                             KeyCode::Char('\\') => {
                                 // Horizontal split (side by side)
-                                if let Err(e) = self
-                                    .spawn_terminal(Some(SplitDirection::Horizontal))
-                                    .await
+                                if let Err(e) =
+                                    self.spawn_terminal(Some(SplitDirection::Horizontal)).await
                                 {
                                     tracing::error!(error = %e, "Failed to spawn new session");
                                 }
@@ -413,7 +413,7 @@ impl App {
                 });
 
                 let prefix = if is_focused { "● " } else { "○ " };
-                Line::from(vec![Span::styled(format!("{}{}", prefix, label), style)])
+                Line::from(vec![Span::styled(format!("{prefix}{label}"), style)])
             })
             .collect();
 
@@ -459,7 +459,7 @@ impl App {
                 let terminal_block = Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(border_color))
-                    .title(format!(" {} ", label));
+                    .title(format!(" {label} "));
 
                 let terminal_pane = TerminalPane::new(&screen)
                     .block(terminal_block)
@@ -481,7 +481,12 @@ impl App {
         }
     }
 
-    fn render_node_separators(&self, frame: &mut ratatui::Frame, node: &crate::presentation::layout::LayoutNode, area: Rect) {
+    fn render_node_separators(
+        &self,
+        frame: &mut ratatui::Frame,
+        node: &crate::presentation::layout::LayoutNode,
+        area: Rect,
+    ) {
         use crate::presentation::layout::LayoutNode;
 
         if let LayoutNode::Split {
@@ -494,7 +499,7 @@ impl App {
         {
             match direction {
                 SplitDirection::Horizontal => {
-                    let first_width = (area.width as f32 * ratio) as u16;
+                    let first_width = (f32::from(area.width) * ratio) as u16;
                     let sep_x = area.x + first_width;
 
                     // Draw vertical separator
@@ -502,8 +507,7 @@ impl App {
                         if sep_x < area.x + area.width {
                             let cell = frame.buffer_mut().cell_mut((sep_x, y));
                             if let Some(cell) = cell {
-                                cell.set_char('│')
-                                    .set_fg(Color::DarkGray);
+                                cell.set_char('│').set_fg(Color::DarkGray);
                             }
                         }
                     }
@@ -525,7 +529,7 @@ impl App {
                     self.render_node_separators(frame, second, second_area);
                 }
                 SplitDirection::Vertical => {
-                    let first_height = (area.height as f32 * ratio) as u16;
+                    let first_height = (f32::from(area.height) * ratio) as u16;
                     let sep_y = area.y + first_height;
 
                     // Draw horizontal separator
@@ -533,8 +537,7 @@ impl App {
                         if sep_y < area.y + area.height {
                             let cell = frame.buffer_mut().cell_mut((x, sep_y));
                             if let Some(cell) = cell {
-                                cell.set_char('─')
-                                    .set_fg(Color::DarkGray);
+                                cell.set_char('─').set_fg(Color::DarkGray);
                             }
                         }
                     }
@@ -562,11 +565,7 @@ impl App {
     /// Render the status bar
     fn render_status_bar(&self, frame: &mut ratatui::Frame, area: Rect) {
         let terminal_count = self.layout.terminal_count();
-        let session_msg = format!(
-            "Panes: {} │ {}",
-            terminal_count,
-            self.state.session_id
-        );
+        let session_msg = format!("Panes: {} │ {}", terminal_count, self.state.session_id);
 
         let status_bar = StatusBar::new()
             .hints(vec![

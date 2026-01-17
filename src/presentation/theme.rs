@@ -73,6 +73,7 @@ pub enum ThemeColor {
 
 impl ThemeColor {
     /// Convert to ratatui Color
+    #[must_use]
     pub fn to_color(&self) -> Color {
         match self {
             ThemeColor::Named(name) => match name.to_lowercase().as_str() {
@@ -346,6 +347,7 @@ impl Theme {
     }
 
     /// Get the dark theme preset
+    #[must_use]
     pub fn dark() -> Self {
         Self {
             name: "dark".to_string(),
@@ -368,6 +370,7 @@ impl Theme {
     }
 
     /// Get the light theme preset
+    #[must_use]
     pub fn light() -> Self {
         Self {
             name: "light".to_string(),
@@ -390,6 +393,7 @@ impl Theme {
     }
 
     /// Get the monokai theme preset
+    #[must_use]
     pub fn monokai() -> Self {
         Self {
             name: "monokai".to_string(),
@@ -412,6 +416,7 @@ impl Theme {
     }
 
     /// Get a theme by name
+    #[must_use]
     pub fn by_name(name: &str) -> Self {
         match name.to_lowercase().as_str() {
             "dark" => Self::dark(),
@@ -422,46 +427,55 @@ impl Theme {
     }
 
     /// Get style for primary elements
+    #[must_use]
     pub fn primary_style(&self) -> Style {
         Style::default().fg(self.colors.primary.to_color())
     }
 
     /// Get style for secondary elements
+    #[must_use]
     pub fn secondary_style(&self) -> Style {
         Style::default().fg(self.colors.secondary.to_color())
     }
 
     /// Get style for success elements
+    #[must_use]
     pub fn success_style(&self) -> Style {
         Style::default().fg(self.colors.success.to_color())
     }
 
     /// Get style for warning elements
+    #[must_use]
     pub fn warning_style(&self) -> Style {
         Style::default().fg(self.colors.warning.to_color())
     }
 
     /// Get style for error elements
+    #[must_use]
     pub fn error_style(&self) -> Style {
         Style::default().fg(self.colors.error.to_color())
     }
 
     /// Get style for info elements
+    #[must_use]
     pub fn info_style(&self) -> Style {
         Style::default().fg(self.colors.info.to_color())
     }
 
     /// Get style for muted/dim elements
+    #[must_use]
     pub fn muted_style(&self) -> Style {
         Style::default().fg(self.colors.muted.to_color())
     }
 
     /// Get style for borders
+    #[must_use]
     pub fn border_style(&self) -> Style {
         Style::default().fg(self.colors.border.to_color())
     }
 
     /// Get style for highlighted elements
+    #[must_use]
     pub fn highlight_style(&self) -> Style {
         Style::default()
             .bg(self.colors.highlight.to_color())
@@ -469,18 +483,19 @@ impl Theme {
     }
 
     /// Get style for focused borders
+    #[must_use]
     pub fn focused_border_style(&self) -> Style {
         Style::default().fg(self.colors.primary.to_color())
     }
 
     /// Get status icon for a task status
+    #[must_use]
     pub fn status_icon(&self, status: &str) -> &str {
         self.components
             .task_tree
             .status_icons
             .get(status)
-            .map(|s| s.as_str())
-            .unwrap_or("?")
+            .map_or("?", std::string::String::as_str)
     }
 }
 
@@ -498,6 +513,7 @@ impl Default for ThemeManager {
 
 impl ThemeManager {
     /// Create a new theme manager with built-in themes
+    #[must_use]
     pub fn new() -> Self {
         let mut themes = HashMap::new();
         themes.insert("default".to_string(), Theme::default());
@@ -512,6 +528,7 @@ impl ThemeManager {
     }
 
     /// Get the current theme
+    #[must_use]
     pub fn current(&self) -> &Theme {
         &self.current
     }
@@ -533,16 +550,20 @@ impl ThemeManager {
     }
 
     /// List available theme names
+    #[must_use]
     pub fn available_themes(&self) -> Vec<&str> {
-        self.themes.keys().map(|s| s.as_str()).collect()
+        self.themes
+            .keys()
+            .map(std::string::String::as_str)
+            .collect()
     }
 
     /// Load a theme from a TOML file
     pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read theme file: {}", e))?;
-        let theme: Theme = toml::from_str(&content)
-            .map_err(|e| format!("Failed to parse theme: {}", e))?;
+        let content =
+            std::fs::read_to_string(path).map_err(|e| format!("Failed to read theme file: {e}"))?;
+        let theme: Theme =
+            toml::from_str(&content).map_err(|e| format!("Failed to parse theme: {e}"))?;
         self.register(theme);
         Ok(())
     }
