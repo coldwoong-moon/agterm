@@ -14,7 +14,7 @@ name = "agterm"
 path = "src/main.rs"
 
 [dependencies]
-# GUI Framework
+# GUI Framework (tiny-skia CPU renderer - faster for many small text widgets)
 iced = { version = "0.13", default-features = false, features = ["tokio", "advanced", "tiny-skia"] }
 
 # Terminal/PTY
