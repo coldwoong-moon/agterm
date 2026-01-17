@@ -1248,11 +1248,8 @@ impl AgTerm {
         }
 
         // ========== Tab Bar ==========
-        let tab_bar: Element<Message> = row(self
-            .tabs
-            .iter()
-            .enumerate()
-            .map(|(i, _)| {
+        let mut tab_elements = Vec::with_capacity(self.tabs.len());
+        for (i, _) in self.tabs.iter().enumerate() {
                 let is_active = i == self.active_tab;
                 let label = format!("Terminal {}", i + 1);
                 let can_close = self.tabs.len() > 1;
@@ -1367,9 +1364,10 @@ impl AgTerm {
                         })
                 ];
 
-                container(tab_content).into()
-            })
-            .collect::<Vec<Element<Message>>>())
+                tab_elements.push(container(tab_content).into());
+        }
+
+        let tab_bar: Element<Message> = row(tab_elements)
         .spacing(2)
         .push(Space::with_width(8))
         .push(
@@ -1637,38 +1635,39 @@ impl AgTerm {
                 .color(theme::TEXT_PRIMARY)
                 .into()
         } else {
-            column(
-                display_lines
-                    .iter()
-                    .map(|spans| {
-                        // Use cached parsed spans directly
-                        if spans.is_empty() {
-                            text("").size(14).font(MONO_FONT).into()
-                        } else if spans.len() == 1 && spans[0].color.is_none() {
-                            text(spans[0].text.clone())
+            // Pre-allocate Vec for line elements
+            let mut line_elements = Vec::with_capacity(display_lines.len());
+
+            for spans in display_lines {
+                let line_element = if spans.is_empty() {
+                    text("").size(14).font(MONO_FONT).into()
+                } else if spans.len() == 1 && spans[0].color.is_none() {
+                    text(spans[0].text.clone())
+                        .size(14)
+                        .font(MONO_FONT)
+                        .color(theme::TEXT_PRIMARY)
+                        .into()
+                } else {
+                    // Pre-allocate Vec for span elements
+                    let mut span_elements = Vec::with_capacity(spans.len());
+                    for span in spans {
+                        let color = span.color.unwrap_or(theme::TEXT_PRIMARY);
+                        span_elements.push(
+                            text(span.text.clone())
                                 .size(14)
                                 .font(MONO_FONT)
-                                .color(theme::TEXT_PRIMARY)
-                                .into()
-                        } else {
-                            row(spans
-                                .iter()
-                                .map(|span| {
-                                    let color = span.color.unwrap_or(theme::TEXT_PRIMARY);
-                                    text(span.text.clone())
-                                        .size(14)
-                                        .font(MONO_FONT)
-                                        .color(color)
-                                        .into()
-                                })
-                                .collect::<Vec<Element<Message>>>())
-                            .into()
-                        }
-                    })
-                    .collect::<Vec<Element<Message>>>(),
-            )
-            .spacing(2)
-            .into()
+                                .color(color)
+                                .into(),
+                        );
+                    }
+                    row(span_elements).into()
+                };
+                line_elements.push(line_element);
+            }
+
+            column(line_elements)
+                .spacing(2)
+                .into()
         };
 
         scrollable(content)
@@ -1680,19 +1679,19 @@ impl AgTerm {
 
     /// Render welcome/info block (for initial output)
     fn render_welcome_block<'a>(&self, lines: &'a [String]) -> Element<'a, Message> {
-        let content = column(
-            lines
-                .iter()
-                .map(|line| {
-                    text(line)
-                        .size(13)
-                        .font(MONO_FONT)
-                        .color(theme::TEXT_SECONDARY)
-                        .into()
-                })
-                .collect::<Vec<Element<Message>>>(),
-        )
-        .spacing(4);
+        // Pre-allocate Vec for line elements
+        let mut line_elements = Vec::with_capacity(lines.len());
+        for line in lines {
+            line_elements.push(
+                text(line)
+                    .size(13)
+                    .font(MONO_FONT)
+                    .color(theme::TEXT_SECONDARY)
+                    .into(),
+            );
+        }
+
+        let content = column(line_elements).spacing(4);
 
         container(content)
             .padding([12, 16])
@@ -1795,42 +1794,38 @@ impl AgTerm {
                 Space::with_height(0).into()
             }
         } else {
-            column(
-                block
-                    .parsed_output_cache
-                    .iter()
-                    .map(|spans| {
-                        // Parse ANSI codes and render with colors
-                        // Use cached parsed ANSI spans
-                        if spans.is_empty() {
-                            Space::with_height(0).into()
-                        } else if spans.len() == 1 && spans[0].color.is_none() {
-                            // Simple case: no colors, just text (clone to own)
-                            text(spans[0].text.clone())
+            // Pre-allocate Vec for output line elements
+            let mut output_elements = Vec::with_capacity(block.parsed_output_cache.len());
+
+            for spans in &block.parsed_output_cache {
+                let line_element = if spans.is_empty() {
+                    Space::with_height(0).into()
+                } else if spans.len() == 1 && spans[0].color.is_none() {
+                    // Simple case: no colors, just text (clone to own)
+                    text(spans[0].text.clone())
+                        .size(13)
+                        .font(MONO_FONT)
+                        .color(theme::TEXT_SECONDARY)
+                        .into()
+                } else {
+                    // Multiple spans with colors - pre-allocate Vec for span elements
+                    let mut span_elements = Vec::with_capacity(spans.len());
+                    for span in spans {
+                        let color = span.color.unwrap_or(theme::TEXT_SECONDARY);
+                        span_elements.push(
+                            text(span.text.clone())
                                 .size(13)
                                 .font(MONO_FONT)
-                                .color(theme::TEXT_SECONDARY)
-                                .into()
-                        } else {
-                            // Multiple spans with colors
-                            row(spans
-                                .iter()
-                                .map(|span| {
-                                    let color = span.color.unwrap_or(theme::TEXT_SECONDARY);
-                                    text(span.text.clone())
-                                        .size(13)
-                                        .font(MONO_FONT)
-                                        .color(color)
-                                        .into()
-                                })
-                                .collect::<Vec<Element<Message>>>())
-                            .into()
-                        }
-                    })
-                    .collect::<Vec<Element<Message>>>(),
-            )
-            .spacing(2)
-            .into()
+                                .color(color)
+                                .into(),
+                        );
+                    }
+                    row(span_elements).into()
+                };
+                output_elements.push(line_element);
+            }
+
+            column(output_elements).spacing(2).into()
         };
 
         let block_content =
