@@ -15,7 +15,7 @@ mod logging;
 mod debug;
 
 use debug::{DebugPanel, DebugPanelMessage};
-use logging::LoggingConfig;
+use logging::{LogBuffer, LoggingConfig};
 
 use terminal::pty::{PtyManager, MAX_OUTPUT_LINES};
 
@@ -301,10 +301,16 @@ fn format_duration(duration: Duration) -> String {
     }
 }
 
+/// Global log buffer for debug panel (initialized once at startup)
+static LOG_BUFFER: std::sync::OnceLock<LogBuffer> = std::sync::OnceLock::new();
+
 fn main() -> iced::Result {
     // Initialize logging system
     let logging_config = LoggingConfig::default();
-    logging::init_logging(&logging_config);
+    let log_buffer = logging::init_logging(&logging_config);
+
+    // Store log buffer globally for access by DebugPanel
+    LOG_BUFFER.set(log_buffer).expect("LOG_BUFFER already initialized");
 
     tracing::info!("AgTerm starting");
 
@@ -371,7 +377,11 @@ impl Default for AgTerm {
             mode: TerminalMode::Raw,  // Default to Raw mode for interactive apps
         };
 
-        let debug_panel = DebugPanel::new();
+        let mut debug_panel = DebugPanel::new();
+        // Connect log buffer to debug panel
+        if let Some(log_buffer) = LOG_BUFFER.get() {
+            debug_panel.set_log_buffer(log_buffer.clone());
+        }
 
         tracing::info!("AgTerm application initialized");
         Self {

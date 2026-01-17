@@ -5,8 +5,11 @@
 //! - File output with daily rotation
 //! - Console output for development
 //! - Module-level log filtering
+//! - In-memory log buffer for debug panel
 
 pub mod layers;
+
+pub use layers::LogBuffer;
 
 use std::path::PathBuf;
 use tracing::Level;
@@ -17,6 +20,8 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
     EnvFilter, Layer,
 };
+
+use layers::LogBufferLayer;
 
 /// Logging configuration
 #[derive(Debug, Clone)]
@@ -74,12 +79,17 @@ fn default_log_dir() -> PathBuf {
         .join("logs")
 }
 
+/// Default log buffer size for debug panel
+const DEFAULT_LOG_BUFFER_SIZE: usize = 100;
+
 /// Initialize the logging system
+///
+/// Returns a `LogBuffer` handle that can be used to read logs in the debug panel.
 ///
 /// # Environment Variables
 /// - `AGTERM_LOG`: Override log level (e.g., "agterm=debug,agterm::terminal::pty=trace")
 /// - `AGTERM_DEBUG`: Enable debug panel on startup
-pub fn init_logging(config: &LoggingConfig) {
+pub fn init_logging(config: &LoggingConfig) -> LogBuffer {
     // Build the environment filter
     let env_filter = EnvFilter::try_from_env("AGTERM_LOG")
         .unwrap_or_else(|_| {
@@ -133,11 +143,15 @@ pub fn init_logging(config: &LoggingConfig) {
         None
     };
 
+    // Create in-memory log buffer layer for debug panel
+    let (log_buffer_layer, log_buffer) = LogBufferLayer::new(DEFAULT_LOG_BUFFER_SIZE);
+
     // Initialize the subscriber
     tracing_subscriber::registry()
         .with(env_filter)
         .with(console_layer)
         .with(file_layer)
+        .with(log_buffer_layer)
         .init();
 
     tracing::info!("Logging initialized");
@@ -147,6 +161,8 @@ pub fn init_logging(config: &LoggingConfig) {
         file_output = config.file_output,
         "Logging configuration"
     );
+
+    log_buffer
 }
 
 /// Parse log level from string

@@ -138,6 +138,15 @@ pub struct LogBuffer {
     buffer: Arc<Mutex<VecDeque<LogEntry>>>,
 }
 
+impl std::fmt::Debug for LogBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let len = self.buffer.lock().map(|g| g.len()).unwrap_or(0);
+        f.debug_struct("LogBuffer")
+            .field("entries", &len)
+            .finish()
+    }
+}
+
 impl LogBuffer {
     /// Get a snapshot of the current log entries
     pub fn get_entries(&self) -> Vec<LogEntry> {
