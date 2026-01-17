@@ -46,6 +46,7 @@
 // TODO: Re-enable strict lints after initial release
 // #![warn(missing_docs)]
 #![allow(missing_docs)]
+#![allow(unknown_lints)] // For cross-version compatibility
 #![warn(clippy::all)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::let_and_return)]
@@ -73,6 +74,9 @@
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::only_used_in_recursion)]
+#![allow(clippy::self_only_used_in_recursion)]
+#![allow(clippy::derivable_impls)]
+#![allow(clippy::replace_box)]
 #![allow(clippy::unnecessary_wraps)]
 #![allow(clippy::format_push_string)]
 #![allow(clippy::match_wildcard_for_single_variants)]
