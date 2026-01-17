@@ -513,11 +513,6 @@ fn main() -> iced::Result {
         .run()
 }
 
-/// Input field ID for focusing (Block mode)
-fn input_id() -> TextInputId {
-    TextInputId::new("terminal_input")
-}
-
 /// Raw mode input field ID for IME support
 fn raw_input_id() -> TextInputId {
     TextInputId::new("raw_terminal_input")
@@ -627,11 +622,9 @@ struct TerminalTab {
 /// Terminal input mode
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 enum TerminalMode {
-    /// Raw mode: all key input goes directly to PTY (for interactive apps like vim, Claude Code)
+    /// Raw mode: all key input goes directly to PTY (full streaming terminal)
     #[default]
     Raw,
-    /// Block mode: command input via text field, output in blocks (Warp-style)
-    Block,
 }
 
 /// Signal types for terminal control
@@ -663,23 +656,10 @@ enum Message {
     NextTab,
     PrevTab,
 
-    // Terminal input (Block mode)
-    InputChanged(String),
-    SubmitInput,
-    #[allow(dead_code)]
-    FocusInput,
-
     // Raw input (Raw mode)
     RawInput(String),
     RawInputChanged(String),
     RawInputSubmit,
-
-    // Mode toggle
-    ToggleMode,
-
-    // History navigation
-    HistoryPrevious,
-    HistoryNext,
 
     // Keyboard events
     KeyPressed(Key, Modifiers),
@@ -779,103 +759,9 @@ impl AgTerm {
                 if index < self.tabs.len() {
                     self.active_tab = index;
                 }
-                text_input::focus(input_id())
+                text_input::focus(raw_input_id())
             }
 
-            Message::InputChanged(input) => {
-                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                    tab.input = input;
-                    // Reset history browsing when user types
-                    tab.history_index = None;
-                }
-                Task::none()
-            }
-
-            Message::SubmitInput => {
-                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                    if !tab.input.is_empty() {
-                        // Add to history (avoid duplicates of last command)
-                        let cmd = tab.input.clone();
-                        if tab.history.last() != Some(&cmd) {
-                            tab.history.push(cmd.clone());
-                        }
-
-                        // Reset history navigation
-                        tab.history_index = None;
-                        tab.history_temp_input.clear();
-
-                        // Create a new command block
-                        let block = CommandBlock {
-                            command: tab.input.clone(),
-                            output: Vec::new(),
-                            parsed_output_cache: Vec::new(),
-                            timestamp: Instant::now(),
-                            completed_at: None,
-                            exit_code: None,
-                            is_running: true,
-                        };
-                        tab.blocks.push(block);
-
-                        // Send command to PTY
-                        if let Some(session_id) = &tab.session_id {
-                            let input = format!("{}\n", tab.input);
-                            let _ = self.pty_manager.write(session_id, input.as_bytes());
-                        }
-                        tab.input.clear();
-                    }
-                }
-                text_input::focus(input_id())
-            }
-
-            Message::FocusInput => text_input::focus(input_id()),
-
-            Message::HistoryPrevious => {
-                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                    if tab.history.is_empty() {
-                        return Task::none();
-                    }
-
-                    match tab.history_index {
-                        None => {
-                            // Start browsing history - save current input
-                            tab.history_temp_input = tab.input.clone();
-                            tab.history_index = Some(tab.history.len() - 1);
-                            tab.input = tab.history[tab.history.len() - 1].clone();
-                        }
-                        Some(idx) if idx > 0 => {
-                            // Move to older command
-                            tab.history_index = Some(idx - 1);
-                            tab.input = tab.history[idx - 1].clone();
-                        }
-                        _ => {
-                            // Already at oldest - do nothing
-                        }
-                    }
-                }
-                Task::none()
-            }
-
-            Message::HistoryNext => {
-                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                    match tab.history_index {
-                        Some(idx) if idx < tab.history.len() - 1 => {
-                            // Move to newer command
-                            tab.history_index = Some(idx + 1);
-                            tab.input = tab.history[idx + 1].clone();
-                        }
-                        Some(_) => {
-                            // At newest history entry - restore temp input
-                            tab.history_index = None;
-                            tab.input = tab.history_temp_input.clone();
-                            tab.history_temp_input.clear();
-                        }
-                        None => {
-                            // Not browsing history - do nothing
-                        }
-                    }
-                }
-                Task::none()
-            }
 
             Message::CloseCurrentTab => {
                 if self.tabs.len() > 1 {
@@ -889,14 +775,14 @@ impl AgTerm {
                         self.active_tab = self.tabs.len() - 1;
                     }
                 }
-                text_input::focus(input_id())
+                text_input::focus(raw_input_id())
             }
 
             Message::NextTab => {
                 if !self.tabs.is_empty() {
                     self.active_tab = (self.active_tab + 1) % self.tabs.len();
                 }
-                text_input::focus(input_id())
+                text_input::focus(raw_input_id())
             }
 
             Message::PrevTab => {
@@ -907,7 +793,7 @@ impl AgTerm {
                         self.active_tab - 1
                     };
                 }
-                text_input::focus(input_id())
+                text_input::focus(raw_input_id())
             }
 
             Message::RawInput(input) => {
@@ -956,25 +842,8 @@ impl AgTerm {
                 text_input::focus(raw_input_id())
             }
 
-            Message::ToggleMode => {
-                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                    tab.mode = match tab.mode {
-                        TerminalMode::Raw => TerminalMode::Block,
-                        TerminalMode::Block => TerminalMode::Raw,
-                    };
-                }
-                Task::none()
-            }
-
             Message::KeyPressed(key, modifiers) => {
-                // Get current mode
-                let current_mode = self
-                    .tabs
-                    .get(self.active_tab)
-                    .map(|t| t.mode)
-                    .unwrap_or(TerminalMode::Raw);
-
-                // Handle Ctrl key signals (both modes)
+                // Handle Ctrl key signals
                 if modifiers.control() {
                     match key.as_ref() {
                         Key::Character("c") => {
@@ -990,7 +859,7 @@ impl AgTerm {
                     }
                 }
 
-                // Handle keyboard shortcuts (Cmd key - both modes)
+                // Handle keyboard shortcuts (Cmd key)
                 if modifiers.command() {
                     match key.as_ref() {
                         Key::Character("t") => return self.update(Message::NewTab),
@@ -1005,7 +874,6 @@ impl AgTerm {
                         Key::Character("v") => {
                             return iced::clipboard::read().map(Message::ClipboardContent)
                         }
-                        Key::Character("m") => return self.update(Message::ToggleMode), // Toggle mode
                         Key::Character("d") => return self.update(Message::ToggleDebugPanel), // Toggle debug panel
                         _ => {}
                     }
@@ -1018,7 +886,7 @@ impl AgTerm {
 
                 // Raw mode: send special keys directly to PTY
                 // NOTE: Regular characters are handled by text_input (for IME support)
-                if current_mode == TerminalMode::Raw && !modifiers.command() {
+                if !modifiers.command() {
                     let input = match key.as_ref() {
                         // Only handle special/named keys here
                         // Regular characters go through text_input for IME support
@@ -1043,19 +911,6 @@ impl AgTerm {
                     }
                 }
 
-                // Block mode: history navigation with arrow keys
-                if current_mode == TerminalMode::Block {
-                    match key.as_ref() {
-                        Key::Named(keyboard::key::Named::ArrowUp) => {
-                            return self.update(Message::HistoryPrevious);
-                        }
-                        Key::Named(keyboard::key::Named::ArrowDown) => {
-                            return self.update(Message::HistoryNext);
-                        }
-                        _ => {}
-                    }
-                }
-
                 Task::none()
             }
 
@@ -1075,17 +930,9 @@ impl AgTerm {
             Message::ClipboardContent(clipboard_opt) => {
                 if let Some(content) = clipboard_opt {
                     if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                        match tab.mode {
-                            TerminalMode::Raw => {
-                                // In Raw mode, send clipboard content directly to PTY
-                                if let Some(session_id) = &tab.session_id {
-                                    let _ = self.pty_manager.write(session_id, content.as_bytes());
-                                }
-                            }
-                            TerminalMode::Block => {
-                                // In Block mode, append to input field
-                                tab.input.push_str(&content);
-                            }
+                        // Send clipboard content directly to PTY
+                        if let Some(session_id) = &tab.session_id {
+                            let _ = self.pty_manager.write(session_id, content.as_bytes());
                         }
                     }
                 }
@@ -1129,14 +976,7 @@ impl AgTerm {
                 // Auto-focus on raw input for IME support
                 let focus_task = if self.startup_focus_count > 0 {
                     self.startup_focus_count -= 1;
-                    if let Some(tab) = self.tabs.get(self.active_tab) {
-                        match tab.mode {
-                            TerminalMode::Raw => text_input::focus(raw_input_id()),
-                            TerminalMode::Block => text_input::focus(input_id()),
-                        }
-                    } else {
-                        Task::none()
-                    }
+                    text_input::focus(raw_input_id())
                 } else {
                     Task::none()
                 };
@@ -1154,102 +994,34 @@ impl AgTerm {
                                 // Record PTY read metrics
                                 self.debug_panel.metrics.record_pty_read(data.len());
 
-                                match tab.mode {
-                                    TerminalMode::Raw => {
-                                        // Check if at bottom before adding new content
-                                        let was_at_bottom = tab.canvas_state.is_at_bottom(tab.parsed_line_cache.len());
+                                // Check if at bottom before adding new content
+                                let was_at_bottom = tab.canvas_state.is_at_bottom(tab.parsed_line_cache.len());
 
-                                        // In Raw mode, append to raw_output_buffer
-                                        tab.raw_output_buffer.push_str(&raw_output);
-                                        // Limit buffer size (keep last 100KB)
-                                        const MAX_RAW_BUFFER: usize = 100 * 1024;
-                                        if tab.raw_output_buffer.len() > MAX_RAW_BUFFER {
-                                            let excess =
-                                                tab.raw_output_buffer.len() - MAX_RAW_BUFFER;
-                                            tab.raw_output_buffer.drain(0..excess);
-                                            // Clear cache when buffer is truncated
-                                            tab.parsed_line_cache.clear();
-                                            tab.cache_buffer_len = 0;
-                                        }
-
-                                        // Update ANSI parsing cache for new content
-                                        update_line_cache(tab);
-
-                                        // Increment content version for canvas cache invalidation
-                                        tab.content_version += 1;
-
-                                        // Auto-scroll if was at bottom
-                                        if was_at_bottom {
-                                            tab.canvas_state.scroll_to_bottom(tab.parsed_line_cache.len());
-                                        }
-                                    }
-                                    TerminalMode::Block => {
-                                        // In Block mode, use existing block-based logic
-                                        let output = &raw_output;
-                                        let stripped = strip_ansi(&raw_output);
-
-                                        if let Some(block) =
-                                            tab.blocks.iter_mut().rev().find(|b| b.is_running)
-                                        {
-                                            for line in output.lines() {
-                                                let trimmed_stripped =
-                                                    strip_ansi(line).trim().to_string();
-                                                if !trimmed_stripped.is_empty()
-                                                    && trimmed_stripped != block.command
-                                                {
-                                                    block.output.push(line.to_string());
-                                                    // Cache parsed ANSI for this line
-                                                    block
-                                                        .parsed_output_cache
-                                                        .push(parse_ansi_text(line));
-                                                    if block.output.len() > MAX_OUTPUT_LINES {
-                                                        block.output.drain(0..1000);
-                                                        block.parsed_output_cache.drain(0..1000);
-                                                    }
-                                                }
-                                            }
-                                            if block.timestamp.elapsed()
-                                                > Duration::from_millis(500)
-                                                && stripped.is_empty()
-                                            {
-                                                if block.is_running {
-                                                    block.completed_at = Some(Instant::now());
-                                                }
-                                                block.is_running = false;
-                                            }
-                                        } else {
-                                            for line in output.lines() {
-                                                let trimmed = line.trim();
-                                                if !trimmed.is_empty() {
-                                                    tab.pending_output.push(trimmed.to_string());
-                                                    if tab.pending_output.len() > 1000 {
-                                                        tab.pending_output.drain(0..100);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                // Append to raw_output_buffer
+                                tab.raw_output_buffer.push_str(&raw_output);
+                                // Limit buffer size (keep last 100KB)
+                                const MAX_RAW_BUFFER: usize = 100 * 1024;
+                                if tab.raw_output_buffer.len() > MAX_RAW_BUFFER {
+                                    let excess =
+                                        tab.raw_output_buffer.len() - MAX_RAW_BUFFER;
+                                    tab.raw_output_buffer.drain(0..excess);
+                                    // Clear cache when buffer is truncated
+                                    tab.parsed_line_cache.clear();
+                                    tab.cache_buffer_len = 0;
                                 }
-                            } else if tab.mode == TerminalMode::Block {
-                                // Block mode: mark running blocks as complete
-                                for block in &mut tab.blocks {
-                                    if block.is_running
-                                        && block.timestamp.elapsed() > Duration::from_millis(300)
-                                    {
-                                        if block.completed_at.is_none() {
-                                            block.completed_at = Some(Instant::now());
-                                        }
-                                        block.is_running = false;
-                                    }
+
+                                // Update ANSI parsing cache for new content
+                                update_line_cache(tab);
+
+                                // Increment content version for canvas cache invalidation
+                                tab.content_version += 1;
+
+                                // Auto-scroll if was at bottom
+                                if was_at_bottom {
+                                    tab.canvas_state.scroll_to_bottom(tab.parsed_line_cache.len());
                                 }
                             }
                         }
-                    }
-
-                    // Enforce maximum blocks per tab (Block mode)
-                    if tab.mode == TerminalMode::Block && tab.blocks.len() > MAX_BLOCKS_PER_TAB {
-                        let excess = tab.blocks.len() - MAX_BLOCKS_PER_TAB;
-                        tab.blocks.drain(0..excess);
                     }
                 }
                 focus_task
@@ -1415,183 +1187,80 @@ impl AgTerm {
 
         // ========== Terminal Content ==========
         let content: Element<Message> = if let Some(tab) = self.tabs.get(self.active_tab) {
-            match tab.mode {
-                TerminalMode::Raw => {
-                    // ========== Raw Mode: Full terminal view ==========
-                    let terminal_output = self.render_raw_terminal(&tab.parsed_line_cache);
+            // ========== Full Streaming Terminal ==========
+            let terminal_output = self.render_raw_terminal(&tab.parsed_line_cache);
 
-                    // ========== Input Area (Raw Mode - for IME/Korean support) ==========
-                    let prompt_symbol = text("❯").size(16).font(MONO_FONT).color(theme::PROMPT);
-                    let raw_input_field = text_input("", &tab.raw_input)
-                        .id(raw_input_id())
-                        .on_input(Message::RawInputChanged)
-                        .on_submit(Message::RawInputSubmit)
-                        .padding([10, 14])
-                        .size(14)
-                        .font(MONO_FONT)
-                        .style(theme::raw_input_style);
+            // ========== Hidden Input (for IME/Korean support) ==========
+            // Note: We use a minimal-height container instead of size(0) to avoid cosmic-text crash
+            let raw_input_field: Element<Message> = container(
+                text_input("", &tab.raw_input)
+                    .id(raw_input_id())
+                    .on_input(Message::RawInputChanged)
+                    .on_submit(Message::RawInputSubmit)
+                    .size(1) // Minimum size to avoid crash
+                    .style(|_theme, _status| text_input::Style {
+                        background: Color::TRANSPARENT.into(),
+                        border: Border::default(),
+                        icon: Color::TRANSPARENT,
+                        placeholder: Color::TRANSPARENT,
+                        value: Color::TRANSPARENT,
+                        selection: Color::TRANSPARENT,
+                    }),
+            )
+            .height(Length::Fixed(1.0)) // Minimal height
+            .into();
 
-                    let input_row: Element<Message> = container(
-                        row![prompt_symbol, Space::with_width(10), raw_input_field]
-                            .align_y(Alignment::Center)
-                            .width(Length::Fill),
-                    )
-                    .padding([8, 12])
-                    .style(theme::section_container_style)
-                    .into();
+            // ========== Status Bar ==========
+            let shell_name = self.get_shell_name();
+            let mode_indicator = text("STREAMING").size(11).color(theme::ACCENT_GREEN);
+            let tab_info = format!("Tab {} of {}", self.active_tab + 1, self.tabs.len());
 
-                    // ========== Status Bar (Raw Mode) ==========
-                    let shell_name = self.get_shell_name();
-                    let mode_indicator = text("RAW").size(11).color(theme::ACCENT_GREEN);
-                    let tab_info = format!("Tab {} of {}", self.active_tab + 1, self.tabs.len());
+            let status_left = row![
+                text(shell_name).size(12).color(theme::TEXT_MUTED),
+                Space::with_width(12),
+                mode_indicator
+            ];
 
-                    let status_left = row![
-                        text(shell_name).size(12).color(theme::TEXT_MUTED),
-                        Space::with_width(12),
-                        mode_indicator
-                    ];
+            let status_center = text(tab_info).size(12).color(theme::TEXT_MUTED);
 
-                    let status_center = text(tab_info).size(12).color(theme::TEXT_MUTED);
+            let status_right = text("⌘T New | ⌘W Close | ⌘D Debug")
+                .size(12)
+                .color(theme::TEXT_MUTED);
 
-                    let status_right = text("⌘M Toggle | ⌘T New | ⌘W Close")
-                        .size(12)
-                        .color(theme::TEXT_MUTED);
+            let status_bar: Element<Message> = container(
+                row![
+                    status_left,
+                    Space::with_width(Length::Fill),
+                    status_center,
+                    Space::with_width(Length::Fill),
+                    status_right
+                ]
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+            )
+            .padding([4, 12])
+            .width(Length::Fill)
+            .style(theme::status_bar_style)
+            .into();
 
-                    let status_bar: Element<Message> = container(
-                        row![
-                            status_left,
-                            Space::with_width(Length::Fill),
-                            status_center,
-                            Space::with_width(Length::Fill),
-                            status_right
-                        ]
-                        .align_y(Alignment::Center)
-                        .width(Length::Fill),
-                    )
-                    .padding([4, 12])
-                    .width(Length::Fill)
-                    .style(theme::status_bar_style)
-                    .into();
-
+            column![
+                container(
                     column![
-                        container(terminal_output)
-                            .padding([8, 12])
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .style(theme::terminal_output_style),
-                        input_row,
-                        status_bar
+                        terminal_output,
+                        raw_input_field // Hidden at bottom for IME
                     ]
                     .width(Length::Fill)
                     .height(Length::Fill)
-                    .into()
-                }
-                TerminalMode::Block => {
-                    // ========== Block Mode: Command blocks view ==========
-                    let mut blocks_column: Vec<Element<Message>> = Vec::new();
-
-                    // Show error message if PTY creation failed
-                    if let Some(error_msg) = &tab.error_message {
-                        let error_block = self.render_error_block(error_msg);
-                        blocks_column.push(error_block);
-                    }
-
-                    // Show pending output (before first command)
-                    if !tab.pending_output.is_empty() {
-                        let welcome_block = self.render_welcome_block(&tab.pending_output);
-                        blocks_column.push(welcome_block);
-                    }
-
-                    // Render command blocks
-                    for block in &tab.blocks {
-                        let block_element = self.render_command_block(block);
-                        blocks_column.push(block_element);
-                    }
-
-                    // Add some spacing at the bottom
-                    blocks_column.push(Space::with_height(20).into());
-
-                    let terminal_content: Element<Message> =
-                        scrollable(column(blocks_column).spacing(12).width(Length::Fill))
-                            .height(Length::Fill)
-                            .style(theme::scrollable_style)
-                            .into();
-
-                    // ========== Input Area (Block Mode) ==========
-                    let prompt_symbol = text("❯").size(16).font(MONO_FONT).color(theme::PROMPT);
-                    let cwd_display = text(shorten_path(&tab.cwd))
-                        .size(12)
-                        .font(MONO_FONT)
-                        .color(theme::TEXT_MUTED);
-
-                    let input_field = text_input("Type a command...", &tab.input)
-                        .id(input_id())
-                        .on_input(Message::InputChanged)
-                        .on_submit(Message::SubmitInput)
-                        .padding([12, 16])
-                        .size(14)
-                        .font(MONO_FONT)
-                        .style(theme::input_style);
-
-                    let input_row: Element<Message> = container(
-                        column![
-                            cwd_display,
-                            Space::with_height(6),
-                            row![prompt_symbol, Space::with_width(12), input_field]
-                                .align_y(Alignment::Center)
-                        ]
-                        .width(Length::Fill),
-                    )
-                    .padding([16, 20])
-                    .style(theme::section_container_style)
-                    .into();
-
-                    // ========== Status Bar (Block Mode) ==========
-                    let shell_name = self.get_shell_name();
-                    let mode_indicator = text("BLOCK").size(11).color(theme::ACCENT_BLUE);
-                    let tab_info = format!("Tab {} of {}", self.active_tab + 1, self.tabs.len());
-
-                    let status_left = row![
-                        text(shell_name).size(12).color(theme::TEXT_MUTED),
-                        Space::with_width(12),
-                        mode_indicator
-                    ];
-
-                    let status_center = text(tab_info).size(12).color(theme::TEXT_MUTED);
-
-                    let status_right = text("⌘M Toggle | ⌘T New | ⌘W Close")
-                        .size(12)
-                        .color(theme::TEXT_MUTED);
-
-                    let status_bar: Element<Message> = container(
-                        row![
-                            status_left,
-                            Space::with_width(Length::Fill),
-                            status_center,
-                            Space::with_width(Length::Fill),
-                            status_right
-                        ]
-                        .align_y(Alignment::Center)
-                        .width(Length::Fill),
-                    )
-                    .padding([4, 12])
-                    .width(Length::Fill)
-                    .style(theme::status_bar_style)
-                    .into();
-
-                    column![
-                        container(terminal_content)
-                            .padding([16, 20])
-                            .width(Length::Fill)
-                            .height(Length::Fill),
-                        input_row,
-                        status_bar
-                    ]
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into()
-                }
-            }
+                )
+                .padding([8, 12])
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(theme::terminal_output_style),
+                status_bar
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
         } else {
             column![text("No terminal open").color(theme::TEXT_PRIMARY)].into()
         };
@@ -1975,7 +1644,7 @@ mod tests {
             history: Vec::new(),
             history_index: None,
             history_temp_input: String::new(),
-            mode: TerminalMode::Block, // Use Block mode for tests to maintain compatibility
+            mode: TerminalMode::Raw,
             parsed_line_cache: Vec::new(),
             cache_buffer_len: 0,
             canvas_state: TerminalCanvasState::new(),
@@ -2079,136 +1748,6 @@ mod tests {
         assert_eq!(app.active_tab, 2); // Should cycle to last tab
     }
 
-    // ========== Input Management Tests ==========
-
-    #[test]
-    fn test_input_changed() {
-        let mut app = create_test_app();
-
-        let _ = app.update(Message::InputChanged("ls -la".to_string()));
-
-        assert_eq!(app.tabs[0].input, "ls -la");
-    }
-
-    #[test]
-    fn test_submit_input_creates_block() {
-        let mut app = create_test_app();
-
-        let _ = app.update(Message::InputChanged("echo hello".to_string()));
-        let _ = app.update(Message::SubmitInput);
-
-        assert_eq!(app.tabs[0].blocks.len(), 1);
-        assert_eq!(app.tabs[0].blocks[0].command, "echo hello");
-        assert!(app.tabs[0].blocks[0].is_running);
-        assert_eq!(app.tabs[0].input, ""); // Input should be cleared
-    }
-
-    #[test]
-    fn test_submit_empty_input_no_block() {
-        let mut app = create_test_app();
-
-        let _ = app.update(Message::SubmitInput);
-
-        assert_eq!(app.tabs[0].blocks.len(), 0);
-    }
-
-    #[test]
-    fn test_submit_adds_to_history() {
-        let mut app = create_test_app();
-
-        let _ = app.update(Message::InputChanged("cmd1".to_string()));
-        let _ = app.update(Message::SubmitInput);
-        let _ = app.update(Message::InputChanged("cmd2".to_string()));
-        let _ = app.update(Message::SubmitInput);
-
-        assert_eq!(app.tabs[0].history.len(), 2);
-        assert_eq!(app.tabs[0].history[0], "cmd1");
-        assert_eq!(app.tabs[0].history[1], "cmd2");
-    }
-
-    #[test]
-    fn test_submit_no_duplicate_history() {
-        let mut app = create_test_app();
-
-        let _ = app.update(Message::InputChanged("cmd1".to_string()));
-        let _ = app.update(Message::SubmitInput);
-        let _ = app.update(Message::InputChanged("cmd1".to_string()));
-        let _ = app.update(Message::SubmitInput);
-
-        // Should not add duplicate consecutive commands
-        assert_eq!(app.tabs[0].history.len(), 1);
-    }
-
-    // ========== History Navigation Tests ==========
-
-    #[test]
-    fn test_history_previous() {
-        let mut app = create_test_app();
-
-        // Add some history
-        let _ = app.update(Message::InputChanged("cmd1".to_string()));
-        let _ = app.update(Message::SubmitInput);
-        let _ = app.update(Message::InputChanged("cmd2".to_string()));
-        let _ = app.update(Message::SubmitInput);
-
-        // Navigate back
-        let _ = app.update(Message::HistoryPrevious);
-        assert_eq!(app.tabs[0].input, "cmd2");
-
-        let _ = app.update(Message::HistoryPrevious);
-        assert_eq!(app.tabs[0].input, "cmd1");
-    }
-
-    #[test]
-    fn test_history_next() {
-        let mut app = create_test_app();
-
-        // Add history
-        let _ = app.update(Message::InputChanged("cmd1".to_string()));
-        let _ = app.update(Message::SubmitInput);
-        let _ = app.update(Message::InputChanged("cmd2".to_string()));
-        let _ = app.update(Message::SubmitInput);
-
-        // Type something new
-        let _ = app.update(Message::InputChanged("new cmd".to_string()));
-
-        // Navigate back
-        let _ = app.update(Message::HistoryPrevious);
-        let _ = app.update(Message::HistoryPrevious);
-
-        // Navigate forward
-        let _ = app.update(Message::HistoryNext);
-        assert_eq!(app.tabs[0].input, "cmd2");
-
-        let _ = app.update(Message::HistoryNext);
-        assert_eq!(app.tabs[0].input, "new cmd"); // Should restore temp input
-    }
-
-    #[test]
-    fn test_history_empty() {
-        let mut app = create_test_app();
-
-        // Should not crash on empty history
-        let _ = app.update(Message::HistoryPrevious);
-        let _ = app.update(Message::HistoryNext);
-
-        assert_eq!(app.tabs[0].input, "");
-    }
-
-    #[test]
-    fn test_input_change_resets_history_index() {
-        let mut app = create_test_app();
-
-        let _ = app.update(Message::InputChanged("cmd1".to_string()));
-        let _ = app.update(Message::SubmitInput);
-
-        let _ = app.update(Message::HistoryPrevious);
-        assert!(app.tabs[0].history_index.is_some());
-
-        let _ = app.update(Message::InputChanged("new".to_string()));
-        assert!(app.tabs[0].history_index.is_none());
-    }
-
     // ========== Command Block Tests ==========
 
     #[test]
@@ -2286,26 +1825,4 @@ mod tests {
         let _ = pty_manager.close_session(&session_id);
     }
 
-    #[test]
-    fn test_max_blocks_limit() {
-        let mut app = create_test_app();
-
-        // Add more than MAX_BLOCKS_PER_TAB blocks
-        for i in 0..(MAX_BLOCKS_PER_TAB + 50) {
-            app.tabs[0].blocks.push(CommandBlock {
-                command: format!("cmd{}", i),
-                output: Vec::new(),
-                parsed_output_cache: Vec::new(),
-                timestamp: Instant::now(),
-                completed_at: Some(Instant::now()),
-                exit_code: Some(0),
-                is_running: false,
-            });
-        }
-
-        // Trigger tick to enforce limit
-        let _ = app.update(Message::Tick);
-
-        assert!(app.tabs[0].blocks.len() <= MAX_BLOCKS_PER_TAB);
-    }
 }
