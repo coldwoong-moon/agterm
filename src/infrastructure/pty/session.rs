@@ -43,8 +43,9 @@ pub struct PtySessionConfig {
 
 impl Default for PtySessionConfig {
     fn default() -> Self {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+        let shell = default_shell();
+        let working_dir =
+            std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
 
         Self {
             shell,
@@ -58,6 +59,18 @@ impl Default for PtySessionConfig {
                 pixel_height: 0,
             },
         }
+    }
+}
+
+/// Get the default shell for the current platform
+fn default_shell() -> String {
+    #[cfg(windows)]
+    {
+        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
     }
 }
 
