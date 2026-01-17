@@ -53,10 +53,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev
+
       - name: Install cross-compilation tools
         if: matrix.cross
         run: |
-          sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Build release binary
@@ -77,6 +82,43 @@ jobs:
       - name: Copy binary (Windows)
         if: runner.os == 'Windows'
         run: cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe dist/
+
+      - name: Create macOS .app bundle
+        if: runner.os == 'macOS'
+        run: |
+          APP_NAME="AgTerm"
+          APP_DIR="dist/${APP_NAME}.app"
+          mkdir -p "${APP_DIR}/Contents/MacOS"
+          mkdir -p "${APP_DIR}/Contents/Resources"
+          cp dist/${{ env.BINARY_NAME }} "${APP_DIR}/Contents/MacOS/${APP_NAME}"
+          chmod +x "${APP_DIR}/Contents/MacOS/${APP_NAME}"
+          cp assets/icons/icon.icns "${APP_DIR}/Contents/Resources/AppIcon.icns" || true
+          cat > "${APP_DIR}/Contents/Info.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>${APP_NAME}</string>
+              <key>CFBundleIconFile</key>
+              <string>AppIcon</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.coldwoong-moon.agterm</string>
+              <key>CFBundleName</key>
+              <string>${APP_NAME}</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${GITHUB_REF#refs/tags/v}</string>
+              <key>CFBundleVersion</key>
+              <string>${GITHUB_REF#refs/tags/v}</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>11.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
 
       - name: Create archive (Unix)
         if: runner.os != 'Windows'

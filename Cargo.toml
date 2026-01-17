@@ -1,80 +1,92 @@
 [package]
 name = "agterm"
-version = "0.1.0-alpha.1"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
-description = "AI Agent Terminal Orchestrator with MCP support"
-repository = "https://github.com/user/agterm"
-keywords = ["terminal", "tui", "mcp", "ai-agent", "orchestration"]
-categories = ["command-line-interface", "development-tools"]
+description = "AI Agent Terminal - Native GPU-accelerated terminal with AI orchestration"
+repository = "https://github.com/coldwoong-moon/agterm"
+keywords = ["terminal", "gpu", "ai-agent", "mcp", "iced"]
+categories = ["command-line-interface", "development-tools", "gui"]
+
+[[bin]]
+name = "agterm"
+path = "src/main.rs"
 
 [dependencies]
-# TUI Framework
-ratatui = { version = "0.29", default-features = true }
-crossterm = "0.28"
+# GUI Framework
+iced = { version = "0.13", default-features = false, features = ["tokio", "advanced", "tiny-skia"] }
 
 # Terminal/PTY
 portable-pty = "0.8"
+# vte = "0.13"  # TODO: implement ANSI escape code parsing for enhanced terminal support
 
-# ANSI Escape Sequence Parsing
-vte = "0.13"
+# TODO: implement async operations with tokio
+# tokio = { version = "1", features = ["full"] }
 
-# Async Runtime
-tokio = { version = "1", features = ["full"] }
-
-# MCP SDK
-rmcp = { version = "0.13", features = ["client", "client-side-sse", "transport-child-process", "transport-streamable-http-client-reqwest"] }
-
-# Graph Data Structure
-petgraph = "0.6"
+# TODO: implement MCP (Model Context Protocol) support
+# rmcp = { version = "0.13", features = ["client", "client-side-sse", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 
 # Unique IDs
 uuid = { version = "1", features = ["v4", "serde"] }
 
-# Date/Time
-chrono = { version = "0.4", features = ["serde"] }
-
-# Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-toml = "0.8"
-
-# Binary serialization for archives
-bincode = "1"
-
-# SQLite (for session storage with FTS5 full-text search)
-rusqlite = { version = "0.32", features = ["bundled", "bundled-sqlcipher-vendored-openssl"] }
+# TODO: implement data serialization if needed
+# serde = { version = "1", features = ["derive"] }
+# serde_json = "1"
 
 # Configuration
-config = "0.14"
-directories = "5"
+dirs = "5"
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+log = "0.4"
+# TODO: implement structured tracing and observability
+# tracing = "0.1"
+# TODO: implement structured logging
+# tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Error Handling
-thiserror = "1"
-anyhow = "1"
+thiserror = "2"
+# TODO: consider using for flexible error contexts
+# anyhow = "1"
 
-# Async utilities
-futures = "0.3"
+# TODO: implement async utilities if needed
+# futures = "0.3"
+
+# TODO: implement parking_lot for sync primitives if needed
+# parking_lot = "0.12"
 
 [dev-dependencies]
 tempfile = "3"
-tokio-test = "0.4"
 pretty_assertions = "1"
-
-[features]
-default = ["sqlite"]
-sqlite = []
-mcp-server = []
 
 [profile.release]
 lto = true
 codegen-units = 1
+strip = true
+opt-level = 3
 
 [profile.dev]
 opt-level = 0
 debug = true
+
+# macOS .app bundle configuration
+[package.metadata.bundle]
+name = "AgTerm"
+identifier = "com.coldwoong-moon.agterm"
+icon = ["assets/icons/icon.icns"]
+version = "1.0.0"
+copyright = "Copyright (c) 2024 coldwoong-moon"
+category = "Developer Tools"
+short_description = "AI Agent Terminal"
+long_description = """
+AgTerm is a native GPU-accelerated terminal emulator with AI agent orchestration.
+Features include multi-tab support, PTY management, and MCP protocol integration.
+"""
+
+# Windows configuration
+[package.metadata.bundle.windows]
+icon = ["assets/icons/icon.ico"]
+
+# Linux configuration
+[package.metadata.bundle.linux]
+icon = ["assets/icons/icon.png"]
