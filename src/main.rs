@@ -190,6 +190,43 @@ fn parse_ansi_text(input: &str) -> Vec<StyledSpan> {
     spans
 }
 
+/// Update the ANSI parsing cache for a terminal tab
+/// Parses only new lines since the last cache update
+fn update_line_cache(tab: &mut TerminalTab) {
+    // If buffer length hasn't changed, no update needed
+    if tab.raw_output_buffer.len() == tab.cache_buffer_len {
+        return;
+    }
+
+    // Normalize line endings
+    let normalized = tab.raw_output_buffer
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+
+    // Split into lines
+    let lines: Vec<&str> = normalized.lines().collect();
+    let new_line_count = lines.len();
+
+    // If we have cached lines and the buffer grew, parse only new lines
+    if tab.cache_buffer_len > 0 && tab.parsed_line_cache.len() <= new_line_count {
+        // Parse only new lines (from cached count to current count)
+        for line in lines.iter().skip(tab.parsed_line_cache.len()) {
+            let spans = parse_ansi_text(line);
+            tab.parsed_line_cache.push(spans);
+        }
+    } else {
+        // Full reparse (buffer was cleared or is initial)
+        tab.parsed_line_cache.clear();
+        for line in lines.iter() {
+            let spans = parse_ansi_text(line);
+            tab.parsed_line_cache.push(spans);
+        }
+    }
+
+    // Update cache length tracker
+    tab.cache_buffer_len = tab.raw_output_buffer.len();
+}
+
 // ============================================================================
 // Command Block - Warp-style grouped command + output
 // ============================================================================
@@ -339,6 +376,8 @@ struct AgTerm {
     startup_focus_count: u8,
     /// Debug panel state
     debug_panel: DebugPanel,
+    /// Last time PTY activity was detected (for dynamic tick optimization)
+    last_pty_activity: Instant,
 }
 
 impl Default for AgTerm {
@@ -375,6 +414,8 @@ impl Default for AgTerm {
             history_index: None,
             history_temp_input: String::new(),
             mode: TerminalMode::Raw,  // Default to Raw mode for interactive apps
+            parsed_line_cache: Vec::new(),
+            cache_buffer_len: 0,
         };
 
         let mut debug_panel = DebugPanel::new();
@@ -391,6 +432,7 @@ impl Default for AgTerm {
             next_tab_id: 1,
             startup_focus_count: 10,
             debug_panel,
+            last_pty_activity: Instant::now(),
         }
     }
 }
@@ -413,6 +455,11 @@ struct TerminalTab {
     history_temp_input: String,    // Temporary storage for current input when browsing
     // Terminal mode
     mode: TerminalMode,
+    // ANSI parsing cache for Raw mode
+    /// Cached parsed lines for Raw mode (line index -> parsed spans)
+    parsed_line_cache: Vec<Vec<StyledSpan>>,
+    /// Last known buffer length when cache was updated
+    cache_buffer_len: usize,
 }
 
 /// Terminal input mode
@@ -538,6 +585,8 @@ impl AgTerm {
                     history_index: None,
                     history_temp_input: String::new(),
                     mode: TerminalMode::Raw,
+                    parsed_line_cache: Vec::new(),
+                    cache_buffer_len: 0,
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
@@ -917,12 +966,15 @@ impl AgTerm {
                     Task::none()
                 };
 
-                // Poll PTY output for all tabs
-                for tab in &mut self.tabs {
+                // Poll PTY output only for active tab
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                     if let Some(session_id) = &tab.session_id {
                         if let Ok(data) = self.pty_manager.read(session_id) {
                             if !data.is_empty() {
                                 let raw_output = String::from_utf8_lossy(&data);
+
+                                // Update PTY activity timestamp for dynamic tick optimization
+                                self.last_pty_activity = Instant::now();
 
                                 // Record PTY read metrics
                                 self.debug_panel.metrics.record_pty_read(data.len());
@@ -936,7 +988,13 @@ impl AgTerm {
                                         if tab.raw_output_buffer.len() > MAX_RAW_BUFFER {
                                             let excess = tab.raw_output_buffer.len() - MAX_RAW_BUFFER;
                                             tab.raw_output_buffer.drain(0..excess);
+                                            // Clear cache when buffer is truncated
+                                            tab.parsed_line_cache.clear();
+                                            tab.cache_buffer_len = 0;
                                         }
+
+                                        // Update ANSI parsing cache for new content
+                                        update_line_cache(tab);
                                     }
                                     TerminalMode::Block => {
                                         // In Block mode, use existing block-based logic
@@ -1144,7 +1202,7 @@ impl AgTerm {
             match tab.mode {
                 TerminalMode::Raw => {
                     // ========== Raw Mode: Full terminal view ==========
-                    let terminal_output = self.render_raw_terminal(&tab.raw_output_buffer);
+                    let terminal_output = self.render_raw_terminal(&tab.parsed_line_cache);
 
                     // ========== Input Area (Raw Mode - for IME/Korean support) ==========
                     let prompt_symbol = text("❯").size(16).font(MONO_FONT).color(theme::PROMPT);
@@ -1472,19 +1530,13 @@ impl AgTerm {
     }
 
     /// Render raw terminal output (for Raw mode)
-    fn render_raw_terminal(&self, buffer: &str) -> Element<Message> {
-        // Parse the buffer and render with ANSI colors
-        // Handle different line endings: \r\n, \n, or standalone \r
-        let normalized = buffer
-            .replace("\r\n", "\n")
-            .replace('\r', "\n");
-
-        // Split into lines and get the last N lines
-        let lines: Vec<&str> = normalized.lines().collect();
-        let display_lines: Vec<&str> = if lines.len() > 100 {
-            lines[lines.len() - 100..].to_vec()
+    /// Uses cached parsed lines to avoid repeated ANSI parsing
+    fn render_raw_terminal(&self, parsed_cache: &[Vec<StyledSpan>]) -> Element<Message> {
+        // Get the last N lines from cache
+        let display_lines: &[Vec<StyledSpan>] = if parsed_cache.len() > 100 {
+            &parsed_cache[parsed_cache.len() - 100..]
         } else {
-            lines
+            parsed_cache
         };
 
         let content: Element<Message> = if display_lines.is_empty() {
@@ -1498,9 +1550,8 @@ impl AgTerm {
             column(
                 display_lines
                     .iter()
-                    .map(|line| {
-                        // Parse ANSI codes for each line
-                        let spans = parse_ansi_text(line);
+                    .map(|spans| {
+                        // Use cached parsed spans directly
                         if spans.is_empty() {
                             text("").size(14).font(MONO_FONT).into()
                         } else if spans.len() == 1 && spans[0].color.is_none() {
@@ -1511,9 +1562,9 @@ impl AgTerm {
                                 .into()
                         } else {
                             row(
-                                spans.into_iter().map(|span| {
+                                spans.iter().map(|span| {
                                     let color = span.color.unwrap_or(theme::TEXT_PRIMARY);
-                                    text(span.text)
+                                    text(span.text.clone())
                                         .size(14)
                                         .font(MONO_FONT)
                                         .color(color)
@@ -1749,8 +1800,20 @@ impl AgTerm {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        // Poll PTY output every 100ms (balance between responsiveness and CPU usage)
-        let timer = iced::time::every(Duration::from_millis(100)).map(|_| Message::Tick);
+        // Dynamic tick interval based on PTY activity
+        // - Recent activity (< 500ms): 16ms (60fps) for smooth updates
+        // - Medium activity (< 2s): 50ms (20fps) for responsiveness
+        // - Idle: 200ms (5fps) to save CPU
+        let elapsed_since_activity = self.last_pty_activity.elapsed();
+        let tick_interval = if elapsed_since_activity < Duration::from_millis(500) {
+            Duration::from_millis(16)  // 60fps
+        } else if elapsed_since_activity < Duration::from_secs(2) {
+            Duration::from_millis(50)  // 20fps
+        } else {
+            Duration::from_millis(200) // 5fps
+        };
+
+        let timer = iced::time::every(tick_interval).map(|_| Message::Tick);
 
         let keyboard = keyboard::on_key_press(|key, modifiers| {
             Some(Message::KeyPressed(key, modifiers))
@@ -1895,6 +1958,8 @@ mod tests {
             history_index: None,
             history_temp_input: String::new(),
             mode: TerminalMode::Block, // Use Block mode for tests to maintain compatibility
+            parsed_line_cache: Vec::new(),
+            cache_buffer_len: 0,
         };
 
         AgTerm {
@@ -1904,6 +1969,7 @@ mod tests {
             next_tab_id: 1,
             startup_focus_count: 0,
             debug_panel: DebugPanel::new(),
+            last_pty_activity: Instant::now(),
         }
     }
 
