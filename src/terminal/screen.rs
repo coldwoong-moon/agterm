@@ -114,6 +114,9 @@ pub struct Cell {
     pub bold: bool,
     pub underline: bool,
     pub reverse: bool,
+    pub dim: bool,
+    pub italic: bool,
+    pub strikethrough: bool,
     /// This cell is the first cell of a wide character (CJK, emoji, etc.)
     pub wide: bool,
     /// This cell is a placeholder for the second cell of a wide character
@@ -129,6 +132,9 @@ impl Default for Cell {
             bold: false,
             underline: false,
             reverse: false,
+            dim: false,
+            italic: false,
+            strikethrough: false,
             wide: false,
             placeholder: false,
         }
@@ -152,6 +158,9 @@ pub struct TerminalScreen {
     bold: bool,
     underline: bool,
     reverse: bool,
+    dim: bool,
+    italic: bool,
+    strikethrough: bool,
     /// VTE parser
     parser: Parser,
     /// Scroll region (top, bottom) - None means full screen
@@ -189,6 +198,8 @@ pub struct TerminalScreen {
     bracketed_paste_mode: bool,
     /// Application cursor keys mode (DECCKM - CSI ?1h/l)
     application_cursor_keys: bool,
+    /// Pending responses to be sent to PTY (for DA, DSR, CPR, etc.)
+    pending_responses: Vec<String>,
 }
 
 impl TerminalScreen {
@@ -209,6 +220,9 @@ impl TerminalScreen {
             bold: false,
             underline: false,
             reverse: false,
+            dim: false,
+            italic: false,
+            strikethrough: false,
             parser: Parser::new(),
             scroll_region: None,
             saved_cursor: None,
@@ -227,6 +241,7 @@ impl TerminalScreen {
             auto_wrap_mode: true,
             bracketed_paste_mode: false,
             application_cursor_keys: false,
+            pending_responses: Vec::new(),
         }
     }
 
@@ -369,6 +384,12 @@ impl TerminalScreen {
     /// Get application cursor keys mode state (DECCKM)
     pub fn application_cursor_keys(&self) -> bool {
         self.application_cursor_keys
+    }
+
+    /// Take pending responses (for sending to PTY)
+    /// This drains the pending_responses vec and returns it
+    pub fn take_pending_responses(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_responses)
     }
 
     /// Scroll screen up by n lines
@@ -643,13 +664,25 @@ impl TerminalScreen {
                     self.bold = false;
                     self.underline = false;
                     self.reverse = false;
+                    self.dim = false;
+                    self.italic = false;
+                    self.strikethrough = false;
                 }
                 1 => self.bold = true,
+                2 => self.dim = true,
+                3 => self.italic = true,
                 4 => self.underline = true,
                 7 => self.reverse = true,
-                22 => self.bold = false,
+                9 => self.strikethrough = true,
+                22 => {
+                    // Normal intensity (not bold and not dim)
+                    self.bold = false;
+                    self.dim = false;
+                }
+                23 => self.italic = false,
                 24 => self.underline = false,
                 27 => self.reverse = false,
+                29 => self.strikethrough = false,
                 // Foreground colors (30-37, 90-97)
                 30..=37 => self.current_fg = Some(AnsiColor::Indexed((value - 30) as u8)),
                 38 => {
@@ -756,6 +789,9 @@ impl Perform for TerminalScreen {
                     bold: self.bold,
                     underline: self.underline,
                     reverse: self.reverse,
+                    dim: self.dim,
+                    italic: self.italic,
+                    strikethrough: self.strikethrough,
                     wide: true,
                     placeholder: false,
                 };
@@ -769,6 +805,9 @@ impl Perform for TerminalScreen {
                         bold: self.bold,
                         underline: self.underline,
                         reverse: self.reverse,
+                        dim: self.dim,
+                        italic: self.italic,
+                        strikethrough: self.strikethrough,
                         wide: false,
                         placeholder: true,
                     };
@@ -784,6 +823,9 @@ impl Perform for TerminalScreen {
                     bold: self.bold,
                     underline: self.underline,
                     reverse: self.reverse,
+                    dim: self.dim,
+                    italic: self.italic,
+                    strikethrough: self.strikethrough,
                     wide: false,
                     placeholder: false,
                 };
@@ -1096,6 +1138,41 @@ impl Perform for TerminalScreen {
                 let n = params.iter().next().map(|p| p[0] as usize).unwrap_or(1);
                 self.delete_characters(n);
             }
+            'c' => {
+                // Device Attributes (DA)
+                if intermediates.contains(&b'>') {
+                    // Secondary DA (DA2) - CSI > c
+                    // Response: CSI > 0 ; 0 ; 0 c (VT100 compatible)
+                    self.pending_responses.push("\x1b[>0;0;0c".to_string());
+                } else {
+                    // Primary DA (DA1) - CSI c
+                    // Response: CSI ? 1 ; 2 c (VT100 with Advanced Video Option)
+                    self.pending_responses.push("\x1b[?1;2c".to_string());
+                }
+            }
+            'n' => {
+                // Device Status Report (DSR)
+                let n = params.iter().next().map(|p| p[0]).unwrap_or(0);
+                match n {
+                    5 => {
+                        // DSR - Device Status Report
+                        // Response: CSI 0 n (Terminal OK)
+                        self.pending_responses.push("\x1b[0n".to_string());
+                    }
+                    6 => {
+                        // CPR - Cursor Position Report
+                        // Response: CSI <row> ; <col> R
+                        // Note: VT100 uses 1-based indexing
+                        let row = self.cursor_row + 1;
+                        let col = self.cursor_col + 1;
+                        self.pending_responses
+                            .push(format!("\x1b[{};{}R", row, col));
+                    }
+                    _ => {
+                        // Unknown DSR request - ignore
+                    }
+                }
+            }
             _ => {
                 // Unknown CSI sequence - ignore
             }
@@ -1178,6 +1255,9 @@ impl Perform for TerminalScreen {
                 self.bold = false;
                 self.underline = false;
                 self.reverse = false;
+                self.dim = false;
+                self.italic = false;
+                self.strikethrough = false;
                 self.scroll_region = None;
                 self.saved_cursor = None;
                 self.saved_cursor_state = None;
@@ -1906,19 +1986,19 @@ fn test_emoji_wide_character() {
     #[test]
     fn test_application_cursor_keys_mode_sequences() {
         let mut screen = TerminalScreen::new(80, 24);
-        
+
         // Test that mode changes are correctly applied via escape sequences
         // Normal mode (default)
         assert!(!screen.application_cursor_keys());
-        
+
         // Enable application mode (like vim does)
         screen.process(b"\x1b[?1h");
         assert!(screen.application_cursor_keys());
-        
+
         // Disable application mode (back to normal)
         screen.process(b"\x1b[?1l");
         assert!(!screen.application_cursor_keys());
-        
+
         // Test multiple mode changes
         for _ in 0..3 {
             screen.process(b"\x1b[?1h");
@@ -1927,3 +2007,276 @@ fn test_emoji_wide_character() {
             assert!(!screen.application_cursor_keys());
         }
     }
+
+#[test]
+fn test_device_attributes_primary_da1() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Send Primary DA request (CSI c)
+    screen.process(b"\x1b[c");
+
+    // Should have one pending response
+    let responses = screen.take_pending_responses();
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0], "\x1b[?1;2c");
+}
+
+#[test]
+fn test_device_attributes_secondary_da2() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Send Secondary DA request (CSI > c)
+    screen.process(b"\x1b[>c");
+
+    // Should have one pending response
+    let responses = screen.take_pending_responses();
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0], "\x1b[>0;0;0c");
+}
+
+#[test]
+fn test_device_status_report_dsr() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Send DSR request (CSI 5 n)
+    screen.process(b"\x1b[5n");
+
+    // Should have one pending response
+    let responses = screen.take_pending_responses();
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0], "\x1b[0n");
+}
+
+#[test]
+fn test_cursor_position_report_cpr() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Move cursor to position (5, 10)
+    screen.process(b"\x1b[6;11H");
+    assert_eq!(screen.cursor_position(), (5, 10));
+
+    // Send CPR request (CSI 6 n)
+    screen.process(b"\x1b[6n");
+
+    // Should have one pending response with 1-based indexing
+    let responses = screen.take_pending_responses();
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0], "\x1b[6;11R");
+}
+
+#[test]
+fn test_cpr_at_origin() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Cursor should be at origin (0, 0)
+    assert_eq!(screen.cursor_position(), (0, 0));
+
+    // Send CPR request
+    screen.process(b"\x1b[6n");
+
+    // Response should be (1, 1) in 1-based indexing
+    let responses = screen.take_pending_responses();
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0], "\x1b[1;1R");
+}
+
+#[test]
+fn test_multiple_device_attribute_requests() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Send multiple requests
+    screen.process(b"\x1b[c");       // Primary DA
+    screen.process(b"\x1b[>c");      // Secondary DA
+    screen.process(b"\x1b[5n");      // DSR
+    screen.process(b"\x1b[6n");      // CPR
+
+    // Should have four pending responses
+    let responses = screen.take_pending_responses();
+    assert_eq!(responses.len(), 4);
+    assert_eq!(responses[0], "\x1b[?1;2c");
+    assert_eq!(responses[1], "\x1b[>0;0;0c");
+    assert_eq!(responses[2], "\x1b[0n");
+    assert_eq!(responses[3], "\x1b[1;1R");
+}
+
+#[test]
+fn test_take_pending_responses_clears_queue() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Send DA request
+    screen.process(b"\x1b[c");
+
+    // Take responses
+    let responses = screen.take_pending_responses();
+    assert_eq!(responses.len(), 1);
+
+    // Queue should be empty now
+    let responses2 = screen.take_pending_responses();
+    assert_eq!(responses2.len(), 0);
+}
+
+#[test]
+fn test_device_attributes_with_regular_content() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Write some text
+    screen.process(b"Hello, World!");
+
+    // Send DA request
+    screen.process(b"\x1b[c");
+
+    // Should have response and text should be preserved
+    let responses = screen.take_pending_responses();
+    assert_eq!(responses.len(), 1);
+
+    // Check that text is still there
+    let buffer = &screen.buffer;
+    assert_eq!(buffer[0][0].c, 'H');
+    assert_eq!(buffer[0][1].c, 'e');
+}
+
+#[test]
+fn test_sgr_dim() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Enable dim
+    screen.process(b"\x1b[2m");
+    assert!(screen.dim);
+
+    // Write text with dim
+    screen.process(b"dim text");
+    assert!(screen.buffer[0][0].dim);
+
+    // Reset
+    screen.process(b"\x1b[0m");
+    assert!(!screen.dim);
+}
+
+#[test]
+fn test_sgr_italic() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Enable italic
+    screen.process(b"\x1b[3m");
+    assert!(screen.italic);
+
+    // Write text with italic
+    screen.process(b"italic text");
+    assert!(screen.buffer[0][0].italic);
+
+    // Disable italic (SGR 23)
+    screen.process(b"\x1b[23m");
+    assert!(!screen.italic);
+}
+
+#[test]
+fn test_sgr_strikethrough() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Enable strikethrough
+    screen.process(b"\x1b[9m");
+    assert!(screen.strikethrough);
+
+    // Write text with strikethrough
+    screen.process(b"strike");
+    assert!(screen.buffer[0][0].strikethrough);
+
+    // Disable strikethrough (SGR 29)
+    screen.process(b"\x1b[29m");
+    assert!(!screen.strikethrough);
+}
+
+#[test]
+fn test_sgr_normal_intensity() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Enable bold
+    screen.process(b"\x1b[1m");
+    assert!(screen.bold);
+    assert!(!screen.dim);
+
+    // Enable dim (should not affect bold in this test)
+    screen.process(b"\x1b[2m");
+    assert!(screen.dim);
+
+    // SGR 22 - Normal intensity (disables both bold and dim)
+    screen.process(b"\x1b[22m");
+    assert!(!screen.bold);
+    assert!(!screen.dim);
+}
+
+#[test]
+fn test_sgr_combined_attributes() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Enable multiple attributes
+    screen.process(b"\x1b[1;3;4;9m");
+    assert!(screen.bold);
+    assert!(screen.italic);
+    assert!(screen.underline);
+    assert!(screen.strikethrough);
+
+    // Write text with combined attributes
+    screen.process(b"styled");
+    let cell = &screen.buffer[0][0];
+    assert!(cell.bold);
+    assert!(cell.italic);
+    assert!(cell.underline);
+    assert!(cell.strikethrough);
+
+    // Reset all
+    screen.process(b"\x1b[0m");
+    assert!(!screen.bold);
+    assert!(!screen.italic);
+    assert!(!screen.underline);
+    assert!(!screen.strikethrough);
+}
+
+#[test]
+fn test_sgr_dim_and_bold() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Enable bold
+    screen.process(b"\x1b[1mBold");
+    assert!(screen.bold);
+    assert!(!screen.dim);
+
+    // Enable dim (both can be active, though visually may conflict)
+    screen.process(b"\x1b[2mDim");
+    assert!(screen.bold);
+    assert!(screen.dim);
+
+    // SGR 22 should reset both
+    screen.process(b"\x1b[22mNormal");
+    assert!(!screen.bold);
+    assert!(!screen.dim);
+}
+
+#[test]
+fn test_sgr_reset_specific_attributes() {
+    let mut screen = TerminalScreen::new(80, 24);
+
+    // Enable all new attributes
+    screen.process(b"\x1b[2;3;9m");
+    assert!(screen.dim);
+    assert!(screen.italic);
+    assert!(screen.strikethrough);
+
+    // Reset italic (SGR 23)
+    screen.process(b"\x1b[23m");
+    assert!(screen.dim);
+    assert!(!screen.italic);
+    assert!(screen.strikethrough);
+
+    // Reset dim (SGR 22)
+    screen.process(b"\x1b[22m");
+    assert!(!screen.dim);
+    assert!(!screen.italic);
+    assert!(screen.strikethrough);
+
+    // Reset strikethrough (SGR 29)
+    screen.process(b"\x1b[29m");
+    assert!(!screen.dim);
+    assert!(!screen.italic);
+    assert!(!screen.strikethrough);
+}

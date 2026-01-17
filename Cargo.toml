@@ -42,6 +42,9 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # Configuration
 dirs = "5"
 
+# Clipboard
+arboard = "3"
+
 # Logging
 log = "0.4"
 tracing = "0.1"

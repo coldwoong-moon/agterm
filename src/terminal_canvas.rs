@@ -62,6 +62,93 @@ impl Selection {
     }
 }
 
+/// Extract selected text from terminal lines
+pub fn get_selected_text(lines: &[Vec<StyledSpan>], selection: &Selection) -> String {
+    if !selection.active {
+        return String::new();
+    }
+
+    let (start, end) = selection.normalized();
+
+    // If selection is empty (start == end), return empty string
+    if start == end {
+        return String::new();
+    }
+
+    let mut result = String::new();
+
+    for row in start.0..=end.0 {
+        if row >= lines.len() {
+            break;
+        }
+
+        // Calculate column range for this row
+        let (start_col, end_col) = if row == start.0 && row == end.0 {
+            // Single line selection
+            (start.1, end.1)
+        } else if row == start.0 {
+            // First line of multi-line selection
+            let max_col = lines[row]
+                .iter()
+                .map(|span| span.text.chars().count())
+                .sum::<usize>();
+            (start.1, max_col)
+        } else if row == end.0 {
+            // Last line of multi-line selection
+            (0, end.1)
+        } else {
+            // Middle line - select entire line
+            let max_col = lines[row]
+                .iter()
+                .map(|span| span.text.chars().count())
+                .sum::<usize>();
+            (0, max_col)
+        };
+
+        // Extract text from spans
+        let mut current_col = 0;
+        for span in &lines[row] {
+            // Skip placeholder cells (second cell of wide characters)
+            let span_text = &span.text;
+            let span_len = span_text.chars().count();
+            let span_end = current_col + span_len;
+
+            // Check if this span overlaps with selection
+            if span_end > start_col && current_col <= end_col {
+                // Calculate overlap range within this span
+                let copy_start = if current_col < start_col {
+                    start_col - current_col
+                } else {
+                    0
+                };
+                let copy_end = if span_end > end_col {
+                    span_len - (span_end - end_col - 1)
+                } else {
+                    span_len
+                };
+
+                // Extract characters in range
+                let chars: Vec<char> = span_text.chars().collect();
+                for i in copy_start..copy_end.min(chars.len()) {
+                    result.push(chars[i]);
+                }
+            }
+
+            current_col = span_end;
+            if current_col > end_col {
+                break;
+            }
+        }
+
+        // Add newline for multi-line selections (except for the last line)
+        if row < end.0 {
+            result.push('\n');
+        }
+    }
+
+    result
+}
+
 /// Cursor style for terminal rendering
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum CursorStyle {
@@ -369,53 +456,47 @@ impl<'a> TerminalCanvas<'a> {
         }
 
         let mut x = config::PADDING_LEFT;
-        let mut merged_text = String::new();
-        let mut current_color = spans[0].color;
-        let mut segment_start_x = x;
 
         for span in spans {
             if span.text.is_empty() {
                 continue;
             }
 
-            let span_color = span.color.unwrap_or(self.default_color);
-            let current = current_color.unwrap_or(self.default_color);
+            let mut color = span.color.unwrap_or(self.default_color);
 
-            if span_color == current {
-                // Same color - merge with current segment
-                if merged_text.is_empty() {
-                    current_color = span.color;
-                    segment_start_x = x;
-                }
-                merged_text.push_str(&span.text);
-            } else {
-                // Different color - draw accumulated segment and start new one
-                if !merged_text.is_empty() {
-                    self.draw_text_segment(
-                        frame,
-                        &merged_text,
-                        segment_start_x,
-                        y.round(),
-                        current,
-                    );
-                }
-                merged_text = span.text.clone();
-                current_color = span.color;
-                segment_start_x = x;
+            // Apply dim effect by reducing alpha
+            if span.dim {
+                color = Color::from_rgba(color.r, color.g, color.b, color.a * 0.5);
             }
+
+            // Apply italic effect (Iced doesn't support italic directly, so we use a slight color shift)
+            // In a real implementation, you might want to use a different font or skew transform
+            if span.italic {
+                color = Color::from_rgba(
+                    color.r * 0.9,
+                    color.g * 0.9 + 0.1,
+                    color.b * 0.9 + 0.1,
+                    color.a,
+                );
+            }
+
+            // Draw the text segment
+            self.draw_text_segment(frame, &span.text, x, y.round(), color, span);
 
             // Advance x position
             x += span.text.chars().count() as f32 * config::char_width(self.font_size);
         }
-
-        // Draw final segment
-        if !merged_text.is_empty() {
-            let color = current_color.unwrap_or(self.default_color);
-            self.draw_text_segment(frame, &merged_text, segment_start_x, y.round(), color);
-        }
     }
 
-    fn draw_text_segment(&self, frame: &mut Frame, text: &str, x: f32, y: f32, color: Color) {
+    fn draw_text_segment(
+        &self,
+        frame: &mut Frame,
+        text: &str,
+        x: f32,
+        y: f32,
+        color: Color,
+        span: &StyledSpan,
+    ) {
         let text_obj = Text {
             content: text.to_string(),
             position: Point::new(x, y),
@@ -427,6 +508,29 @@ impl<'a> TerminalCanvas<'a> {
             ..Default::default()
         };
         frame.fill_text(text_obj);
+
+        let char_count = text.chars().count();
+        let text_width = char_count as f32 * config::char_width(self.font_size);
+
+        // Draw underline
+        if span.underline {
+            let underline_y = y + config::line_height(self.font_size) - 2.0;
+            frame.fill_rectangle(
+                Point::new(x, underline_y),
+                Size::new(text_width, 1.0),
+                color,
+            );
+        }
+
+        // Draw strikethrough
+        if span.strikethrough {
+            let strikethrough_y = y + config::line_height(self.font_size) / 2.0;
+            frame.fill_rectangle(
+                Point::new(x, strikethrough_y),
+                Size::new(text_width, 1.0),
+                color,
+            );
+        }
     }
 
     fn draw_cursor(&self, frame: &mut Frame, state: &TerminalCanvasState, bounds: Rectangle) {

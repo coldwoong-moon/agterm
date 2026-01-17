@@ -145,6 +145,10 @@ pub struct StyledSpan {
     pub text: String,
     pub color: Option<Color>,
     pub bold: bool,
+    pub underline: bool,
+    pub dim: bool,
+    pub italic: bool,
+    pub strikethrough: bool,
 }
 
 /// Convert terminal cells to styled spans
@@ -153,6 +157,10 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
     let mut current_text = String::new();
     let mut current_color: Option<Color> = None;
     let mut current_bold = false;
+    let mut current_underline = false;
+    let mut current_dim = false;
+    let mut current_italic = false;
+    let mut current_strikethrough = false;
 
     for cell in cells {
         // Skip placeholder cells (second cell of wide characters)
@@ -166,17 +174,31 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
             None
         };
 
-        // If color or bold changes, push current span and start new one
-        if color != current_color || cell.bold != current_bold {
+        // If any style attribute changes, push current span and start new one
+        if color != current_color
+            || cell.bold != current_bold
+            || cell.underline != current_underline
+            || cell.dim != current_dim
+            || cell.italic != current_italic
+            || cell.strikethrough != current_strikethrough
+        {
             if !current_text.is_empty() {
                 spans.push(StyledSpan {
                     text: std::mem::take(&mut current_text),
                     color: current_color,
                     bold: current_bold,
+                    underline: current_underline,
+                    dim: current_dim,
+                    italic: current_italic,
+                    strikethrough: current_strikethrough,
                 });
             }
             current_color = color;
             current_bold = cell.bold;
+            current_underline = cell.underline;
+            current_dim = cell.dim;
+            current_italic = cell.italic;
+            current_strikethrough = cell.strikethrough;
         }
 
         current_text.push(cell.c);
@@ -188,6 +210,10 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
             text: current_text,
             color: current_color,
             bold: current_bold,
+            underline: current_underline,
+            dim: current_dim,
+            italic: current_italic,
+            strikethrough: current_strikethrough,
         });
     }
 
@@ -381,6 +407,7 @@ enum Message {
 
     // Clipboard
     ClipboardContent(Option<String>),
+    CopySelection,
 
     // Window resize
     WindowResized {
@@ -556,12 +583,29 @@ impl AgTerm {
             }
 
             Message::KeyPressed(key, modifiers) => {
-                // Handle Ctrl key signals
+                // Handle Ctrl/Cmd+C: Copy if selection exists, otherwise send interrupt signal
+                if (modifiers.control() || modifiers.command()) && matches!(key.as_ref(), Key::Character("c")) {
+                    // Check if there's an active selection
+                    let has_selection = if let Some(tab) = self.tabs.get(self.active_tab) {
+                        tab.canvas_state.selection.as_ref().map(|s| s.active && s.start != s.end).unwrap_or(false)
+                    } else {
+                        false
+                    };
+
+                    if has_selection {
+                        // Copy selection to clipboard
+                        return self.update(Message::CopySelection);
+                    } else if modifiers.control() {
+                        // Send interrupt signal (Ctrl+C)
+                        return self.update(Message::SendSignal(SignalType::Interrupt));
+                    }
+                    // Cmd+C with no selection: do nothing
+                    return Task::none();
+                }
+
+                // Handle other Ctrl key signals
                 if modifiers.control() {
                     match key.as_ref() {
-                        Key::Character("c") => {
-                            return self.update(Message::SendSignal(SignalType::Interrupt))
-                        }
                         Key::Character("d") => {
                             return self.update(Message::SendSignal(SignalType::EOF))
                         }
@@ -671,6 +715,31 @@ impl AgTerm {
                 Task::none()
             }
 
+            Message::CopySelection => {
+                use terminal_canvas::get_selected_text;
+
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    if let Some(selection) = &tab.canvas_state.selection {
+                        if selection.active && selection.start != selection.end {
+                            // Extract selected text
+                            let selected_text = get_selected_text(&tab.parsed_line_cache, selection);
+
+                            // Copy to clipboard using arboard
+                            if !selected_text.is_empty() {
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    let _ = clipboard.set_text(selected_text);
+                                }
+                            }
+
+                            // Clear selection after copying
+                            tab.canvas_state.selection = None;
+                            tab.canvas_state.invalidate();
+                        }
+                    }
+                }
+                Task::none()
+            }
+
             Message::WindowResized { width, height } => {
                 // Calculate terminal dimensions based on approximate character size
                 // D2Coding at ~13px = roughly 8px width, 18px height per character
@@ -752,6 +821,12 @@ impl AgTerm {
 
                                 // Process bytes through VTE parser
                                 tab.screen.process(&data);
+
+                                // Send pending responses (DA, DSR, CPR, etc.) to PTY
+                                let pending_responses = tab.screen.take_pending_responses();
+                                for response in pending_responses {
+                                    let _ = self.pty_manager.write(session_id, response.as_bytes());
+                                }
 
                                 // Convert screen buffer to parsed line cache for rendering
                                 let all_lines = tab.screen.get_all_lines();
