@@ -55,6 +55,7 @@ impl Default for LoggingConfig {
 
 /// Log output format
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum LogFormat {
     Pretty,
     Json,
@@ -62,6 +63,7 @@ pub enum LogFormat {
 }
 
 impl LogFormat {
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "json" => LogFormat::Json,
@@ -166,6 +168,7 @@ pub fn init_logging(config: &LoggingConfig) -> LogBuffer {
 }
 
 /// Parse log level from string
+#[allow(dead_code)]
 pub fn parse_level(s: &str) -> Level {
     match s.to_lowercase().as_str() {
         "trace" => Level::TRACE,

@@ -14,6 +14,7 @@ use tracing_subscriber::Layer;
 
 /// A log entry stored in the buffer
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct LogEntry {
     /// Timestamp when the log was recorded
     pub timestamp: Instant,
@@ -147,6 +148,7 @@ impl std::fmt::Debug for LogBuffer {
     }
 }
 
+#[allow(dead_code)]
 impl LogBuffer {
     /// Get a snapshot of the current log entries
     pub fn get_entries(&self) -> Vec<LogEntry> {

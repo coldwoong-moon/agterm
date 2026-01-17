@@ -60,7 +60,6 @@ mod theme {
     // UI elements
     pub const BORDER: Color = Color::from_rgb(0.22, 0.22, 0.28);          // #383847
     pub const TAB_ACTIVE: Color = Color::from_rgb(0.36, 0.54, 0.98);      // #5c8afa
-    pub const TAB_INACTIVE: Color = Color::from_rgb(0.18, 0.18, 0.22);    // #2d2d38
 
     // Prompt symbol
     pub const PROMPT: Color = Color::from_rgb(0.55, 0.36, 0.98);          // #8c5cfa (purple)
@@ -91,6 +90,7 @@ mod theme {
 
 /// A styled text span with optional color
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 struct StyledSpan {
     text: String,
     color: Option<Color>,
@@ -457,6 +457,7 @@ enum Message {
     // Terminal input (Block mode)
     InputChanged(String),
     SubmitInput,
+    #[allow(dead_code)]
     FocusInput,
 
     // Raw input (Raw mode)
@@ -489,6 +490,7 @@ enum Message {
 
     // Debug panel
     ToggleDebugPanel,
+    #[allow(dead_code)]
     DebugPanelMessage(DebugPanelMessage),
 }
 

@@ -35,6 +35,7 @@ impl Default for Metrics {
     }
 }
 
+#[allow(dead_code)]
 impl Metrics {
     /// Create a new metrics collector with the specified sample size
     pub fn new(max_samples: usize) -> Self {
@@ -166,6 +167,7 @@ pub struct InputDebugState {
     pub raw_mode: bool,
 }
 
+#[allow(dead_code)]
 impl InputDebugState {
     /// Update with a new key press
     pub fn record_key(&mut self, key: &str, modifiers: &str) {
@@ -182,6 +184,7 @@ impl InputDebugState {
 
 /// PTY session debug info
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PtyDebugInfo {
     /// Session ID
     pub session_id: String,
@@ -197,6 +200,7 @@ pub struct PtyDebugInfo {
     pub active: bool,
 }
 
+#[allow(dead_code)]
 impl PtyDebugInfo {
     /// Create a new PTY debug info
     pub fn new(session_id: String) -> Self {

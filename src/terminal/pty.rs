@@ -29,6 +29,7 @@ pub enum PtyError {
     Channel(String),
 }
 
+#[allow(dead_code)]
 enum PtyCommand {
     Create {
         id: PtyId,
@@ -434,6 +435,7 @@ impl PtyManager {
     /// - `Ok(Some(exit_code))` if the process has terminated with the given exit code
     /// - `Ok(None)` if the process is still running
     /// - `Err(PtyError)` if there was an error checking the status
+    #[allow(dead_code)]
     pub fn check_status(&self, id: &PtyId) -> Result<Option<i32>, PtyError> {
         let (response_tx, response_rx) = mpsc::channel();
 

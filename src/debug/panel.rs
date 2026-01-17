@@ -9,7 +9,7 @@
 use super::{InputDebugState, Metrics, PtyDebugInfo};
 use crate::logging::layers::LogBuffer;
 use iced::widget::{column, container, row, scrollable, text, Space};
-use iced::{Alignment, Border, Color, Element, Font, Length};
+use iced::{Alignment, Border, Element, Font, Length};
 use std::time::Instant;
 use tracing::Level;
 
@@ -35,6 +35,7 @@ mod colors {
 
 /// Debug panel messages
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum DebugPanelMessage {
     /// Toggle panel visibility
     Toggle,
@@ -99,6 +100,7 @@ impl DebugPanel {
     }
 
     /// Update PTY session info
+    #[allow(dead_code)]
     pub fn update_pty_session(&mut self, info: PtyDebugInfo) {
         if let Some(existing) = self.pty_sessions.iter_mut().find(|s| s.session_id == info.session_id) {
             *existing = info;
@@ -108,6 +110,7 @@ impl DebugPanel {
     }
 
     /// Remove a PTY session
+    #[allow(dead_code)]
     pub fn remove_pty_session(&mut self, session_id: &str) {
         self.pty_sessions.retain(|s| s.session_id != session_id);
     }
