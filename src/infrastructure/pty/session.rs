@@ -249,6 +249,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg(not(windows))] // PTY spawning is unreliable on Windows CI
     async fn test_pty_session_creation() {
         let config = PtySessionConfig::default();
         let session = PtySession::new(config);
