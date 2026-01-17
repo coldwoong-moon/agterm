@@ -44,8 +44,7 @@ pub struct PtySessionConfig {
 impl Default for PtySessionConfig {
     fn default() -> Self {
         let shell = default_shell();
-        let working_dir =
-            std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
 
         Self {
             shell,
