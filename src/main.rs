@@ -13,9 +13,11 @@ use std::time::{Duration, Instant};
 mod debug;
 mod logging;
 mod terminal;
+mod terminal_canvas;
 
 use debug::{DebugPanel, DebugPanelMessage};
 use logging::{LogBuffer, LoggingConfig};
+use terminal_canvas::{TerminalCanvas, TerminalCanvasState};
 
 use terminal::pty::{PtyManager, MAX_OUTPUT_LINES};
 
@@ -232,10 +234,10 @@ mod theme {
 /// A styled text span with optional color
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
-struct StyledSpan {
-    text: String,
-    color: Option<Color>,
-    bold: bool,
+pub struct StyledSpan {
+    pub text: String,
+    pub color: Option<Color>,
+    pub bold: bool,
 }
 
 /// Parse ANSI-colored text into styled spans
@@ -570,6 +572,8 @@ impl Default for AgTerm {
             mode: TerminalMode::Raw, // Default to Raw mode for interactive apps
             parsed_line_cache: Vec::new(),
             cache_buffer_len: 0,
+            canvas_state: TerminalCanvasState::new(),
+            content_version: 0,
         };
 
         let mut debug_panel = DebugPanel::new();
@@ -614,6 +618,10 @@ struct TerminalTab {
     parsed_line_cache: Vec<Vec<StyledSpan>>,
     /// Last known buffer length when cache was updated
     cache_buffer_len: usize,
+    // Canvas state for virtual scrolling
+    canvas_state: TerminalCanvasState,
+    /// Content version for cache invalidation
+    content_version: u64,
 }
 
 /// Terminal input mode
@@ -744,6 +752,8 @@ impl AgTerm {
                     mode: TerminalMode::Raw,
                     parsed_line_cache: Vec::new(),
                     cache_buffer_len: 0,
+                    canvas_state: TerminalCanvasState::new(),
+                    content_version: 0,
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
@@ -1146,6 +1156,9 @@ impl AgTerm {
 
                                 match tab.mode {
                                     TerminalMode::Raw => {
+                                        // Check if at bottom before adding new content
+                                        let was_at_bottom = tab.canvas_state.is_at_bottom(tab.parsed_line_cache.len());
+
                                         // In Raw mode, append to raw_output_buffer
                                         tab.raw_output_buffer.push_str(&raw_output);
                                         // Limit buffer size (keep last 100KB)
@@ -1161,6 +1174,14 @@ impl AgTerm {
 
                                         // Update ANSI parsing cache for new content
                                         update_line_cache(tab);
+
+                                        // Increment content version for canvas cache invalidation
+                                        tab.content_version += 1;
+
+                                        // Auto-scroll if was at bottom
+                                        if was_at_bottom {
+                                            tab.canvas_state.scroll_to_bottom(tab.parsed_line_cache.len());
+                                        }
                                     }
                                     TerminalMode::Block => {
                                         // In Block mode, use existing block-based logic
@@ -1618,62 +1639,21 @@ impl AgTerm {
     }
 
     /// Render raw terminal output (for Raw mode)
-    /// Uses cached parsed lines to avoid repeated ANSI parsing
-    fn render_raw_terminal(&self, parsed_cache: &[Vec<StyledSpan>]) -> Element<Message> {
-        // Get the last N lines from cache
-        let display_lines: &[Vec<StyledSpan>] = if parsed_cache.len() > 100 {
-            &parsed_cache[parsed_cache.len() - 100..]
-        } else {
-            parsed_cache
-        };
+    /// Uses Canvas for virtual scrolling and hardware acceleration
+    fn render_raw_terminal<'a>(&self, parsed_cache: &'a [Vec<StyledSpan>]) -> Element<'a, Message> {
+        use iced::widget::canvas;
 
-        let content: Element<Message> = if display_lines.is_empty() {
-            // Show cursor indicator when empty
-            text("█")
-                .size(14)
-                .font(MONO_FONT)
-                .color(theme::TEXT_PRIMARY)
-                .into()
-        } else {
-            // Pre-allocate Vec for line elements
-            let mut line_elements = Vec::with_capacity(display_lines.len());
+        // Create terminal canvas with all lines (virtual scrolling will handle visibility)
+        let terminal_canvas = TerminalCanvas::new(
+            parsed_cache,
+            self.tabs[self.active_tab].content_version,
+            theme::TEXT_PRIMARY,
+            MONO_FONT,
+        );
 
-            for spans in display_lines {
-                let line_element = if spans.is_empty() {
-                    text("").size(14).font(MONO_FONT).into()
-                } else if spans.len() == 1 && spans[0].color.is_none() {
-                    text(spans[0].text.clone())
-                        .size(14)
-                        .font(MONO_FONT)
-                        .color(theme::TEXT_PRIMARY)
-                        .into()
-                } else {
-                    // Pre-allocate Vec for span elements
-                    let mut span_elements = Vec::with_capacity(spans.len());
-                    for span in spans {
-                        let color = span.color.unwrap_or(theme::TEXT_PRIMARY);
-                        span_elements.push(
-                            text(span.text.clone())
-                                .size(14)
-                                .font(MONO_FONT)
-                                .color(color)
-                                .into(),
-                        );
-                    }
-                    row(span_elements).into()
-                };
-                line_elements.push(line_element);
-            }
-
-            column(line_elements)
-                .spacing(2)
-                .into()
-        };
-
-        scrollable(content)
-            .height(Length::Fill)
+        canvas(terminal_canvas)
             .width(Length::Fill)
-            .style(theme::scrollable_style)
+            .height(Length::Fill)
             .into()
     }
 
@@ -1998,6 +1978,8 @@ mod tests {
             mode: TerminalMode::Block, // Use Block mode for tests to maintain compatibility
             parsed_line_cache: Vec::new(),
             cache_buffer_len: 0,
+            canvas_state: TerminalCanvasState::new(),
+            content_version: 0,
         };
 
         AgTerm {
