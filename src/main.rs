@@ -931,12 +931,10 @@ impl AgTerm {
                     return self.update(Message::ToggleDebugPanel);
                 }
 
-                // Raw mode: send special keys directly to PTY
-                // NOTE: Regular characters are handled by text_input (for IME support)
+                // Raw mode: send all keys directly to PTY
                 if !modifiers.command() {
                     let input = match key.as_ref() {
-                        // Only handle special/named keys here
-                        // Regular characters go through text_input for IME support
+                        // Special/named keys
                         Key::Named(keyboard::key::Named::Escape) => Some("\x1b".to_string()),
                         Key::Named(keyboard::key::Named::ArrowUp) => Some("\x1b[A".to_string()),
                         Key::Named(keyboard::key::Named::ArrowDown) => Some("\x1b[B".to_string()),
@@ -948,8 +946,12 @@ impl AgTerm {
                         Key::Named(keyboard::key::Named::PageDown) => Some("\x1b[6~".to_string()),
                         Key::Named(keyboard::key::Named::Delete) => Some("\x1b[3~".to_string()),
                         Key::Named(keyboard::key::Named::Insert) => Some("\x1b[2~".to_string()),
-                        // Tab key - send directly (text_input uses it for focus)
                         Key::Named(keyboard::key::Named::Tab) => Some("\t".to_string()),
+                        Key::Named(keyboard::key::Named::Enter) => Some("\r".to_string()),
+                        Key::Named(keyboard::key::Named::Backspace) => Some("\x7f".to_string()),
+                        Key::Named(keyboard::key::Named::Space) => Some(" ".to_string()),
+                        // Regular characters - send directly to PTY
+                        Key::Character(c) => Some(c.to_string()),
                         _ => None,
                     };
 
