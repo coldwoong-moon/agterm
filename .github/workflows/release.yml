@@ -8,86 +8,17 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
+  BINARY_NAME: agterm
 
 jobs:
-  create-release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      version: ${{ steps.get_version.outputs.VERSION }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Get version from tag
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: AgTerm v${{ steps.get_version.outputs.VERSION }}
-          draft: false
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-          generate_release_notes: true
-          body: |
-            ## AgTerm v${{ steps.get_version.outputs.VERSION }}
-
-            AI Agent Terminal Orchestrator with MCP Support
-
-            ### Quick Install
-
-            #### macOS / Linux (one-liner)
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sh
-            ```
-
-            #### Manual Installation
-
-            **macOS (Apple Silicon)**
-            ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/agterm-macos-arm64.tar.gz | tar xz
-            sudo mv agterm /usr/local/bin/
-            ```
-
-            **macOS (Intel)**
-            ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/agterm-macos-amd64.tar.gz | tar xz
-            sudo mv agterm /usr/local/bin/
-            ```
-
-            **Linux (x86_64)**
-            ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/agterm-linux-amd64.tar.gz | tar xz
-            sudo mv agterm /usr/local/bin/
-            ```
-
-            **Linux (ARM64)**
-            ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/agterm-linux-arm64.tar.gz | tar xz
-            sudo mv agterm /usr/local/bin/
-            ```
-
-            **Windows**
-            Download `agterm-windows-amd64.zip`, extract, and add to your PATH.
-
-            ### Verify Downloads
-
-            Download `checksums.txt` and verify with:
-            ```bash
-            sha256sum -c checksums.txt
-            ```
-
-            ### Changelog
-
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
-
-  build-release:
-    name: Build Release
-    needs: create-release
+  build:
+    name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -95,24 +26,24 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            name: agterm-linux-amd64
-            archive: tar.gz
+            name: linux-amd64
+            cross: false
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            name: agterm-linux-arm64
-            archive: tar.gz
+            name: linux-arm64
+            cross: true
           - os: macos-latest
             target: x86_64-apple-darwin
-            name: agterm-macos-amd64
-            archive: tar.gz
+            name: macos-amd64
+            cross: false
           - os: macos-latest
             target: aarch64-apple-darwin
-            name: agterm-macos-arm64
-            archive: tar.gz
+            name: macos-arm64
+            cross: false
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            name: agterm-windows-amd64
-            archive: zip
+            name: windows-amd64
+            cross: false
 
     steps:
       - uses: actions/checkout@v4
@@ -122,75 +53,263 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross-compilation tools (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      - name: Install cross-compilation tools
+        if: matrix.cross
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      - name: Build release
+      - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
-      - name: Create archive (Unix)
-        if: matrix.archive == 'tar.gz'
+      - name: Create dist directory
+        shell: bash
+        run: mkdir -p dist
+
+      - name: Copy binary (Unix)
+        if: runner.os != 'Windows'
         run: |
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/agterm dist/
-          cp README.md LICENSE dist/ 2>/dev/null || true
-          cd dist && tar -czvf ../${{ matrix.name }}.tar.gz *
-          cd .. && sha256sum ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
+          cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} dist/
+          chmod +x dist/${{ env.BINARY_NAME }}
+
+      - name: Copy binary (Windows)
+        if: runner.os == 'Windows'
+        run: cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe dist/
+
+      - name: Create archive (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd dist
+          tar -czvf ../${{ env.BINARY_NAME }}-${{ matrix.name }}.tar.gz *
 
       - name: Create archive (Windows)
-        if: matrix.archive == 'zip'
+        if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist
-          Copy-Item target/${{ matrix.target }}/release/agterm.exe dist/
-          Copy-Item README.md, LICENSE dist/ -ErrorAction SilentlyContinue
-          Compress-Archive -Path dist/* -DestinationPath ${{ matrix.name }}.zip
-          (Get-FileHash ${{ matrix.name }}.zip -Algorithm SHA256).Hash.ToLower() + "  ${{ matrix.name }}.zip" | Out-File -Encoding ASCII ${{ matrix.name }}.zip.sha256
+        run: Compress-Archive -Path dist/* -DestinationPath ${{ env.BINARY_NAME }}-${{ matrix.name }}.zip
 
-      - name: Upload archive
-        uses: softprops/action-gh-release@v2
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            ${{ matrix.name }}.${{ matrix.archive }}
-            ${{ matrix.name }}.${{ matrix.archive }}.sha256
+          name: ${{ env.BINARY_NAME }}-${{ matrix.name }}
+          path: |
+            ${{ env.BINARY_NAME }}-${{ matrix.name }}.tar.gz
+            ${{ env.BINARY_NAME }}-${{ matrix.name }}.zip
+          if-no-files-found: ignore
 
-  create-checksums:
-    name: Create Checksums
-    needs: build-release
+  build-linux-packages:
+    name: Build Linux Packages
+    needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ env.BINARY_NAME }}-linux-*
+          merge-multiple: true
+
+      - name: Extract binaries
+        run: |
+          mkdir -p pkg-amd64 pkg-arm64
+          tar -xzf ${{ env.BINARY_NAME }}-linux-amd64.tar.gz -C pkg-amd64
+          tar -xzf ${{ env.BINARY_NAME }}-linux-arm64.tar.gz -C pkg-arm64
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev rubygems build-essential rpm
+          sudo gem install fpm
+
+      - name: Build DEB package (amd64)
+        run: |
+          fpm -s dir -t deb \
+            -n ${{ env.BINARY_NAME }} \
+            -v ${{ steps.version.outputs.VERSION }} \
+            -a amd64 \
+            -m "AgTerm Maintainers" \
+            --description "AI Agent Terminal Orchestrator with MCP Support" \
+            --url "https://github.com/${{ github.repository }}" \
+            --license "MIT" \
+            --deb-no-default-config-files \
+            pkg-amd64/${{ env.BINARY_NAME }}=/usr/bin/${{ env.BINARY_NAME }}
+
+      - name: Build DEB package (arm64)
+        run: |
+          fpm -s dir -t deb \
+            -n ${{ env.BINARY_NAME }} \
+            -v ${{ steps.version.outputs.VERSION }} \
+            -a arm64 \
+            -m "AgTerm Maintainers" \
+            --description "AI Agent Terminal Orchestrator with MCP Support" \
+            --url "https://github.com/${{ github.repository }}" \
+            --license "MIT" \
+            --deb-no-default-config-files \
+            pkg-arm64/${{ env.BINARY_NAME }}=/usr/bin/${{ env.BINARY_NAME }}
+
+      - name: Build RPM package (x86_64)
+        run: |
+          fpm -s dir -t rpm \
+            -n ${{ env.BINARY_NAME }} \
+            -v ${{ steps.version.outputs.VERSION }} \
+            -a x86_64 \
+            -m "AgTerm Maintainers" \
+            --description "AI Agent Terminal Orchestrator with MCP Support" \
+            --url "https://github.com/${{ github.repository }}" \
+            --license "MIT" \
+            pkg-amd64/${{ env.BINARY_NAME }}=/usr/bin/${{ env.BINARY_NAME }}
+
+      - name: Build RPM package (aarch64)
+        run: |
+          fpm -s dir -t rpm \
+            -n ${{ env.BINARY_NAME }} \
+            -v ${{ steps.version.outputs.VERSION }} \
+            -a aarch64 \
+            -m "AgTerm Maintainers" \
+            --description "AI Agent Terminal Orchestrator with MCP Support" \
+            --url "https://github.com/${{ github.repository }}" \
+            --license "MIT" \
+            pkg-arm64/${{ env.BINARY_NAME }}=/usr/bin/${{ env.BINARY_NAME }}
+
+      - name: Upload DEB/RPM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            *.deb
+            *.rpm
+
+  release:
+    name: Create Release
+    needs: [build, build-linux-packages]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: '*'
-          merge-multiple: true
+          path: artifacts
 
-      - name: Download release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Prepare release assets
         run: |
-          gh release download ${{ github.ref_name }} --repo ${{ github.repository }} --pattern "*.sha256"
-
-      - name: Create combined checksums file
-        run: |
-          cat *.sha256 > checksums.txt
+          mkdir -p release
+          # Move all archives
+          find artifacts -name "*.tar.gz" -exec mv {} release/ \;
+          find artifacts -name "*.zip" -exec mv {} release/ \;
+          find artifacts -name "*.deb" -exec mv {} release/ \;
+          find artifacts -name "*.rpm" -exec mv {} release/ \;
+          # Create checksums
+          cd release
+          sha256sum * > checksums.txt
           cat checksums.txt
 
-      - name: Upload checksums
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: checksums.txt
+          name: AgTerm v${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          generate_release_notes: true
+          files: release/*
+          body: |
+            ## AgTerm v${{ steps.version.outputs.VERSION }}
+
+            AI Agent Terminal Orchestrator with MCP Support
+
+            ### Installation
+
+            #### Homebrew (macOS/Linux)
+            ```bash
+            brew install coldwoong-moon/tap/agterm
+            ```
+
+            #### Cargo
+            ```bash
+            cargo install agterm
+            ```
+
+            #### Shell Script (macOS/Linux)
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sh
+            ```
+
+            #### Debian/Ubuntu
+            ```bash
+            curl -LO https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/agterm_${{ steps.version.outputs.VERSION }}_amd64.deb
+            sudo dpkg -i agterm_${{ steps.version.outputs.VERSION }}_amd64.deb
+            ```
+
+            #### Fedora/RHEL
+            ```bash
+            curl -LO https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/agterm-${{ steps.version.outputs.VERSION }}-1.x86_64.rpm
+            sudo rpm -i agterm-${{ steps.version.outputs.VERSION }}-1.x86_64.rpm
+            ```
+
+            #### Scoop (Windows)
+            ```powershell
+            scoop bucket add agterm https://github.com/coldwoong-moon/scoop-agterm
+            scoop install agterm
+            ```
+
+            #### Manual Download
+            Download the appropriate archive for your platform from the assets below.
+
+            ### Verify Downloads
+            ```bash
+            sha256sum -c checksums.txt
+            ```
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+    if: "!contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc')"
+    steps:
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Download checksums
+        run: |
+          curl -L -o checksums.txt \
+            "https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/checksums.txt"
+
+      - name: Extract SHA256 values
+        id: sha
+        run: |
+          echo "MACOS_ARM64=$(grep 'agterm-macos-arm64.tar.gz' checksums.txt | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "MACOS_AMD64=$(grep 'agterm-macos-amd64.tar.gz' checksums.txt | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "LINUX_ARM64=$(grep 'agterm-linux-arm64.tar.gz' checksums.txt | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "LINUX_AMD64=$(grep 'agterm-linux-amd64.tar.gz' checksums.txt | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Update Homebrew formula
+        uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          formula-name: agterm
+          formula-path: Formula/agterm.rb
+          homebrew-tap: coldwoong-moon/homebrew-tap
+          download-url: https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/agterm-macos-arm64.tar.gz
+          download-sha256: ${{ steps.sha.outputs.MACOS_ARM64 }}
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        continue-on-error: true
 
   publish-crate:
     name: Publish to crates.io
-    needs: [create-release, build-release]
+    needs: release
     runs-on: ubuntu-latest
-    if: "!contains(github.ref, 'alpha') && !contains(github.ref, 'beta')"
+    if: "!contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc')"
     steps:
       - uses: actions/checkout@v4
 
