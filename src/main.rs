@@ -3,16 +3,16 @@
 //! Native GPU-accelerated terminal emulator with AI agent orchestration.
 //! Inspired by Warp terminal's modern block-based interface.
 
+use iced::keyboard::{self, Key, Modifiers};
+use iced::widget::text_input::Id as TextInputId;
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Border, Color, Element, Font, Length, Subscription, Task};
-use iced::widget::text_input::Id as TextInputId;
-use iced::keyboard::{self, Key, Modifiers};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-mod terminal;
-mod logging;
 mod debug;
+mod logging;
+mod terminal;
 
 use debug::{DebugPanel, DebugPanelMessage};
 use logging::{LogBuffer, LoggingConfig};
@@ -40,29 +40,29 @@ mod theme {
     use iced::Color;
 
     // Background colors
-    pub const BG_PRIMARY: Color = Color::from_rgb(0.09, 0.09, 0.11);      // #17171c
-    pub const BG_SECONDARY: Color = Color::from_rgb(0.12, 0.12, 0.15);    // #1e1e26
-    pub const BG_BLOCK: Color = Color::from_rgb(0.14, 0.14, 0.18);        // #242430
-    pub const BG_BLOCK_HOVER: Color = Color::from_rgb(0.18, 0.18, 0.22);  // #2d2d38
-    pub const BG_INPUT: Color = Color::from_rgb(0.11, 0.11, 0.14);        // #1c1c24
+    pub const BG_PRIMARY: Color = Color::from_rgb(0.09, 0.09, 0.11); // #17171c
+    pub const BG_SECONDARY: Color = Color::from_rgb(0.12, 0.12, 0.15); // #1e1e26
+    pub const BG_BLOCK: Color = Color::from_rgb(0.14, 0.14, 0.18); // #242430
+    pub const BG_BLOCK_HOVER: Color = Color::from_rgb(0.18, 0.18, 0.22); // #2d2d38
+    pub const BG_INPUT: Color = Color::from_rgb(0.11, 0.11, 0.14); // #1c1c24
 
     // Text colors
-    pub const TEXT_PRIMARY: Color = Color::from_rgb(0.93, 0.93, 0.95);    // #edeff2
-    pub const TEXT_SECONDARY: Color = Color::from_rgb(0.6, 0.62, 0.68);   // #999ead
-    pub const TEXT_MUTED: Color = Color::from_rgb(0.45, 0.47, 0.52);      // #737885
+    pub const TEXT_PRIMARY: Color = Color::from_rgb(0.93, 0.93, 0.95); // #edeff2
+    pub const TEXT_SECONDARY: Color = Color::from_rgb(0.6, 0.62, 0.68); // #999ead
+    pub const TEXT_MUTED: Color = Color::from_rgb(0.45, 0.47, 0.52); // #737885
 
     // Accent colors
-    pub const ACCENT_BLUE: Color = Color::from_rgb(0.36, 0.54, 0.98);     // #5c8afa
-    pub const ACCENT_GREEN: Color = Color::from_rgb(0.35, 0.78, 0.55);    // #59c78c
-    pub const ACCENT_YELLOW: Color = Color::from_rgb(0.95, 0.77, 0.36);   // #f2c55c
-    pub const ACCENT_RED: Color = Color::from_rgb(0.92, 0.39, 0.45);      // #eb6473
+    pub const ACCENT_BLUE: Color = Color::from_rgb(0.36, 0.54, 0.98); // #5c8afa
+    pub const ACCENT_GREEN: Color = Color::from_rgb(0.35, 0.78, 0.55); // #59c78c
+    pub const ACCENT_YELLOW: Color = Color::from_rgb(0.95, 0.77, 0.36); // #f2c55c
+    pub const ACCENT_RED: Color = Color::from_rgb(0.92, 0.39, 0.45); // #eb6473
 
     // UI elements
-    pub const BORDER: Color = Color::from_rgb(0.22, 0.22, 0.28);          // #383847
-    pub const TAB_ACTIVE: Color = Color::from_rgb(0.36, 0.54, 0.98);      // #5c8afa
+    pub const BORDER: Color = Color::from_rgb(0.22, 0.22, 0.28); // #383847
+    pub const TAB_ACTIVE: Color = Color::from_rgb(0.36, 0.54, 0.98); // #5c8afa
 
     // Prompt symbol
-    pub const PROMPT: Color = Color::from_rgb(0.55, 0.36, 0.98);          // #8c5cfa (purple)
+    pub const PROMPT: Color = Color::from_rgb(0.55, 0.36, 0.98); // #8c5cfa (purple)
 
     // ANSI colors (standard 16-color palette)
     pub const ANSI_BLACK: Color = Color::from_rgb(0.0, 0.0, 0.0);
@@ -82,6 +82,147 @@ mod theme {
     pub const ANSI_BRIGHT_MAGENTA: Color = Color::from_rgb(1.0, 0.3, 1.0);
     pub const ANSI_BRIGHT_CYAN: Color = Color::from_rgb(0.3, 1.0, 1.0);
     pub const ANSI_BRIGHT_WHITE: Color = Color::from_rgb(1.0, 1.0, 1.0);
+
+    // ============================================================================
+    // Reusable Style Functions
+    // ============================================================================
+
+    use iced::widget::{button, container, scrollable, text_input};
+    use iced::Border;
+
+    /// Common input field style for text inputs
+    pub fn input_style(_theme: &iced::Theme, _status: text_input::Status) -> text_input::Style {
+        text_input::Style {
+            background: BG_INPUT.into(),
+            border: Border {
+                color: BORDER,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            icon: TEXT_MUTED,
+            placeholder: TEXT_MUTED,
+            value: TEXT_PRIMARY,
+            selection: ACCENT_BLUE,
+        }
+    }
+
+    /// Raw mode input field style (slightly smaller radius)
+    pub fn raw_input_style(_theme: &iced::Theme, _status: text_input::Status) -> text_input::Style {
+        text_input::Style {
+            background: BG_INPUT.into(),
+            border: Border {
+                color: BORDER,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            icon: TEXT_MUTED,
+            placeholder: TEXT_MUTED,
+            value: TEXT_PRIMARY,
+            selection: ACCENT_BLUE,
+        }
+    }
+
+    /// Common container style for input rows and status bars
+    pub fn section_container_style(_theme: &iced::Theme) -> container::Style {
+        container::Style {
+            background: Some(BG_SECONDARY.into()),
+            border: Border {
+                color: BORDER,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Container style for status bar
+    pub fn status_bar_style(_theme: &iced::Theme) -> container::Style {
+        container::Style {
+            background: Some(BG_PRIMARY.into()),
+            border: Border {
+                color: BORDER,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Container style for command blocks
+    pub fn block_container_style(_theme: &iced::Theme) -> container::Style {
+        container::Style {
+            background: Some(BG_BLOCK.into()),
+            border: Border {
+                color: BORDER,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Container style for terminal output area
+    pub fn terminal_output_style(_theme: &iced::Theme) -> container::Style {
+        container::Style {
+            background: Some(BG_BLOCK.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Container style for primary background
+    pub fn primary_background_style(_theme: &iced::Theme) -> container::Style {
+        container::Style {
+            background: Some(BG_PRIMARY.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Common scrollable style with custom scrollbar
+    pub fn scrollable_style(
+        _theme: &iced::Theme,
+        _status: scrollable::Status,
+    ) -> scrollable::Style {
+        scrollable::Style {
+            container: container::Style::default(),
+            vertical_rail: scrollable::Rail {
+                background: Some(BG_PRIMARY.into()),
+                border: Border::default(),
+                scroller: scrollable::Scroller {
+                    color: BG_BLOCK_HOVER,
+                    border: Border {
+                        radius: 4.0.into(),
+                        ..Default::default()
+                    },
+                },
+            },
+            horizontal_rail: scrollable::Rail {
+                background: Some(BG_PRIMARY.into()),
+                border: Border::default(),
+                scroller: scrollable::Scroller {
+                    color: BG_BLOCK_HOVER,
+                    border: Border {
+                        radius: 4.0.into(),
+                        ..Default::default()
+                    },
+                },
+            },
+            gap: None,
+        }
+    }
+
+    /// Copy button style
+    pub fn copy_button_style(_theme: &iced::Theme, _status: button::Status) -> button::Style {
+        button::Style {
+            background: Some(BG_SECONDARY.into()),
+            text_color: TEXT_MUTED,
+            border: Border {
+                color: BORDER,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        }
+    }
 }
 
 // ============================================================================
@@ -137,7 +278,10 @@ fn parse_ansi_text(input: &str) -> Vec<StyledSpan> {
                 for code_str in codes.split(';') {
                     if let Ok(code) = code_str.parse::<u8>() {
                         match code {
-                            0 => { current_color = None; bold = false; } // Reset
+                            0 => {
+                                current_color = None;
+                                bold = false;
+                            } // Reset
                             1 => bold = true,
                             22 => bold = false,
                             30 => current_color = Some(theme::ANSI_BLACK),
@@ -199,7 +343,8 @@ fn update_line_cache(tab: &mut TerminalTab) {
     }
 
     // Normalize line endings
-    let normalized = tab.raw_output_buffer
+    let normalized = tab
+        .raw_output_buffer
         .replace("\r\n", "\n")
         .replace('\r', "\n");
 
@@ -234,7 +379,9 @@ fn update_line_cache(tab: &mut TerminalTab) {
 #[derive(Clone)]
 struct CommandBlock {
     command: String,
-    output: Vec<String>,  // Raw output with ANSI codes preserved
+    output: Vec<String>, // Raw output with ANSI codes preserved
+    /// Cached parsed ANSI spans for output lines
+    parsed_output_cache: Vec<Vec<StyledSpan>>,
     timestamp: Instant,
     completed_at: Option<Instant>,
     exit_code: Option<i32>,
@@ -262,10 +409,15 @@ fn strip_ansi(input: &str) -> String {
             // Skip escape sequence
             if let Some(&'[') = chars.peek() {
                 chars.next(); // consume '['
-                // Skip until we hit a letter (command character)
+                              // Skip until we hit a letter (command character)
                 while let Some(&next) = chars.peek() {
                     chars.next();
-                    if next.is_ascii_alphabetic() || next == 'm' || next == 'K' || next == 'H' || next == 'J' {
+                    if next.is_ascii_alphabetic()
+                        || next == 'm'
+                        || next == 'K'
+                        || next == 'H'
+                        || next == 'J'
+                    {
                         break;
                     }
                 }
@@ -347,7 +499,9 @@ fn main() -> iced::Result {
     let log_buffer = logging::init_logging(&logging_config);
 
     // Store log buffer globally for access by DebugPanel
-    LOG_BUFFER.set(log_buffer).expect("LOG_BUFFER already initialized");
+    LOG_BUFFER
+        .set(log_buffer)
+        .expect("LOG_BUFFER already initialized");
 
     tracing::info!("AgTerm starting");
 
@@ -413,7 +567,7 @@ impl Default for AgTerm {
             history: Vec::new(),
             history_index: None,
             history_temp_input: String::new(),
-            mode: TerminalMode::Raw,  // Default to Raw mode for interactive apps
+            mode: TerminalMode::Raw, // Default to Raw mode for interactive apps
             parsed_line_cache: Vec::new(),
             cache_buffer_len: 0,
         };
@@ -443,16 +597,16 @@ struct TerminalTab {
     id: usize,
     session_id: Option<uuid::Uuid>,
     blocks: Vec<CommandBlock>,
-    pending_output: Vec<String>,  // Output before first command
-    raw_output_buffer: String,    // Raw PTY output for Raw mode display
-    raw_input: String,            // Input buffer for Raw mode (IME support)
+    pending_output: Vec<String>, // Output before first command
+    raw_output_buffer: String,   // Raw PTY output for Raw mode display
+    raw_input: String,           // Input buffer for Raw mode (IME support)
     input: String,
-    cwd: String,  // Current working directory display
-    error_message: Option<String>,  // PTY error message if creation failed
+    cwd: String,                   // Current working directory display
+    error_message: Option<String>, // PTY error message if creation failed
     // Command history
     history: Vec<String>,
-    history_index: Option<usize>,  // Current position in history (None = not browsing)
-    history_temp_input: String,    // Temporary storage for current input when browsing
+    history_index: Option<usize>, // Current position in history (None = not browsing)
+    history_temp_input: String,   // Temporary storage for current input when browsing
     // Terminal mode
     mode: TerminalMode,
     // ANSI parsing cache for Raw mode
@@ -475,18 +629,18 @@ enum TerminalMode {
 /// Signal types for terminal control
 #[derive(Debug, Clone, Copy)]
 enum SignalType {
-    Interrupt,  // Ctrl+C (0x03)
-    EOF,        // Ctrl+D (0x04)
-    Suspend,    // Ctrl+Z (0x1A)
+    Interrupt, // Ctrl+C (0x03)
+    EOF,       // Ctrl+D (0x04)
+    Suspend,   // Ctrl+Z (0x1A)
 }
 
 impl SignalType {
     /// Convert signal type to its corresponding byte value
     fn as_byte(self) -> u8 {
         match self {
-            SignalType::Interrupt => 0x03,  // Ctrl+C
-            SignalType::EOF => 0x04,         // Ctrl+D
-            SignalType::Suspend => 0x1A,     // Ctrl+Z
+            SignalType::Interrupt => 0x03, // Ctrl+C
+            SignalType::EOF => 0x04,       // Ctrl+D
+            SignalType::Suspend => 0x1A,   // Ctrl+Z
         }
     }
 }
@@ -530,7 +684,10 @@ enum Message {
     ClipboardContent(Option<String>),
 
     // Window resize
-    WindowResized { width: u32, height: u32 },
+    WindowResized {
+        width: u32,
+        height: u32,
+    },
 
     // Tick for PTY polling
     Tick,
@@ -641,6 +798,7 @@ impl AgTerm {
                         let block = CommandBlock {
                             command: tab.input.clone(),
                             output: Vec::new(),
+                            parsed_output_cache: Vec::new(),
                             timestamp: Instant::now(),
                             completed_at: None,
                             exit_code: None,
@@ -659,9 +817,7 @@ impl AgTerm {
                 text_input::focus(input_id())
             }
 
-            Message::FocusInput => {
-                text_input::focus(input_id())
-            }
+            Message::FocusInput => text_input::focus(input_id()),
 
             Message::HistoryPrevious => {
                 if let Some(tab) = self.tabs.get_mut(self.active_tab) {
@@ -769,7 +925,8 @@ impl AgTerm {
                             // Characters were deleted - send backspace
                             let deleted_count = old_len - new_len;
                             for _ in 0..deleted_count {
-                                let _ = self.pty_manager.write(session_id, &[0x7f]); // Backspace
+                                let _ = self.pty_manager.write(session_id, &[0x7f]);
+                                // Backspace
                             }
                         }
                     }
@@ -801,16 +958,24 @@ impl AgTerm {
 
             Message::KeyPressed(key, modifiers) => {
                 // Get current mode
-                let current_mode = self.tabs.get(self.active_tab)
+                let current_mode = self
+                    .tabs
+                    .get(self.active_tab)
                     .map(|t| t.mode)
                     .unwrap_or(TerminalMode::Raw);
 
                 // Handle Ctrl key signals (both modes)
                 if modifiers.control() {
                     match key.as_ref() {
-                        Key::Character("c") => return self.update(Message::SendSignal(SignalType::Interrupt)),
-                        Key::Character("d") => return self.update(Message::SendSignal(SignalType::EOF)),
-                        Key::Character("z") => return self.update(Message::SendSignal(SignalType::Suspend)),
+                        Key::Character("c") => {
+                            return self.update(Message::SendSignal(SignalType::Interrupt))
+                        }
+                        Key::Character("d") => {
+                            return self.update(Message::SendSignal(SignalType::EOF))
+                        }
+                        Key::Character("z") => {
+                            return self.update(Message::SendSignal(SignalType::Suspend))
+                        }
                         _ => {}
                     }
                 }
@@ -827,9 +992,11 @@ impl AgTerm {
                         Key::Character("3") => return self.update(Message::SelectTab(2)),
                         Key::Character("4") => return self.update(Message::SelectTab(3)),
                         Key::Character("5") => return self.update(Message::SelectTab(4)),
-                        Key::Character("v") => return iced::clipboard::read().map(Message::ClipboardContent),
-                        Key::Character("m") => return self.update(Message::ToggleMode),  // Toggle mode
-                        Key::Character("d") => return self.update(Message::ToggleDebugPanel),  // Toggle debug panel
+                        Key::Character("v") => {
+                            return iced::clipboard::read().map(Message::ClipboardContent)
+                        }
+                        Key::Character("m") => return self.update(Message::ToggleMode), // Toggle mode
+                        Key::Character("d") => return self.update(Message::ToggleDebugPanel), // Toggle debug panel
                         _ => {}
                     }
                 }
@@ -893,9 +1060,7 @@ impl AgTerm {
                 Task::none()
             }
 
-            Message::CopyToClipboard(content) => {
-                iced::clipboard::write(content)
-            }
+            Message::CopyToClipboard(content) => iced::clipboard::write(content),
 
             Message::ClipboardContent(clipboard_opt) => {
                 if let Some(content) = clipboard_opt {
@@ -986,7 +1151,8 @@ impl AgTerm {
                                         // Limit buffer size (keep last 100KB)
                                         const MAX_RAW_BUFFER: usize = 100 * 1024;
                                         if tab.raw_output_buffer.len() > MAX_RAW_BUFFER {
-                                            let excess = tab.raw_output_buffer.len() - MAX_RAW_BUFFER;
+                                            let excess =
+                                                tab.raw_output_buffer.len() - MAX_RAW_BUFFER;
                                             tab.raw_output_buffer.drain(0..excess);
                                             // Clear cache when buffer is truncated
                                             tab.parsed_line_cache.clear();
@@ -1001,17 +1167,30 @@ impl AgTerm {
                                         let output = &raw_output;
                                         let stripped = strip_ansi(&raw_output);
 
-                                        if let Some(block) = tab.blocks.iter_mut().rev().find(|b| b.is_running) {
+                                        if let Some(block) =
+                                            tab.blocks.iter_mut().rev().find(|b| b.is_running)
+                                        {
                                             for line in output.lines() {
-                                                let trimmed_stripped = strip_ansi(line).trim().to_string();
-                                                if !trimmed_stripped.is_empty() && trimmed_stripped != block.command {
+                                                let trimmed_stripped =
+                                                    strip_ansi(line).trim().to_string();
+                                                if !trimmed_stripped.is_empty()
+                                                    && trimmed_stripped != block.command
+                                                {
                                                     block.output.push(line.to_string());
+                                                    // Cache parsed ANSI for this line
+                                                    block
+                                                        .parsed_output_cache
+                                                        .push(parse_ansi_text(line));
                                                     if block.output.len() > MAX_OUTPUT_LINES {
                                                         block.output.drain(0..1000);
+                                                        block.parsed_output_cache.drain(0..1000);
                                                     }
                                                 }
                                             }
-                                            if block.timestamp.elapsed() > Duration::from_millis(500) && stripped.is_empty() {
+                                            if block.timestamp.elapsed()
+                                                > Duration::from_millis(500)
+                                                && stripped.is_empty()
+                                            {
                                                 if block.is_running {
                                                     block.completed_at = Some(Instant::now());
                                                 }
@@ -1033,7 +1212,9 @@ impl AgTerm {
                             } else if tab.mode == TerminalMode::Block {
                                 // Block mode: mark running blocks as complete
                                 for block in &mut tab.blocks {
-                                    if block.is_running && block.timestamp.elapsed() > Duration::from_millis(300) {
+                                    if block.is_running
+                                        && block.timestamp.elapsed() > Duration::from_millis(300)
+                                    {
                                         if block.completed_at.is_none() {
                                             block.completed_at = Some(Instant::now());
                                         }
@@ -1062,75 +1243,88 @@ impl AgTerm {
                 .height(Length::Fill)
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
-                .style(|_| container::Style {
-                    background: Some(theme::BG_PRIMARY.into()),
-                    ..Default::default()
-                })
+                .style(theme::primary_background_style)
                 .into();
         }
 
         // ========== Tab Bar ==========
-        let tab_bar: Element<Message> = row(
-            self.tabs
-                .iter()
-                .enumerate()
-                .map(|(i, _)| {
-                    let is_active = i == self.active_tab;
-                    let label = format!("Terminal {}", i + 1);
-                    let can_close = self.tabs.len() > 1;
+        let tab_bar: Element<Message> = row(self
+            .tabs
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                let is_active = i == self.active_tab;
+                let label = format!("Terminal {}", i + 1);
+                let can_close = self.tabs.len() > 1;
 
-                    let icon_color = if is_active { theme::TAB_ACTIVE } else { theme::TEXT_MUTED };
-                    let label_color = if is_active { theme::TEXT_PRIMARY } else { theme::TEXT_SECONDARY };
+                let icon_color = if is_active {
+                    theme::TAB_ACTIVE
+                } else {
+                    theme::TEXT_MUTED
+                };
+                let label_color = if is_active {
+                    theme::TEXT_PRIMARY
+                } else {
+                    theme::TEXT_SECONDARY
+                };
 
-                    // Tab label button (clickable to select)
-                    let tab_label_button = button(
-                        row![
-                            text("▶").size(11).color(icon_color),
-                            Space::with_width(8),
-                            text(label.clone()).size(13).color(label_color)
-                        ]
-                        .align_y(Alignment::Center)
-                    )
-                    .padding([8, 12])
-                    .style(move |_, status| {
-                        let bg = match status {
-                            button::Status::Hovered => {
-                                if is_active { theme::BG_SECONDARY } else { theme::BG_BLOCK_HOVER }
+                // Tab label button (clickable to select)
+                let tab_label_button = button(
+                    row![
+                        text("▶").size(11).color(icon_color),
+                        Space::with_width(8),
+                        text(label.clone()).size(13).color(label_color)
+                    ]
+                    .align_y(Alignment::Center),
+                )
+                .padding([8, 12])
+                .style(move |_, status| {
+                    let bg = match status {
+                        button::Status::Hovered => {
+                            if is_active {
+                                theme::BG_SECONDARY
+                            } else {
+                                theme::BG_BLOCK_HOVER
                             }
-                            _ => {
-                                if is_active { theme::BG_SECONDARY } else { theme::BG_PRIMARY }
-                            }
-                        };
-                        button::Style {
-                            background: Some(bg.into()),
-                            text_color: theme::TEXT_PRIMARY,
-                            border: Border {
-                                color: Color::TRANSPARENT,
-                                width: 0.0,
-                                radius: iced::border::Radius {
-                                    top_left: 6.0,
-                                    top_right: 0.0,
-                                    bottom_left: 0.0,
-                                    bottom_right: 0.0,
-                                },
-                            },
-                            ..Default::default()
                         }
-                    })
-                    .on_press(Message::SelectTab(i));
+                        _ => {
+                            if is_active {
+                                theme::BG_SECONDARY
+                            } else {
+                                theme::BG_PRIMARY
+                            }
+                        }
+                    };
+                    button::Style {
+                        background: Some(bg.into()),
+                        text_color: theme::TEXT_PRIMARY,
+                        border: Border {
+                            color: Color::TRANSPARENT,
+                            width: 0.0,
+                            radius: iced::border::Radius {
+                                top_left: 6.0,
+                                top_right: 0.0,
+                                bottom_left: 0.0,
+                                bottom_right: 0.0,
+                            },
+                        },
+                        ..Default::default()
+                    }
+                })
+                .on_press(Message::SelectTab(i));
 
-                    // Close button (separate, clickable to close)
-                    let close_button = button(
-                        text("×").size(14)
-                    )
+                // Close button (separate, clickable to close)
+                let close_button = button(text("×").size(14))
                     .padding([8, 10])
                     .style(move |_, status| {
                         let (bg, text_color) = match status {
-                            button::Status::Hovered => {
-                                (theme::BG_BLOCK_HOVER, theme::ACCENT_RED)
-                            }
+                            button::Status::Hovered => (theme::BG_BLOCK_HOVER, theme::ACCENT_RED),
                             _ => {
-                                let bg = if is_active { theme::BG_SECONDARY } else { theme::BG_PRIMARY };
+                                let bg = if is_active {
+                                    theme::BG_SECONDARY
+                                } else {
+                                    theme::BG_PRIMARY
+                                };
                                 (bg, theme::TEXT_MUTED)
                             }
                         };
@@ -1150,29 +1344,32 @@ impl AgTerm {
                             ..Default::default()
                         }
                     })
-                    .on_press_maybe(if can_close { Some(Message::CloseTab(i)) } else { None });
+                    .on_press_maybe(if can_close {
+                        Some(Message::CloseTab(i))
+                    } else {
+                        None
+                    });
 
-                    // Tab content with accent line
-                    let tab_content = column![
-                        row![tab_label_button, close_button],
-                        // Active tab bottom accent line
-                        container(Space::with_height(0))
-                            .width(Length::Fill)
-                            .height(2)
-                            .style(move |_| container::Style {
-                                background: if is_active {
-                                    Some(theme::TAB_ACTIVE.into())
-                                } else {
-                                    None
-                                },
-                                ..Default::default()
-                            })
-                    ];
+                // Tab content with accent line
+                let tab_content = column![
+                    row![tab_label_button, close_button],
+                    // Active tab bottom accent line
+                    container(Space::with_height(0))
+                        .width(Length::Fill)
+                        .height(2)
+                        .style(move |_| container::Style {
+                            background: if is_active {
+                                Some(theme::TAB_ACTIVE.into())
+                            } else {
+                                None
+                            },
+                            ..Default::default()
+                        })
+                ];
 
-                    container(tab_content).into()
-                })
-                .collect::<Vec<Element<Message>>>(),
-        )
+                container(tab_content).into()
+            })
+            .collect::<Vec<Element<Message>>>())
         .spacing(2)
         .push(Space::with_width(8))
         .push(
@@ -1213,45 +1410,20 @@ impl AgTerm {
                         .padding([10, 14])
                         .size(14)
                         .font(MONO_FONT)
-                        .style(|_, _| text_input::Style {
-                            background: theme::BG_INPUT.into(),
-                            border: Border {
-                                color: theme::BORDER,
-                                width: 1.0,
-                                radius: 6.0.into(),
-                            },
-                            icon: theme::TEXT_MUTED,
-                            placeholder: theme::TEXT_MUTED,
-                            value: theme::TEXT_PRIMARY,
-                            selection: theme::ACCENT_BLUE,
-                        });
+                        .style(theme::raw_input_style);
 
                     let input_row: Element<Message> = container(
-                        row![
-                            prompt_symbol,
-                            Space::with_width(10),
-                            raw_input_field
-                        ]
-                        .align_y(Alignment::Center)
-                        .width(Length::Fill),
+                        row![prompt_symbol, Space::with_width(10), raw_input_field]
+                            .align_y(Alignment::Center)
+                            .width(Length::Fill),
                     )
                     .padding([8, 12])
-                    .style(|_| container::Style {
-                        background: Some(theme::BG_SECONDARY.into()),
-                        border: Border {
-                            color: theme::BORDER,
-                            width: 1.0,
-                            radius: 0.0.into(),
-                        },
-                        ..Default::default()
-                    })
+                    .style(theme::section_container_style)
                     .into();
 
                     // ========== Status Bar (Raw Mode) ==========
                     let shell_name = self.get_shell_name();
-                    let mode_indicator = text("RAW")
-                        .size(11)
-                        .color(theme::ACCENT_GREEN);
+                    let mode_indicator = text("RAW").size(11).color(theme::ACCENT_GREEN);
                     let tab_info = format!("Tab {} of {}", self.active_tab + 1, self.tabs.len());
 
                     let status_left = row![
@@ -1260,9 +1432,7 @@ impl AgTerm {
                         mode_indicator
                     ];
 
-                    let status_center = text(tab_info)
-                        .size(12)
-                        .color(theme::TEXT_MUTED);
+                    let status_center = text(tab_info).size(12).color(theme::TEXT_MUTED);
 
                     let status_right = text("⌘M Toggle | ⌘T New | ⌘W Close")
                         .size(12)
@@ -1277,19 +1447,11 @@ impl AgTerm {
                             status_right
                         ]
                         .align_y(Alignment::Center)
-                        .width(Length::Fill)
+                        .width(Length::Fill),
                     )
                     .padding([4, 12])
                     .width(Length::Fill)
-                    .style(|_| container::Style {
-                        background: Some(theme::BG_PRIMARY.into()),
-                        border: Border {
-                            color: theme::BORDER,
-                            width: 1.0,
-                            radius: 0.0.into(),
-                        },
-                        ..Default::default()
-                    })
+                    .style(theme::status_bar_style)
                     .into();
 
                     column![
@@ -1297,10 +1459,7 @@ impl AgTerm {
                             .padding([8, 12])
                             .width(Length::Fill)
                             .height(Length::Fill)
-                            .style(|_| container::Style {
-                                background: Some(theme::BG_BLOCK.into()),
-                                ..Default::default()
-                            }),
+                            .style(theme::terminal_output_style),
                         input_row,
                         status_bar
                     ]
@@ -1333,39 +1492,11 @@ impl AgTerm {
                     // Add some spacing at the bottom
                     blocks_column.push(Space::with_height(20).into());
 
-                    let terminal_content: Element<Message> = scrollable(
-                        column(blocks_column)
-                            .spacing(12)
-                            .width(Length::Fill),
-                    )
-                    .height(Length::Fill)
-                    .style(|_, _| scrollable::Style {
-                        container: container::Style::default(),
-                        vertical_rail: scrollable::Rail {
-                            background: Some(theme::BG_PRIMARY.into()),
-                            border: Border::default(),
-                            scroller: scrollable::Scroller {
-                                color: theme::BG_BLOCK_HOVER,
-                                border: Border {
-                                    radius: 4.0.into(),
-                                    ..Default::default()
-                                },
-                            },
-                        },
-                        horizontal_rail: scrollable::Rail {
-                            background: Some(theme::BG_PRIMARY.into()),
-                            border: Border::default(),
-                            scroller: scrollable::Scroller {
-                                color: theme::BG_BLOCK_HOVER,
-                                border: Border {
-                                    radius: 4.0.into(),
-                                    ..Default::default()
-                                },
-                            },
-                        },
-                        gap: None,
-                    })
-                    .into();
+                    let terminal_content: Element<Message> =
+                        scrollable(column(blocks_column).spacing(12).width(Length::Fill))
+                            .height(Length::Fill)
+                            .style(theme::scrollable_style)
+                            .into();
 
                     // ========== Input Area (Block Mode) ==========
                     let prompt_symbol = text("❯").size(16).font(MONO_FONT).color(theme::PROMPT);
@@ -1381,49 +1512,24 @@ impl AgTerm {
                         .padding([12, 16])
                         .size(14)
                         .font(MONO_FONT)
-                        .style(|_, _| text_input::Style {
-                            background: theme::BG_INPUT.into(),
-                            border: Border {
-                                color: theme::BORDER,
-                                width: 1.0,
-                                radius: 8.0.into(),
-                            },
-                            icon: theme::TEXT_MUTED,
-                            placeholder: theme::TEXT_MUTED,
-                            value: theme::TEXT_PRIMARY,
-                            selection: theme::ACCENT_BLUE,
-                        });
+                        .style(theme::input_style);
 
                     let input_row: Element<Message> = container(
                         column![
                             cwd_display,
                             Space::with_height(6),
-                            row![
-                                prompt_symbol,
-                                Space::with_width(12),
-                                input_field
-                            ]
-                        .align_y(Alignment::Center)
-                    ]
-                    .width(Length::Fill),
+                            row![prompt_symbol, Space::with_width(12), input_field]
+                                .align_y(Alignment::Center)
+                        ]
+                        .width(Length::Fill),
                     )
                     .padding([16, 20])
-                    .style(|_| container::Style {
-                        background: Some(theme::BG_SECONDARY.into()),
-                        border: Border {
-                            color: theme::BORDER,
-                            width: 1.0,
-                            radius: 0.0.into(),
-                        },
-                        ..Default::default()
-                    })
+                    .style(theme::section_container_style)
                     .into();
 
                     // ========== Status Bar (Block Mode) ==========
                     let shell_name = self.get_shell_name();
-                    let mode_indicator = text("BLOCK")
-                        .size(11)
-                        .color(theme::ACCENT_BLUE);
+                    let mode_indicator = text("BLOCK").size(11).color(theme::ACCENT_BLUE);
                     let tab_info = format!("Tab {} of {}", self.active_tab + 1, self.tabs.len());
 
                     let status_left = row![
@@ -1432,9 +1538,7 @@ impl AgTerm {
                         mode_indicator
                     ];
 
-                    let status_center = text(tab_info)
-                        .size(12)
-                        .color(theme::TEXT_MUTED);
+                    let status_center = text(tab_info).size(12).color(theme::TEXT_MUTED);
 
                     let status_right = text("⌘M Toggle | ⌘T New | ⌘W Close")
                         .size(12)
@@ -1449,19 +1553,11 @@ impl AgTerm {
                             status_right
                         ]
                         .align_y(Alignment::Center)
-                        .width(Length::Fill)
+                        .width(Length::Fill),
                     )
                     .padding([4, 12])
                     .width(Length::Fill)
-                    .style(|_| container::Style {
-                        background: Some(theme::BG_PRIMARY.into()),
-                        border: Border {
-                            color: theme::BORDER,
-                            width: 1.0,
-                            radius: 0.0.into(),
-                        },
-                        ..Default::default()
-                    })
+                    .style(theme::status_bar_style)
                     .into();
 
                     column![
@@ -1508,13 +1604,10 @@ impl AgTerm {
         // Main content with optional debug panel
         let main_content: Element<Message> = if self.debug_panel.visible {
             let debug_panel_view: Element<Message> = self.debug_panel.view();
-            row![
-                terminal_area,
-                debug_panel_view
-            ]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            row![terminal_area, debug_panel_view]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
         } else {
             terminal_area.height(Length::Fill).into()
         };
@@ -1522,10 +1615,7 @@ impl AgTerm {
         container(main_content)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(theme::BG_PRIMARY.into()),
-                ..Default::default()
-            })
+            .style(theme::primary_background_style)
             .into()
     }
 
@@ -1561,16 +1651,18 @@ impl AgTerm {
                                 .color(theme::TEXT_PRIMARY)
                                 .into()
                         } else {
-                            row(
-                                spans.iter().map(|span| {
+                            row(spans
+                                .iter()
+                                .map(|span| {
                                     let color = span.color.unwrap_or(theme::TEXT_PRIMARY);
                                     text(span.text.clone())
                                         .size(14)
                                         .font(MONO_FONT)
                                         .color(color)
                                         .into()
-                                }).collect::<Vec<Element<Message>>>()
-                            ).into()
+                                })
+                                .collect::<Vec<Element<Message>>>())
+                            .into()
                         }
                     })
                     .collect::<Vec<Element<Message>>>(),
@@ -1582,32 +1674,7 @@ impl AgTerm {
         scrollable(content)
             .height(Length::Fill)
             .width(Length::Fill)
-            .style(|_, _| scrollable::Style {
-                container: container::Style::default(),
-                vertical_rail: scrollable::Rail {
-                    background: Some(theme::BG_BLOCK.into()),
-                    border: Border::default(),
-                    scroller: scrollable::Scroller {
-                        color: theme::BG_BLOCK_HOVER,
-                        border: Border {
-                            radius: 4.0.into(),
-                            ..Default::default()
-                        },
-                    },
-                },
-                horizontal_rail: scrollable::Rail {
-                    background: Some(theme::BG_BLOCK.into()),
-                    border: Border::default(),
-                    scroller: scrollable::Scroller {
-                        color: theme::BG_BLOCK_HOVER,
-                        border: Border {
-                            radius: 4.0.into(),
-                            ..Default::default()
-                        },
-                    },
-                },
-                gap: None,
-            })
+            .style(theme::scrollable_style)
             .into()
     }
 
@@ -1630,15 +1697,7 @@ impl AgTerm {
         container(content)
             .padding([12, 16])
             .width(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(theme::BG_BLOCK.into()),
-                border: Border {
-                    color: theme::BORDER,
-                    width: 1.0,
-                    radius: 8.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(theme::block_container_style)
             .into()
     }
 
@@ -1648,7 +1707,7 @@ impl AgTerm {
             text(format!("⚠ Error: {}", message))
                 .size(13)
                 .font(MONO_FONT)
-                .color(theme::ACCENT_RED)
+                .color(theme::ACCENT_RED),
         )
         .padding([12, 16])
         .width(Length::Fill)
@@ -1690,33 +1749,24 @@ impl AgTerm {
             .color(theme::TEXT_MUTED);
 
         // Execution time display (if completed)
-        let execution_time_element: Element<Message> = if let Some(completed_at) = block.completed_at {
-            let duration = completed_at.duration_since(block.timestamp);
-            let duration_str = format_duration(duration);
-            row![
-                text(" • ").size(11).color(theme::TEXT_MUTED),
-                text(duration_str).size(11).color(theme::ACCENT_GREEN)
-            ].into()
-        } else {
-            Space::with_width(0).into()
-        };
+        let execution_time_element: Element<Message> =
+            if let Some(completed_at) = block.completed_at {
+                let duration = completed_at.duration_since(block.timestamp);
+                let duration_str = format_duration(duration);
+                row![
+                    text(" • ").size(11).color(theme::TEXT_MUTED),
+                    text(duration_str).size(11).color(theme::ACCENT_GREEN)
+                ]
+                .into()
+            } else {
+                Space::with_width(0).into()
+            };
 
         // Copy button
-        let copy_button = button(
-            text("Copy").size(11).color(theme::TEXT_MUTED)
-        )
-        .padding([4, 8])
-        .style(|_, _| button::Style {
-            background: Some(theme::BG_SECONDARY.into()),
-            text_color: theme::TEXT_MUTED,
-            border: Border {
-                color: theme::BORDER,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        })
-        .on_press(Message::CopyToClipboard(block.command.clone()));
+        let copy_button = button(text("Copy").size(11).color(theme::TEXT_MUTED))
+            .padding([4, 8])
+            .style(theme::copy_button_style)
+            .on_press(Message::CopyToClipboard(block.command.clone()));
 
         // Header row: status + command + metadata + copy button
         let command_header = row![
@@ -1736,18 +1786,22 @@ impl AgTerm {
         // Output lines
         let output_content: Element<Message> = if block.output.is_empty() {
             if block.is_running {
-                text("Running...").size(12).font(MONO_FONT).color(theme::TEXT_MUTED).into()
+                text("Running...")
+                    .size(12)
+                    .font(MONO_FONT)
+                    .color(theme::TEXT_MUTED)
+                    .into()
             } else {
                 Space::with_height(0).into()
             }
         } else {
             column(
                 block
-                    .output
+                    .parsed_output_cache
                     .iter()
-                    .map(|line| {
+                    .map(|spans| {
                         // Parse ANSI codes and render with colors
-                        let spans = parse_ansi_text(line);
+                        // Use cached parsed ANSI spans
                         if spans.is_empty() {
                             Space::with_height(0).into()
                         } else if spans.len() == 1 && spans[0].color.is_none() {
@@ -1759,16 +1813,18 @@ impl AgTerm {
                                 .into()
                         } else {
                             // Multiple spans with colors
-                            row(
-                                spans.into_iter().map(|span| {
+                            row(spans
+                                .iter()
+                                .map(|span| {
                                     let color = span.color.unwrap_or(theme::TEXT_SECONDARY);
-                                    text(span.text)
+                                    text(span.text.clone())
                                         .size(13)
                                         .font(MONO_FONT)
                                         .color(color)
                                         .into()
-                                }).collect::<Vec<Element<Message>>>()
-                            ).into()
+                                })
+                                .collect::<Vec<Element<Message>>>())
+                            .into()
                         }
                     })
                     .collect::<Vec<Element<Message>>>(),
@@ -1777,25 +1833,13 @@ impl AgTerm {
             .into()
         };
 
-        let block_content = column![
-            command_header,
-            Space::with_height(8),
-            output_content
-        ]
-        .width(Length::Fill);
+        let block_content =
+            column![command_header, Space::with_height(8), output_content].width(Length::Fill);
 
         container(block_content)
             .padding([12, 16])
             .width(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(theme::BG_BLOCK.into()),
-                border: Border {
-                    color: theme::BORDER,
-                    width: 1.0,
-                    radius: 8.0.into(),
-                },
-                ..Default::default()
-            })
+            .style(theme::block_container_style)
             .into()
     }
 
@@ -1806,18 +1850,17 @@ impl AgTerm {
         // - Idle: 200ms (5fps) to save CPU
         let elapsed_since_activity = self.last_pty_activity.elapsed();
         let tick_interval = if elapsed_since_activity < Duration::from_millis(500) {
-            Duration::from_millis(16)  // 60fps
+            Duration::from_millis(16) // 60fps
         } else if elapsed_since_activity < Duration::from_secs(2) {
-            Duration::from_millis(50)  // 20fps
+            Duration::from_millis(50) // 20fps
         } else {
             Duration::from_millis(200) // 5fps
         };
 
         let timer = iced::time::every(tick_interval).map(|_| Message::Tick);
 
-        let keyboard = keyboard::on_key_press(|key, modifiers| {
-            Some(Message::KeyPressed(key, modifiers))
-        });
+        let keyboard =
+            keyboard::on_key_press(|key, modifiers| Some(Message::KeyPressed(key, modifiers)));
 
         // Listen for window resize events
         let window_events = iced::event::listen_with(|event, _status, _id| {
@@ -2196,6 +2239,7 @@ mod tests {
         let block = CommandBlock {
             command: "test".to_string(),
             output: vec!["line1".to_string(), "line2".to_string()],
+            parsed_output_cache: vec![parse_ansi_text("line1"), parse_ansi_text("line2")],
             timestamp: Instant::now(),
             completed_at: None,
             exit_code: None,
@@ -2274,6 +2318,7 @@ mod tests {
             app.tabs[0].blocks.push(CommandBlock {
                 command: format!("cmd{}", i),
                 output: Vec::new(),
+                parsed_output_cache: Vec::new(),
                 timestamp: Instant::now(),
                 completed_at: Some(Instant::now()),
                 exit_code: Some(0),
