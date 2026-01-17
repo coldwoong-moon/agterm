@@ -261,6 +261,11 @@ struct AgTerm {
     last_cursor_blink: Instant,
     /// Font size (8.0 ~ 24.0)
     font_size: f32,
+    /// Search state
+    search_mode: bool,
+    search_query: String,
+    search_matches: Vec<(usize, usize, usize)>, // (line, start_col, end_col)
+    current_match_index: Option<usize>,
 }
 
 impl Default for AgTerm {
@@ -318,6 +323,10 @@ impl Default for AgTerm {
             last_pty_activity: Instant::now(),
             last_cursor_blink: Instant::now(),
             font_size: 14.0,
+            search_mode: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            current_match_index: None,
         }
     }
 }
@@ -1144,7 +1153,7 @@ impl AgTerm {
 
     /// Render raw terminal output (for Raw mode)
     /// Uses Canvas for virtual scrolling and hardware acceleration
-    fn render_raw_terminal<'a>(&self, parsed_cache: &'a [Vec<StyledSpan>]) -> Element<'a, Message> {
+    fn render_raw_terminal<'a>(&'a self, parsed_cache: &'a [Vec<StyledSpan>]) -> Element<'a, Message> {
         use iced::widget::canvas;
 
         let tab = &self.tabs[self.active_tab];
@@ -1167,7 +1176,8 @@ impl AgTerm {
             MONO_FONT,
         )
         .with_cursor(cursor)
-        .with_font_size(self.font_size);
+        .with_font_size(self.font_size)
+        .with_search_matches(&self.search_matches, self.current_match_index);
 
         canvas(terminal_canvas)
             .width(Length::Fill)
@@ -1253,6 +1263,10 @@ mod tests {
             last_pty_activity: Instant::now(),
             last_cursor_blink: Instant::now(),
             font_size: 14.0,
+            search_mode: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            current_match_index: None,
         }
     }
 

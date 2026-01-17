@@ -255,7 +255,7 @@ impl TerminalScreen {
         self.parser = parser;
     }
 
-    /// Resize the terminal
+    /// Resize the terminal with content preservation
     pub fn resize(&mut self, cols: usize, rows: usize) {
         let cols = max(1, cols);
         let rows = max(1, rows);
@@ -264,32 +264,115 @@ impl TerminalScreen {
             return;
         }
 
-        // Save current buffer to scrollback if shrinking
-        if rows < self.rows {
-            let lines_to_save = self.rows - rows;
+        // Save old dimensions
+        let old_cols = self.cols;
+        let old_rows = self.rows;
+
+        // Handle column resize first (reflow lines)
+        let mut new_buffer = Vec::new();
+
+        if cols != old_cols {
+            // Reflow each line to new width
+            for row in &self.buffer {
+                let mut new_row = Vec::with_capacity(cols);
+
+                if cols > old_cols {
+                    // Columns increased: extend with empty cells
+                    new_row.extend_from_slice(&row[..old_cols]);
+                    new_row.resize(cols, Cell::default());
+                } else {
+                    // Columns decreased: truncate long lines
+                    new_row.extend_from_slice(&row[..cols]);
+                }
+
+                new_buffer.push(new_row);
+            }
+        } else {
+            // No column change, just copy buffer
+            new_buffer = self.buffer.clone();
+        }
+
+        // Handle row resize
+        if rows < old_rows {
+            // Rows decreased: move top lines to scrollback
+            let lines_to_save = old_rows - rows;
             for i in 0..lines_to_save {
-                if i < self.buffer.len() {
-                    self.scrollback.push_back(self.buffer[i].clone());
+                if i < new_buffer.len() {
+                    self.scrollback.push_back(new_buffer[i].clone());
                 }
             }
+
+            // Keep only the bottom 'rows' lines
+            if new_buffer.len() > rows {
+                new_buffer.drain(0..lines_to_save);
+            }
+
             // Limit scrollback
-            if self.scrollback.len() > MAX_SCROLLBACK {
-                let excess = self.scrollback.len() - MAX_SCROLLBACK;
-                self.scrollback.drain(0..excess);
+            while self.scrollback.len() > MAX_SCROLLBACK {
+                self.scrollback.pop_front();
+            }
+        } else if rows > old_rows {
+            // Rows increased: restore from scrollback if available
+            let lines_to_restore = min(rows - old_rows, self.scrollback.len());
+
+            // Restore lines from scrollback (from the end)
+            let mut restored_lines = Vec::new();
+            for _ in 0..lines_to_restore {
+                if let Some(mut line) = self.scrollback.pop_back() {
+                    // Reflow restored line to new column width
+                    if cols != old_cols {
+                        line.resize(cols, Cell::default());
+                    }
+                    restored_lines.push(line);
+                }
+            }
+
+            // Insert restored lines at the beginning
+            restored_lines.reverse();
+            new_buffer.splice(0..0, restored_lines);
+
+            // If still need more rows, add empty ones at the end
+            while new_buffer.len() < rows {
+                new_buffer.push(vec![Cell::default(); cols]);
             }
         }
 
-        // Resize buffer
-        self.buffer = vec![vec![Cell::default(); cols]; rows];
+        // Ensure buffer is exactly 'rows' lines
+        new_buffer.resize(rows, vec![Cell::default(); cols]);
+
+        // Update terminal state
+        self.buffer = new_buffer;
         self.cols = cols;
         self.rows = rows;
 
-        // Clamp cursor position
-        self.cursor_row = min(self.cursor_row, rows - 1);
-        self.cursor_col = min(self.cursor_col, cols - 1);
+        // Adjust cursor position to be within new bounds
+        self.cursor_row = min(self.cursor_row, rows.saturating_sub(1));
+        self.cursor_col = min(self.cursor_col, cols.saturating_sub(1));
 
-        // Reset scroll region
+        // Reset scroll region as it's no longer valid
         self.scroll_region = None;
+
+        // Also handle alternate screen buffer if active
+        if self.use_alternate_screen {
+            if let Some(ref mut alt_buffer) = self.alternate_buffer {
+                // Resize alternate buffer similarly
+                let mut resized_alt = Vec::new();
+                for row in alt_buffer.iter() {
+                    let mut new_row = Vec::with_capacity(cols);
+                    if cols > old_cols {
+                        let copy_len = min(row.len(), old_cols);
+                        new_row.extend_from_slice(&row[..copy_len]);
+                        new_row.resize(cols, Cell::default());
+                    } else {
+                        let copy_len = min(row.len(), cols);
+                        new_row.extend_from_slice(&row[..copy_len]);
+                    }
+                    resized_alt.push(new_row);
+                }
+                resized_alt.resize(rows, vec![Cell::default(); cols]);
+                *alt_buffer = resized_alt;
+            }
+        }
     }
 
     /// Get all lines (scrollback + visible) for rendering
@@ -2279,4 +2362,103 @@ fn test_sgr_reset_specific_attributes() {
     assert!(!screen.dim);
     assert!(!screen.italic);
     assert!(!screen.strikethrough);
+}
+
+#[cfg(test)]
+mod resize_tests {
+    use super::*;
+
+    #[test]
+    fn test_resize_no_change() {
+        let mut screen = TerminalScreen::new(80, 24);
+        screen.process(b"Hello, World!");
+
+        // Resize to same dimensions should be a no-op
+        screen.resize(80, 24);
+
+        assert_eq!(screen.buffer.len(), 24);
+        assert_eq!(screen.buffer[0].len(), 80);
+        assert_eq!(screen.buffer[0][0].c, 'H');
+    }
+
+    #[test]
+    fn test_resize_columns_increase() {
+        let mut screen = TerminalScreen::new(10, 5);
+        screen.process(b"Hello");
+
+        // Increase columns from 10 to 20
+        screen.resize(20, 5);
+
+        assert_eq!(screen.buffer.len(), 5);
+        assert_eq!(screen.buffer[0].len(), 20);
+        // Original content should be preserved
+        assert_eq!(screen.buffer[0][0].c, 'H');
+        assert_eq!(screen.buffer[0][1].c, 'e');
+        assert_eq!(screen.buffer[0][2].c, 'l');
+        assert_eq!(screen.buffer[0][3].c, 'l');
+        assert_eq!(screen.buffer[0][4].c, 'o');
+        // New cells should be empty
+        assert_eq!(screen.buffer[0][10].c, ' ');
+        assert_eq!(screen.buffer[0][19].c, ' ');
+    }
+
+    #[test]
+    fn test_resize_columns_decrease() {
+        let mut screen = TerminalScreen::new(20, 5);
+        screen.process(b"Hello, World!");
+
+        // Decrease columns from 20 to 10
+        screen.resize(10, 5);
+
+        assert_eq!(screen.buffer.len(), 5);
+        assert_eq!(screen.buffer[0].len(), 10);
+        // Content should be truncated
+        assert_eq!(screen.buffer[0][0].c, 'H');
+        assert_eq!(screen.buffer[0][1].c, 'e');
+        assert_eq!(screen.buffer[0][9].c, 'r');
+    }
+
+    #[test]
+    fn test_resize_rows_decrease() {
+        let mut screen = TerminalScreen::new(10, 5);
+        // Fill with text
+        for i in 0..5 {
+            screen.process(format!("Line {}\r\n", i).as_bytes());
+        }
+
+        let scrollback_before = screen.scrollback.len();
+
+        // Decrease rows from 5 to 3
+        screen.resize(10, 3);
+
+        assert_eq!(screen.buffer.len(), 3);
+        // Top 2 lines should be moved to scrollback
+        assert_eq!(screen.scrollback.len(), scrollback_before + 2);
+    }
+
+    #[test]
+    fn test_resize_cursor_adjustment() {
+        let mut screen = TerminalScreen::new(80, 24);
+        // Move cursor to position
+        screen.process(b"\x1b[10;40H"); // Row 10, Col 40
+
+        // Resize to smaller dimensions
+        screen.resize(30, 15);
+
+        let (row, col) = screen.cursor_position();
+        // Cursor should be adjusted to fit within new bounds
+        assert!(row < 15);
+        assert!(col < 30);
+    }
+
+    #[test]
+    fn test_resize_minimum_dimensions() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Try to resize to 0x0 (should be clamped to 1x1)
+        screen.resize(0, 0);
+
+        assert_eq!(screen.buffer.len(), 1);
+        assert_eq!(screen.buffer[0].len(), 1);
+    }
 }

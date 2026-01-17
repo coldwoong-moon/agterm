@@ -291,6 +291,8 @@ pub struct TerminalCanvas<'a> {
     pub font: Font,
     pub cursor: Option<CursorState>,
     pub font_size: f32,
+    pub search_matches: &'a [(usize, usize, usize)], // (line, start_col, end_col)
+    pub current_match_index: Option<usize>,
 }
 
 impl<'a> TerminalCanvas<'a> {
@@ -307,6 +309,8 @@ impl<'a> TerminalCanvas<'a> {
             font,
             cursor: None,
             font_size: config::BASE_FONT_SIZE,
+            search_matches: &[],
+            current_match_index: None,
         }
     }
 
@@ -319,6 +323,17 @@ impl<'a> TerminalCanvas<'a> {
     /// Set font size for rendering
     pub fn with_font_size(mut self, font_size: f32) -> Self {
         self.font_size = font_size;
+        self
+    }
+
+    /// Set search matches for highlighting
+    pub fn with_search_matches(
+        mut self,
+        matches: &'a [(usize, usize, usize)],
+        current_index: Option<usize>,
+    ) -> Self {
+        self.search_matches = matches;
+        self.current_match_index = current_index;
         self
     }
 
