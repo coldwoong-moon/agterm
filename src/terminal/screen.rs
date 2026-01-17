@@ -420,6 +420,16 @@ impl TerminalScreen {
         (self.cursor_row, self.cursor_col)
     }
 
+    /// Get terminal dimensions (cols, rows)
+    pub fn dimensions(&self) -> (usize, usize) {
+        (self.cols, self.rows)
+    }
+
+    /// Get scrollback buffer size
+    pub fn scrollback_size(&self) -> usize {
+        self.scrollback.len()
+    }
+
     /// Get window title (OSC 0 or OSC 2) - reserved for future window title bar integration
     #[allow(dead_code)]
     pub fn window_title(&self) -> Option<&str> {

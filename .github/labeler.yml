@@ -1,0 +1,65 @@
+# Labeler configuration for automatic PR labeling
+
+# Documentation
+documentation:
+  - '**/*.md'
+  - 'docs/**/*'
+  - '.github/**/*.md'
+
+# CI/CD
+ci-cd:
+  - '.github/workflows/**'
+  - '.github/actions/**'
+  - 'deny.toml'
+  - 'codecov.yml'
+
+# Dependencies
+dependencies:
+  - 'Cargo.toml'
+  - 'Cargo.lock'
+
+# Source code - Core
+core:
+  - 'src/main.rs'
+  - 'src/lib.rs'
+  - 'src/app.rs'
+
+# Source code - UI
+ui:
+  - 'src/ui/**/*'
+  - 'src/theme/**/*'
+
+# Source code - Terminal
+terminal:
+  - 'src/terminal/**/*'
+  - 'src/pty/**/*'
+
+# Tests
+tests:
+  - 'tests/**/*'
+  - '**/*_test.rs'
+  - '**/*.test.rs'
+
+# Benchmarks
+performance:
+  - 'benches/**/*'
+
+# Configuration
+configuration:
+  - '*.toml'
+  - '*.yml'
+  - '*.yaml'
+  - '.github/**/*.yml'
+
+# Assets
+assets:
+  - 'assets/**/*'
+  - '**/*.png'
+  - '**/*.jpg'
+  - '**/*.ico'
+  - '**/*.icns'
+
+# Security
+security:
+  - 'SECURITY.md'
+  - '.github/SECURITY.md'

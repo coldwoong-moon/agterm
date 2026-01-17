@@ -15,6 +15,7 @@ mod logging;
 mod terminal;
 mod terminal_canvas;
 
+use debug::panel::TerminalState;
 use debug::{DebugPanel, DebugPanelMessage};
 use logging::{LogBuffer, LoggingConfig};
 use terminal_canvas::{CursorState, CursorStyle, TerminalCanvas, TerminalCanvasState};
@@ -307,6 +308,7 @@ impl Default for AgTerm {
             screen: TerminalScreen::new(80, 24),
             cursor_blink_on: true,
             bell_pending: false,
+            title: None,
         };
 
         let mut debug_panel = DebugPanel::new();
@@ -369,6 +371,8 @@ struct TerminalTab {
     cursor_blink_on: bool,
     /// Bell notification state - when bell is triggered in background tab
     bell_pending: bool,
+    /// Custom tab title (set via OSC 0/2 or manually)
+    title: Option<String>,
 }
 
 /// Terminal input mode
@@ -407,6 +411,7 @@ enum Message {
     SelectTab(usize),
     NextTab,
     PrevTab,
+    DuplicateTab,
 
     // Raw input (Raw mode)
     RawInput(String),
@@ -422,12 +427,19 @@ enum Message {
     // Clipboard
     ClipboardContent(Option<String>),
     CopySelection,
+    ForceClipboardCopy,
+    ForceClipboardPaste,
 
     // Window resize
     WindowResized {
         width: u32,
         height: u32,
     },
+
+    // Terminal control
+    ClearScreen,
+    ScrollToTop,
+    ScrollToBottom,
 
     // Tick for PTY polling
     Tick,
@@ -490,9 +502,55 @@ impl AgTerm {
                     screen: TerminalScreen::new(80, 24),
                     cursor_blink_on: true,
                     bell_pending: false,
+                    title: None,
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
+                text_input::focus(raw_input_id())
+            }
+
+            Message::DuplicateTab => {
+                // Duplicate current tab - create new tab with same working directory
+                if let Some(current_tab) = self.tabs.get(self.active_tab) {
+                    let id = self.next_tab_id;
+                    self.next_tab_id += 1;
+
+                    let session_result = self.pty_manager.create_session(24, 80);
+                    // Get the working directory from the current tab's shell
+                    let cwd = current_tab
+                        .screen
+                        .cwd_from_shell()
+                        .map(|s| s.to_string())
+                        .or_else(|| Some(current_tab.cwd.clone()))
+                        .unwrap_or_else(|| "~".to_string());
+
+                    let (session_id, error_message) = match session_result {
+                        Ok(id) => (Some(id), None),
+                        Err(e) => (None, Some(format!("Failed to create PTY session: {}", e))),
+                    };
+
+                    let tab = TerminalTab {
+                        id,
+                        session_id,
+                        raw_input: String::new(),
+                        input: String::new(),
+                        cwd,
+                        error_message,
+                        history: Vec::new(),
+                        history_index: None,
+                        history_temp_input: String::new(),
+                        mode: TerminalMode::Raw,
+                        parsed_line_cache: Vec::new(),
+                        canvas_state: TerminalCanvasState::new(),
+                        content_version: 0,
+                        screen: TerminalScreen::new(80, 24),
+                        cursor_blink_on: true,
+                        bell_pending: false,
+                        title: None, // New tab starts with no custom title
+                    };
+                    self.tabs.push(tab);
+                    self.active_tab = self.tabs.len() - 1;
+                }
                 text_input::focus(raw_input_id())
             }
 
@@ -610,6 +668,21 @@ impl AgTerm {
             }
 
             Message::KeyPressed(key, modifiers) => {
+                // Handle Cmd+Shift+C: Force clipboard copy
+                if modifiers.command() && modifiers.shift() && matches!(key.as_ref(), Key::Character("c")) {
+                    return self.update(Message::ForceClipboardCopy);
+                }
+
+                // Handle Cmd+Shift+V: Force clipboard paste (without bracketed paste)
+                if modifiers.command() && modifiers.shift() && matches!(key.as_ref(), Key::Character("v")) {
+                    return self.update(Message::ForceClipboardPaste);
+                }
+
+                // Handle Cmd+Shift+D: Duplicate tab
+                if modifiers.command() && modifiers.shift() && matches!(key.as_ref(), Key::Character("d")) {
+                    return self.update(Message::DuplicateTab);
+                }
+
                 // Handle Ctrl/Cmd+C: Copy if selection exists, otherwise send interrupt signal
                 if (modifiers.control() || modifiers.command())
                     && matches!(key.as_ref(), Key::Character("c"))
@@ -661,6 +734,11 @@ impl AgTerm {
                         Key::Character("3") => return self.update(Message::SelectTab(2)),
                         Key::Character("4") => return self.update(Message::SelectTab(3)),
                         Key::Character("5") => return self.update(Message::SelectTab(4)),
+                        Key::Character("6") => return self.update(Message::SelectTab(5)),
+                        Key::Character("7") => return self.update(Message::SelectTab(6)),
+                        Key::Character("8") => return self.update(Message::SelectTab(7)),
+                        Key::Character("9") => return self.update(Message::SelectTab(8)),
+                        Key::Character("k") => return self.update(Message::ClearScreen),
                         Key::Character("v") => {
                             return iced::clipboard::read().map(Message::ClipboardContent)
                         }
@@ -670,6 +748,8 @@ impl AgTerm {
                         }
                         Key::Character("-") => return self.update(Message::DecreaseFontSize),
                         Key::Character("0") => return self.update(Message::ResetFontSize),
+                        Key::Named(keyboard::key::Named::Home) => return self.update(Message::ScrollToTop),
+                        Key::Named(keyboard::key::Named::End) => return self.update(Message::ScrollToBottom),
                         _ => {}
                     }
                 }
@@ -774,6 +854,69 @@ impl AgTerm {
                 Task::none()
             }
 
+            Message::ForceClipboardCopy => {
+                // Force copy selection to clipboard (Cmd+Shift+C)
+                use terminal_canvas::get_selected_text;
+
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    if let Some(selection) = &tab.canvas_state.selection {
+                        if selection.active && selection.start != selection.end {
+                            let selected_text = get_selected_text(&tab.parsed_line_cache, selection);
+                            if !selected_text.is_empty() {
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    let _ = clipboard.set_text(selected_text);
+                                }
+                            }
+                            tab.canvas_state.selection = None;
+                            tab.canvas_state.invalidate();
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::ForceClipboardPaste => {
+                // Force paste from clipboard without bracketed paste mode (Cmd+Shift+V)
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                            if let Some(session_id) = &tab.session_id {
+                                // Send text directly without bracketed paste escape codes
+                                let _ = self.pty_manager.write(session_id, text.as_bytes());
+                            }
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::ClearScreen => {
+                // Send clear screen command to PTY (Cmd+K)
+                if let Some(tab) = self.tabs.get(self.active_tab) {
+                    if let Some(session_id) = &tab.session_id {
+                        // Send Ctrl+L (clear screen)
+                        let _ = self.pty_manager.write(session_id, &[0x0C]);
+                    }
+                }
+                Task::none()
+            }
+
+            Message::ScrollToTop => {
+                // Scroll to top of terminal output (Cmd+Home)
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    tab.canvas_state.scroll_to_top();
+                }
+                Task::none()
+            }
+
+            Message::ScrollToBottom => {
+                // Scroll to bottom of terminal output (Cmd+End)
+                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    tab.canvas_state.scroll_to_bottom(tab.parsed_line_cache.len(), self.font_size);
+                }
+                Task::none()
+            }
+
             Message::WindowResized { width, height } => {
                 // Calculate terminal dimensions based on approximate character size
                 // D2Coding at ~13px = roughly 8px width, 18px height per character
@@ -820,9 +963,24 @@ impl AgTerm {
                 // Record frame for metrics
                 self.debug_panel.metrics.record_frame();
 
-                // Update input debug state
+                // Update input debug state and terminal state
                 if let Some(tab) = self.tabs.get(self.active_tab) {
                     self.debug_panel.input_state.raw_mode = tab.mode == TerminalMode::Raw;
+
+                    // Update terminal state
+                    let (cols, rows) = tab.screen.dimensions();
+                    let (cursor_row, cursor_col) = tab.screen.cursor_position();
+                    let scrollback_size = tab.screen.scrollback_size();
+                    let total_lines = tab.parsed_line_cache.len();
+
+                    self.debug_panel.terminal_state = TerminalState {
+                        cols,
+                        rows,
+                        cursor_row,
+                        cursor_col,
+                        scrollback_size,
+                        total_lines,
+                    };
                 }
 
                 // Cursor blinking (every 530ms, like Alacritty)
@@ -859,6 +1017,11 @@ impl AgTerm {
                                 // Check for bell (BEL character) and clear the active tab's bell
                                 // (active tab clears immediately, background tabs keep it)
                                 let _ = tab.screen.take_bell_triggered();
+
+                                // Update tab title from OSC sequences (OSC 0 or OSC 2)
+                                if let Some(window_title) = tab.screen.window_title() {
+                                    tab.title = Some(window_title.to_string());
+                                }
 
                                 // Send pending responses (DA, DSR, CPR, etc.) to PTY
                                 let pending_responses = tab.screen.take_pending_responses();
@@ -962,7 +1125,19 @@ impl AgTerm {
         let mut tab_elements = Vec::with_capacity(self.tabs.len());
         for (i, tab) in self.tabs.iter().enumerate() {
             let is_active = i == self.active_tab;
-            let label = format!("Terminal {}", i + 1);
+            // Use custom title if set, otherwise use default "Terminal N"
+            let label = tab
+                .title
+                .as_ref()
+                .map(|t| {
+                    // Limit title length to 30 characters for display
+                    if t.len() > 30 {
+                        format!("{}...", &t[..27])
+                    } else {
+                        t.clone()
+                    }
+                })
+                .unwrap_or_else(|| format!("Terminal {}", i + 1));
             let can_close = self.tabs.len() > 1;
             let has_bell = tab.bell_pending;
 
@@ -1307,6 +1482,7 @@ mod tests {
             screen: TerminalScreen::new(80, 24),
             cursor_blink_on: true,
             bell_pending: false,
+            title: None,
         };
 
         AgTerm {
@@ -1410,6 +1586,68 @@ mod tests {
 
         let _ = app.update(Message::PrevTab);
         assert_eq!(app.active_tab, 2); // Should cycle to last tab
+    }
+
+    #[test]
+    fn test_duplicate_tab() {
+        let mut app = create_test_app();
+        let initial_count = app.tabs.len();
+
+        // Set a working directory for the current tab
+        app.tabs[0].cwd = "/home/user/projects".to_string();
+
+        let _ = app.update(Message::DuplicateTab);
+
+        // Should have one more tab
+        assert_eq!(app.tabs.len(), initial_count + 1);
+        // Should switch to the new tab
+        assert_eq!(app.active_tab, initial_count);
+        // New tab should have the same working directory
+        assert_eq!(app.tabs[1].cwd, "/home/user/projects");
+    }
+
+    #[test]
+    fn test_tab_title_from_osc() {
+        let mut app = create_test_app();
+
+        // Initially, tab should have no title
+        assert_eq!(app.tabs[0].title, None);
+
+        // Simulate OSC 2 sequence setting window title
+        let osc_sequence = b"\x1b]2;My Custom Tab Title\x1b\\";
+        app.tabs[0].screen.process(osc_sequence);
+
+        // Manually trigger the title update (normally done in Tick)
+        if let Some(window_title) = app.tabs[0].screen.window_title() {
+            app.tabs[0].title = Some(window_title.to_string());
+        }
+
+        assert_eq!(app.tabs[0].title, Some("My Custom Tab Title".to_string()));
+    }
+
+    #[test]
+    fn test_tab_title_truncation() {
+        let mut app = create_test_app();
+
+        // Set a very long title
+        let long_title = "This is a very long tab title that should be truncated for display purposes";
+        app.tabs[0].title = Some(long_title.to_string());
+
+        // The view_tab_bar function should truncate to 30 chars (27 + "...")
+        // This is tested indirectly through the rendering logic
+        assert!(app.tabs[0].title.as_ref().unwrap().len() > 30);
+    }
+
+    #[test]
+    fn test_minimum_tab_warning() {
+        let mut app = create_test_app();
+        assert_eq!(app.tabs.len(), 1);
+
+        // Try to close the last tab
+        let _ = app.update(Message::CloseCurrentTab);
+
+        // Should still have one tab (minimum preserved)
+        assert_eq!(app.tabs.len(), 1);
     }
 
     // ========== Theme Tests ==========

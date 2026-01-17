@@ -21,12 +21,16 @@ pub struct Metrics {
     last_frame: Instant,
     /// Message processing times
     message_times: VecDeque<Duration>,
+    /// Render times (frame render duration)
+    render_times: VecDeque<Duration>,
     /// PTY read byte counts
     pty_bytes_read: VecDeque<usize>,
     /// PTY write byte counts
     pty_bytes_written: VecDeque<usize>,
     /// Maximum samples to keep
     max_samples: usize,
+    /// Last render start time (for measuring render duration)
+    last_render_start: Option<Instant>,
 }
 
 impl Default for Metrics {
@@ -43,9 +47,11 @@ impl Metrics {
             frame_times: VecDeque::with_capacity(max_samples),
             last_frame: Instant::now(),
             message_times: VecDeque::with_capacity(max_samples),
+            render_times: VecDeque::with_capacity(max_samples),
             pty_bytes_read: VecDeque::with_capacity(max_samples),
             pty_bytes_written: VecDeque::with_capacity(max_samples),
             max_samples,
+            last_render_start: None,
         }
     }
 
@@ -85,6 +91,22 @@ impl Metrics {
         self.pty_bytes_written.push_back(bytes);
     }
 
+    /// Start render time measurement
+    pub fn start_render(&mut self) {
+        self.last_render_start = Some(Instant::now());
+    }
+
+    /// Complete render time measurement
+    pub fn end_render(&mut self) {
+        if let Some(start) = self.last_render_start.take() {
+            let duration = start.elapsed();
+            if self.render_times.len() >= self.max_samples {
+                self.render_times.pop_front();
+            }
+            self.render_times.push_back(duration);
+        }
+    }
+
     /// Calculate average FPS
     pub fn fps(&self) -> f64 {
         if self.frame_times.is_empty() {
@@ -106,6 +128,15 @@ impl Metrics {
         }
         let total: Duration = self.frame_times.iter().sum();
         (total.as_secs_f64() * 1000.0) / self.frame_times.len() as f64
+    }
+
+    /// Calculate average render time in milliseconds
+    pub fn avg_render_time_ms(&self) -> f64 {
+        if self.render_times.is_empty() {
+            return 0.0;
+        }
+        let total: Duration = self.render_times.iter().sum();
+        (total.as_secs_f64() * 1000.0) / self.render_times.len() as f64
     }
 
     /// Calculate average message processing time in microseconds
@@ -146,9 +177,11 @@ impl Metrics {
     pub fn reset(&mut self) {
         self.frame_times.clear();
         self.message_times.clear();
+        self.render_times.clear();
         self.pty_bytes_read.clear();
         self.pty_bytes_written.clear();
         self.last_frame = Instant::now();
+        self.last_render_start = None;
     }
 }
 

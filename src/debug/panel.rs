@@ -33,6 +33,13 @@ mod colors {
     pub const ACCENT_CYAN: Color = Color::from_rgb(0.4, 0.85, 0.9);
 }
 
+/// Get current memory usage in MB (platform-specific)
+fn get_memory_usage_mb() -> f64 {
+    // TODO: Implement memory tracking
+    // Memory tracking via mach2 API is complex and needs proper testing
+    0.0
+}
+
 /// Debug panel messages
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -47,6 +54,21 @@ pub enum DebugPanelMessage {
     SearchLogs(String),
 }
 
+/// Terminal state information
+#[derive(Debug, Clone, Default)]
+pub struct TerminalState {
+    /// Terminal dimensions (cols x rows)
+    pub cols: usize,
+    pub rows: usize,
+    /// Cursor position (row, col)
+    pub cursor_row: usize,
+    pub cursor_col: usize,
+    /// Scrollback buffer size
+    pub scrollback_size: usize,
+    /// Total line count (visible + scrollback)
+    pub total_lines: usize,
+}
+
 /// Debug panel state
 pub struct DebugPanel {
     /// Panel visibility
@@ -57,6 +79,8 @@ pub struct DebugPanel {
     pub input_state: InputDebugState,
     /// PTY session info
     pub pty_sessions: Vec<PtyDebugInfo>,
+    /// Terminal state
+    pub terminal_state: TerminalState,
     /// Log buffer handle (optional, set after initialization)
     pub log_buffer: Option<LogBuffer>,
     /// Current log level filter
@@ -83,6 +107,7 @@ impl DebugPanel {
             metrics: Metrics::default(),
             input_state: InputDebugState::default(),
             pty_sessions: Vec::new(),
+            terminal_state: TerminalState::default(),
             log_buffer: None,
             log_filter: Level::DEBUG,
             log_search: String::new(),
@@ -148,6 +173,9 @@ impl DebugPanel {
         // Performance section
         let perf_section: Element<'a, M> = self.render_performance_section();
 
+        // Terminal section
+        let terminal_section: Element<'a, M> = self.render_terminal_section();
+
         // PTY section
         let pty_section: Element<'a, M> = self.render_pty_section();
 
@@ -165,6 +193,8 @@ impl DebugPanel {
             header,
             Space::with_height(8),
             perf_section,
+            Space::with_height(8),
+            terminal_section,
             Space::with_height(8),
             pty_section,
             Space::with_height(8),
@@ -219,7 +249,11 @@ impl DebugPanel {
         };
 
         let frame_time = self.metrics.avg_frame_time_ms();
+        let render_time = self.metrics.avg_render_time_ms();
         let msg_time = self.metrics.avg_message_time_us();
+
+        // Get memory usage (estimate based on Rust's allocator)
+        let memory_mb = get_memory_usage_mb();
 
         let content = column![
             text("Performance").size(13).color(colors::TEXT_TITLE),
@@ -241,9 +275,67 @@ impl DebugPanel {
                     .color(colors::TEXT_VALUE),
             ],
             row![
+                text("Render:").size(11).color(colors::TEXT_LABEL),
+                Space::with_width(8),
+                text(format!("{:.2}ms", render_time))
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_VALUE),
+            ],
+            row![
                 text("Msg:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
                 text(format!("{:.1}\u{00B5}s", msg_time))
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_VALUE),
+            ],
+            row![
+                text("Memory:").size(11).color(colors::TEXT_LABEL),
+                Space::with_width(8),
+                text(format!("{:.1}MB", memory_mb))
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_VALUE),
+            ],
+        ]
+        .spacing(2);
+
+        self.section_container(content)
+    }
+
+    fn render_terminal_section<'a, M: 'a>(&'a self) -> Element<'a, M> {
+        let content = column![
+            text("Terminal").size(13).color(colors::TEXT_TITLE),
+            Space::with_height(4),
+            row![
+                text("Size:").size(11).color(colors::TEXT_LABEL),
+                Space::with_width(8),
+                text(format!("{}x{}", self.terminal_state.cols, self.terminal_state.rows))
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::ACCENT_CYAN),
+            ],
+            row![
+                text("Cursor:").size(11).color(colors::TEXT_LABEL),
+                Space::with_width(8),
+                text(format!("({}, {})", self.terminal_state.cursor_row, self.terminal_state.cursor_col))
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_VALUE),
+            ],
+            row![
+                text("Lines:").size(11).color(colors::TEXT_LABEL),
+                Space::with_width(8),
+                text(format!("{}", self.terminal_state.total_lines))
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_VALUE),
+            ],
+            row![
+                text("Scrollback:").size(11).color(colors::TEXT_LABEL),
+                Space::with_width(8),
+                text(format!("{} lines", self.terminal_state.scrollback_size))
                     .size(11)
                     .font(MONO_FONT)
                     .color(colors::TEXT_VALUE),

@@ -266,6 +266,15 @@ impl TerminalCanvasState {
         self.cache.clear();
     }
 
+    /// Scroll to top
+    pub fn scroll_to_top(&mut self) {
+        self.scroll_offset = 0.0;
+        // Don't clear cache on scroll - virtual scrolling handles visibility changes
+        if !self.streaming_mode {
+            self.cache.clear();
+        }
+    }
+
     /// Scroll to bottom
     pub fn scroll_to_bottom(&mut self, total_lines: usize, font_size: f32) {
         let content_height = total_lines as f32 * config::line_height(font_size);

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/coldwoong-moon/agterm/discussions
+    about: Ask questions and discuss ideas with the community
+  - name: Security Vulnerability
+    url: https://github.com/coldwoong-moon/agterm/security/advisories/new
+    about: Report security vulnerabilities privately
+  - name: Documentation
+    url: https://github.com/coldwoong-moon/agterm#readme
+    about: View the project documentation

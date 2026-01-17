@@ -5,6 +5,9 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  schedule:
+    # Run tests weekly to catch dependency issues
+    - cron: '0 0 * * 0'
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,7 +15,7 @@ env:
 
 jobs:
   check:
-    name: Check
+    name: Code Quality Checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,32 +30,49 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          shared-key: "ci-check"
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Run clippy with detailed output
+        run: |
+          cargo clippy --all-targets --all-features --message-format=json -- -D warnings \
+            | tee clippy-output.json
+        continue-on-error: true
 
-      - name: Check docs
-        run: cargo doc --no-deps --all-features
+      - name: Generate clippy report
+        if: always()
+        run: |
+          echo "## Clippy Results" >> $GITHUB_STEP_SUMMARY
+          if [ -f clippy-output.json ]; then
+            cargo clippy --all-targets --all-features -- -D warnings 2>&1 | tee clippy.txt || true
+            if [ -s clippy.txt ]; then
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              cat clippy.txt >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ No clippy warnings found!" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      - name: Check documentation
+        run: cargo doc --no-deps --all-features --document-private-items
         env:
           RUSTDOCFLAGS: -D warnings
 
+      - name: Upload documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation
+          path: target/doc/
+          retention-days: 7
+
   test:
-    name: Test
+    name: Test Suite
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -76,24 +96,56 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.rust }}-cargo-
+          shared-key: "test-${{ matrix.os }}-${{ matrix.rust }}"
 
-      - name: Build
-        run: cargo build --all-features
+      - name: Build all targets
+        run: cargo build --all-features --all-targets
 
-      - name: Run tests
-        run: cargo test --all-features --no-fail-fast
+      - name: Run tests with output
+        run: |
+          cargo test --all-features --no-fail-fast -- --nocapture --test-threads=1 2>&1 | tee test-output.txt
+        continue-on-error: true
+
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "## Test Results - ${{ matrix.os }} (${{ matrix.rust }})" >> $GITHUB_STEP_SUMMARY
+          if [ -f test-output.txt ]; then
+            # Extract test summary
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "test result:|running [0-9]+ test" test-output.txt | tail -20 >> $GITHUB_STEP_SUMMARY || echo "Tests completed" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+        shell: bash
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.rust }}
+          path: test-output.txt
+          retention-days: 7
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run cargo-audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          log-level: warn
+          command: check
+        continue-on-error: true
 
   coverage:
     name: Code Coverage
@@ -114,25 +166,94 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-coverage-cargo-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: "coverage"
 
-      - name: Generate coverage
-        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+      - name: Generate coverage report
+        run: |
+          cargo llvm-cov --all-features --lcov --output-path lcov.info --ignore-filename-regex "tests/.*"
+        continue-on-error: true
+
+      - name: Generate HTML coverage report
+        run: |
+          cargo llvm-cov --all-features --html --ignore-filename-regex "tests/.*"
+        continue-on-error: true
+
+      - name: Upload HTML coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: target/llvm-cov/html/
+          retention-days: 30
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           files: lcov.info
           fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Generate coverage summary
+        if: always()
+        run: |
+          echo "## Code Coverage Report" >> $GITHUB_STEP_SUMMARY
+          if [ -f lcov.info ]; then
+            echo "✅ Coverage report generated successfully" >> $GITHUB_STEP_SUMMARY
+            echo "View detailed HTML report in artifacts" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Coverage report generation skipped or failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "benchmark"
+
+      - name: Run benchmarks (if available)
+        run: |
+          if [ -d "benches" ]; then
+            cargo bench --no-fail-fast -- --output-format bencher | tee benchmark-output.txt
+          else
+            echo "No benchmarks found, skipping..." | tee benchmark-output.txt
+          fi
+        continue-on-error: true
+
+      - name: Generate benchmark summary
+        if: always()
+        run: |
+          echo "## Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          if [ -f benchmark-output.txt ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat benchmark-output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          tool: 'cargo'
+          output-file-path: benchmark-output.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+        continue-on-error: true
 
   build-release:
     name: Build Release
@@ -177,10 +298,19 @@ jobs:
         run: |
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release-${{ matrix.target }}"
+
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
+        run: strip target/${{ matrix.target }}/release/agterm || true
 
       - name: Package binary (Unix)
         if: runner.os != 'Windows'

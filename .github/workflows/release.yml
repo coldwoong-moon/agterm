@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,6 +21,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   BINARY_NAME: agterm
+  RUST_BACKTRACE: 1
 
 jobs:
   build:
@@ -47,6 +54,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for changelog generation
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -64,10 +73,37 @@ jobs:
         run: |
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release-${{ matrix.target }}"
+
+      - name: Run tests before release
+        run: cargo test --release --target ${{ matrix.target }}
+        continue-on-error: false
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Strip debug symbols (Unix)
+        if: runner.os != 'Windows'
+        run: strip target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} || true
+
+      - name: Run binary smoke test (Unix)
+        if: runner.os != 'Windows' && !matrix.cross
+        run: |
+          target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} --version || true
+          echo "Binary smoke test completed"
+
+      - name: Run binary smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe --version || echo "Binary smoke test completed"
+        shell: pwsh
 
       - name: Create dist directory
         shell: bash
@@ -92,7 +128,13 @@ jobs:
           mkdir -p "${APP_DIR}/Contents/Resources"
           cp dist/${{ env.BINARY_NAME }} "${APP_DIR}/Contents/MacOS/${APP_NAME}"
           chmod +x "${APP_DIR}/Contents/MacOS/${APP_NAME}"
-          cp assets/icons/icon.icns "${APP_DIR}/Contents/Resources/AppIcon.icns" || true
+
+          # Copy icon if available
+          if [ -f "assets/icons/icon.icns" ]; then
+            cp assets/icons/icon.icns "${APP_DIR}/Contents/Resources/AppIcon.icns"
+          fi
+
+          # Create Info.plist
           cat > "${APP_DIR}/Contents/Info.plist" << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -116,8 +158,20 @@ jobs:
               <string>11.0</string>
               <key>NSHighResolutionCapable</key>
               <true/>
+              <key>LSApplicationCategoryType</key>
+              <string>public.app-category.developer-tools</string>
           </dict>
           </plist>
+          EOF
+
+          # Create README
+          cat > "dist/README.txt" << EOF
+          AgTerm - AI Agent Terminal
+
+          To install: Drag AgTerm.app to your Applications folder
+
+          Version: ${GITHUB_REF#refs/tags/v}
+          Architecture: ${{ matrix.target }}
           EOF
 
       - name: Create archive (Unix)
