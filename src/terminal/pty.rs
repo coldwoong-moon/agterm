@@ -107,7 +107,12 @@ fn create_pty_session(rows: u16, cols: u16) -> Result<InternalPtySession, PtyErr
 
     let mut cmd = CommandBuilder::new(&shell);
     cmd.cwd(&working_dir);
+
+    // Enhanced shell integration environment variables
     cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("TERM_PROGRAM", "agterm");
+    cmd.env("AGTERM_VERSION", env!("CARGO_PKG_VERSION"));
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| {
         error!(error = %e, "Failed to spawn shell command");

@@ -1289,12 +1289,23 @@ impl Perform for TerminalScreen {
                 // c = clipboard selection (usually 'c' for clipboard, 'p' for primary)
                 // base64-data = clipboard content in base64
                 if params.len() > 2 {
-                    let _selection = String::from_utf8_lossy(params[1]);
+                    let selection = String::from_utf8_lossy(params[1]);
                     let data = String::from_utf8_lossy(params[2]).to_string();
 
-                    // Store the base64 data for external handling
-                    // Applications can read this and decode it
-                    if !data.is_empty() && data != "?" {
+                    if data == "?" {
+                        // OSC 52 query - respond with clipboard content
+                        // Read current clipboard and send back as base64
+                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                            if let Ok(text) = clipboard.get_text() {
+                                use base64::{engine::general_purpose::STANDARD, Engine as _};
+                                let encoded = STANDARD.encode(text.as_bytes());
+                                // Respond with OSC 52 ; c ; <base64> ST
+                                let response = format!("\x1b]52;{};{}\x1b\\", selection, encoded);
+                                self.pending_responses.push(response);
+                            }
+                        }
+                    } else if !data.is_empty() {
+                        // OSC 52 set - store clipboard data
                         self.clipboard_request = Some(data);
                     }
                 }
@@ -1357,6 +1368,10 @@ impl Perform for TerminalScreen {
                         // Note: cursor is saved in the state structure
                         self.switch_to_alternate_screen(true);
                     }
+                    2004 => {
+                        // CSI ?2004h - Enable bracketed paste mode
+                        self.bracketed_paste_mode = true;
+                    }
                     _ => {
                         // Other private modes not implemented yet
                     }
@@ -1394,6 +1409,10 @@ impl Perform for TerminalScreen {
                         // All three modes restore the main screen completely
                         // The saved state includes cursor position and all attributes
                         self.switch_to_normal_screen();
+                    }
+                    2004 => {
+                        // CSI ?2004l - Disable bracketed paste mode
+                        self.bracketed_paste_mode = false;
                     }
                     _ => {
                         // Other private modes not implemented yet

@@ -226,7 +226,7 @@ pub struct TerminalCanvasState {
     /// Text selection state
     pub selection: Option<Selection>,
     /// Mouse drag state
-    is_dragging: bool,
+    pub is_dragging: bool,
 }
 
 impl Default for TerminalCanvasState {

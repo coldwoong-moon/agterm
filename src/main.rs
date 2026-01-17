@@ -354,6 +354,7 @@ impl Default for AgTerm {
             cursor_blink_on: true,
             bell_pending: false,
             title: None,
+            last_copied_selection: None,
         };
 
         let mut debug_panel = DebugPanel::new();
@@ -423,6 +424,8 @@ struct TerminalTab {
     bell_pending: bool,
     /// Custom tab title (set via OSC 0/2 or manually)
     title: Option<String>,
+    /// Track last copied selection coordinates to avoid duplicate copies
+    last_copied_selection: Option<((usize, usize), (usize, usize))>,
 }
 
 /// Terminal input mode
@@ -553,6 +556,7 @@ impl AgTerm {
                     cursor_blink_on: true,
                     bell_pending: false,
                     title: None,
+                    last_copied_selection: None,
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
@@ -597,6 +601,7 @@ impl AgTerm {
                         cursor_blink_on: true,
                         bell_pending: false,
                         title: None, // New tab starts with no custom title
+                        last_copied_selection: None,
                     };
                     self.tabs.push(tab);
                     self.active_tab = self.tabs.len() - 1;
@@ -869,9 +874,20 @@ impl AgTerm {
             Message::ClipboardContent(clipboard_opt) => {
                 if let Some(content) = clipboard_opt {
                     if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                        // Send clipboard content directly to PTY
+                        // Send clipboard content to PTY with bracketed paste if enabled
                         if let Some(session_id) = &tab.session_id {
-                            let _ = self.pty_manager.write(session_id, content.as_bytes());
+                            let config = get_config();
+                            let bracketed_paste = config.terminal.bracketed_paste && tab.screen.bracketed_paste_mode();
+
+                            if bracketed_paste {
+                                // Wrap paste with bracketed paste escape codes
+                                let _ = self.pty_manager.write(session_id, b"\x1b[200~");
+                                let _ = self.pty_manager.write(session_id, content.as_bytes());
+                                let _ = self.pty_manager.write(session_id, b"\x1b[201~");
+                            } else {
+                                // Direct paste without bracketed mode
+                                let _ = self.pty_manager.write(session_id, content.as_bytes());
+                            }
                         }
                     }
                 }
@@ -898,6 +914,7 @@ impl AgTerm {
                             // Clear selection after copying
                             tab.canvas_state.selection = None;
                             tab.canvas_state.invalidate();
+                            tab.last_copied_selection = None;
                         }
                     }
                 }
@@ -919,6 +936,7 @@ impl AgTerm {
                             }
                             tab.canvas_state.selection = None;
                             tab.canvas_state.invalidate();
+                            tab.last_copied_selection = None;
                         }
                     }
                 }
@@ -1078,10 +1096,28 @@ impl AgTerm {
                                     tab.title = Some(window_title.to_string());
                                 }
 
-                                // Send pending responses (DA, DSR, CPR, etc.) to PTY
+                                // Update CWD from OSC 7 for tab subtitle/info
+                                if let Some(cwd) = tab.screen.cwd_from_shell() {
+                                    tab.cwd = cwd.to_string();
+                                }
+
+                                // Send pending responses (DA, DSR, CPR, OSC 52 query, etc.) to PTY
                                 let pending_responses = tab.screen.take_pending_responses();
                                 for response in pending_responses {
                                     let _ = self.pty_manager.write(session_id, response.as_bytes());
+                                }
+
+                                // Handle OSC 52 clipboard set request
+                                if let Some(clipboard_data) = tab.screen.take_clipboard_request() {
+                                    // Decode base64 and set clipboard
+                                    use base64::{engine::general_purpose::STANDARD, Engine as _};
+                                    if let Ok(decoded_bytes) = STANDARD.decode(&clipboard_data) {
+                                        if let Ok(text) = String::from_utf8(decoded_bytes) {
+                                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                                let _ = clipboard.set_text(text);
+                                            }
+                                        }
+                                    }
                                 }
 
                                 // Convert screen buffer to parsed line cache for rendering
@@ -1111,6 +1147,33 @@ impl AgTerm {
                     // Check if bell was triggered in background tab
                     if tab.screen.take_bell_triggered() {
                         tab.bell_pending = true;
+                    }
+                }
+
+                // Handle copy-on-select for active tab
+                let config = get_config();
+                if config.mouse.copy_on_select {
+                    if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                        // Check if there's a completed selection that hasn't been copied yet
+                        if let Some(selection) = &tab.canvas_state.selection {
+                            if selection.active && selection.start != selection.end {
+                                // Check if this selection is different from the last copied one
+                                let current_selection = (selection.start, selection.end);
+                                let should_copy = tab.last_copied_selection.as_ref() != Some(&current_selection);
+
+                                if should_copy && !tab.canvas_state.is_dragging {
+                                    // Copy selection to clipboard
+                                    use terminal_canvas::get_selected_text;
+                                    let selected_text = get_selected_text(&tab.parsed_line_cache, selection);
+                                    if !selected_text.is_empty() {
+                                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                            let _ = clipboard.set_text(selected_text);
+                                            tab.last_copied_selection = Some(current_selection);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1538,6 +1601,7 @@ mod tests {
             cursor_blink_on: true,
             bell_pending: false,
             title: None,
+            last_copied_selection: None,
         };
 
         AgTerm {
