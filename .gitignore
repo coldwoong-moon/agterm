@@ -29,3 +29,9 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Backup files
+*.bak
+*.backup
+*.backup-*
+*.tmp
