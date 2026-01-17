@@ -155,11 +155,6 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
     let mut current_bold = false;
 
     for cell in cells {
-        // Skip placeholder cells (second cell of wide characters)
-        if cell.placeholder {
-            continue;
-        }
-
         let color = if let Some(fg) = &cell.fg {
             Some(fg.to_color())
         } else {

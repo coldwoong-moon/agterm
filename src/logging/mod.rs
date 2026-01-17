@@ -93,10 +93,9 @@ const DEFAULT_LOG_BUFFER_SIZE: usize = 100;
 /// - `AGTERM_DEBUG`: Enable debug panel on startup
 pub fn init_logging(config: &LoggingConfig) -> LogBuffer {
     // Build the environment filter
-    let env_filter = EnvFilter::try_from_env("AGTERM_LOG")
-        .unwrap_or_else(|_| {
-            EnvFilter::new(format!("agterm={}", config.level.as_str().to_lowercase()))
-        });
+    let env_filter = EnvFilter::try_from_env("AGTERM_LOG").unwrap_or_else(|_| {
+        EnvFilter::new(format!("agterm={}", config.level.as_str().to_lowercase()))
+    });
 
     // Create the console layer
     let console_layer = fmt::layer()
@@ -120,14 +119,13 @@ pub fn init_logging(config: &LoggingConfig) -> LogBuffer {
 
         // Ensure log directory exists
         if let Err(e) = std::fs::create_dir_all(&log_dir) {
-            eprintln!("Warning: Failed to create log directory {:?}: {}", log_dir, e);
+            eprintln!(
+                "Warning: Failed to create log directory {:?}: {}",
+                log_dir, e
+            );
             None
         } else {
-            let file_appender = RollingFileAppender::new(
-                Rotation::DAILY,
-                &log_dir,
-                "agterm.log",
-            );
+            let file_appender = RollingFileAppender::new(Rotation::DAILY, &log_dir, "agterm.log");
 
             let file_layer = fmt::layer()
                 .with_writer(file_appender)

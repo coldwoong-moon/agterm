@@ -77,7 +77,9 @@ impl DebugPanel {
     /// Create a new debug panel
     pub fn new() -> Self {
         Self {
-            visible: std::env::var("AGTERM_DEBUG").map(|v| v == "1").unwrap_or(false),
+            visible: std::env::var("AGTERM_DEBUG")
+                .map(|v| v == "1")
+                .unwrap_or(false),
             metrics: Metrics::default(),
             input_state: InputDebugState::default(),
             pty_sessions: Vec::new(),
@@ -102,7 +104,11 @@ impl DebugPanel {
     /// Update PTY session info
     #[allow(dead_code)]
     pub fn update_pty_session(&mut self, info: PtyDebugInfo) {
-        if let Some(existing) = self.pty_sessions.iter_mut().find(|s| s.session_id == info.session_id) {
+        if let Some(existing) = self
+            .pty_sessions
+            .iter_mut()
+            .find(|s| s.session_id == info.session_id)
+        {
             *existing = info;
         } else {
             self.pty_sessions.push(info);
@@ -170,26 +176,24 @@ impl DebugPanel {
         .padding(12)
         .width(Length::Fixed(350.0));
 
-        container(
-            scrollable(content)
-                .height(Length::Fill)
-        )
-        .style(|_| container::Style {
-            background: Some(colors::BG_PANEL.into()),
-            border: Border {
-                color: colors::BORDER,
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            ..Default::default()
-        })
-        .height(Length::Fill)
-        .into()
+        container(scrollable(content).height(Length::Fill))
+            .style(|_| container::Style {
+                background: Some(colors::BG_PANEL.into()),
+                border: Border {
+                    color: colors::BORDER,
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                ..Default::default()
+            })
+            .height(Length::Fill)
+            .into()
     }
 
     fn render_header<'a, M: 'a>(&'a self) -> Element<'a, M> {
         let uptime = self.created_at.elapsed();
-        let uptime_str = format!("{}:{:02}:{:02}",
+        let uptime_str = format!(
+            "{}:{:02}:{:02}",
             uptime.as_secs() / 3600,
             (uptime.as_secs() % 3600) / 60,
             uptime.as_secs() % 60
@@ -223,17 +227,26 @@ impl DebugPanel {
             row![
                 text("FPS:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format!("{:.1}", fps)).size(11).font(MONO_FONT).color(fps_color),
+                text(format!("{:.1}", fps))
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(fps_color),
             ],
             row![
                 text("Frame:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format!("{:.2}ms", frame_time)).size(11).font(MONO_FONT).color(colors::TEXT_VALUE),
+                text(format!("{:.2}ms", frame_time))
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_VALUE),
             ],
             row![
                 text("Msg:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format!("{:.1}\u{00B5}s", msg_time)).size(11).font(MONO_FONT).color(colors::TEXT_VALUE),
+                text(format!("{:.1}\u{00B5}s", msg_time))
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_VALUE),
             ],
         ]
         .spacing(2);
@@ -253,35 +266,56 @@ impl DebugPanel {
             row![
                 text("Active:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format!("{}", sessions_count)).size(11).font(MONO_FONT).color(colors::ACCENT_GREEN),
+                text(format!("{}", sessions_count))
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::ACCENT_GREEN),
             ],
             row![
                 text("Read:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format_bytes(total_read)).size(11).font(MONO_FONT).color(colors::TEXT_VALUE),
-                text(format!(" ({}/s)", format_bytes(read_rate as usize))).size(10).color(colors::TEXT_LABEL),
+                text(format_bytes(total_read))
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_VALUE),
+                text(format!(" ({}/s)", format_bytes(read_rate as usize)))
+                    .size(10)
+                    .color(colors::TEXT_LABEL),
             ],
             row![
                 text("Write:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format_bytes(total_written)).size(11).font(MONO_FONT).color(colors::TEXT_VALUE),
+                text(format_bytes(total_written))
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_VALUE),
             ],
         ]
         .spacing(2);
 
         // Show individual session info
         for session in &self.pty_sessions {
-            let status_color = if session.active { colors::ACCENT_GREEN } else { colors::ACCENT_RED };
+            let status_color = if session.active {
+                colors::ACCENT_GREEN
+            } else {
+                colors::ACCENT_RED
+            };
             let id_short = &session.session_id[..8.min(session.session_id.len())];
-            content = content.push(
-                row![
-                    text(format!("  {}", id_short)).size(10).font(MONO_FONT).color(colors::TEXT_LABEL),
-                    Space::with_width(4),
-                    text(if session.active { "●" } else { "○" }).size(10).color(status_color),
-                    Space::with_width(4),
-                    text(format_bytes(session.buffer_size)).size(10).font(MONO_FONT).color(colors::TEXT_VALUE),
-                ]
-            );
+            content = content.push(row![
+                text(format!("  {}", id_short))
+                    .size(10)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_LABEL),
+                Space::with_width(4),
+                text(if session.active { "●" } else { "○" })
+                    .size(10)
+                    .color(status_color),
+                Space::with_width(4),
+                text(format_bytes(session.buffer_size))
+                    .size(10)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_VALUE),
+            ]);
         }
 
         self.section_container(content)
@@ -295,8 +329,16 @@ impl DebugPanel {
         } else {
             "Idle".to_string()
         };
-        let mode_color = if self.input_state.raw_mode { colors::ACCENT_CYAN } else { colors::ACCENT_BLUE };
-        let mode_str = if self.input_state.raw_mode { "RAW" } else { "BLOCK" };
+        let mode_color = if self.input_state.raw_mode {
+            colors::ACCENT_CYAN
+        } else {
+            colors::ACCENT_BLUE
+        };
+        let mode_str = if self.input_state.raw_mode {
+            "RAW"
+        } else {
+            "BLOCK"
+        };
 
         let content = column![
             text("Input").size(13).color(colors::TEXT_TITLE),
@@ -309,14 +351,22 @@ impl DebugPanel {
             row![
                 text("Key:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(key_display).size(11).font(MONO_FONT).color(colors::TEXT_VALUE),
+                text(key_display)
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_VALUE),
                 Space::with_width(8),
-                text(format!("[{}]", mods_display)).size(10).color(colors::TEXT_LABEL),
+                text(format!("[{}]", mods_display))
+                    .size(10)
+                    .color(colors::TEXT_LABEL),
             ],
             row![
                 text("IME:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(ime_status).size(11).font(MONO_FONT).color(colors::TEXT_VALUE),
+                text(ime_status)
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::TEXT_VALUE),
             ],
         ]
         .spacing(2);
@@ -345,9 +395,7 @@ impl DebugPanel {
                 .collect();
 
             if filtered.is_empty() {
-                content = content.push(
-                    text("No logs").size(10).color(colors::TEXT_LABEL)
-                );
+                content = content.push(text("No logs").size(10).color(colors::TEXT_LABEL));
             } else {
                 for entry in filtered.iter().rev().take(20) {
                     let level_color = match entry.level {
@@ -372,29 +420,43 @@ impl DebugPanel {
                         entry.message.clone()
                     };
 
-                    content = content.push(
-                        row![
-                            text(time_str).size(9).font(MONO_FONT).color(colors::TEXT_LABEL),
-                            Space::with_width(4),
-                            text(entry.level_str()).size(9).font(MONO_FONT).color(level_color),
-                            Space::with_width(4),
-                            text(format!("[{}]", target_short)).size(9).color(colors::TEXT_LABEL),
-                            Space::with_width(4),
-                            text(msg_truncated).size(9).font(MONO_FONT).color(colors::TEXT_VALUE),
-                        ]
-                    );
+                    content = content.push(row![
+                        text(time_str)
+                            .size(9)
+                            .font(MONO_FONT)
+                            .color(colors::TEXT_LABEL),
+                        Space::with_width(4),
+                        text(entry.level_str())
+                            .size(9)
+                            .font(MONO_FONT)
+                            .color(level_color),
+                        Space::with_width(4),
+                        text(format!("[{}]", target_short))
+                            .size(9)
+                            .color(colors::TEXT_LABEL),
+                        Space::with_width(4),
+                        text(msg_truncated)
+                            .size(9)
+                            .font(MONO_FONT)
+                            .color(colors::TEXT_VALUE),
+                    ]);
                 }
             }
         } else {
             content = content.push(
-                text("Log buffer not initialized").size(10).color(colors::ACCENT_YELLOW)
+                text("Log buffer not initialized")
+                    .size(10)
+                    .color(colors::ACCENT_YELLOW),
             );
         }
 
         self.section_container(content)
     }
 
-    fn section_container<'a, M: 'a>(&'a self, content: iced::widget::Column<'a, M>) -> Element<'a, M> {
+    fn section_container<'a, M: 'a>(
+        &'a self,
+        content: iced::widget::Column<'a, M>,
+    ) -> Element<'a, M> {
         container(content.padding(8))
             .width(Length::Fill)
             .style(|_| container::Style {

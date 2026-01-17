@@ -1,12 +1,12 @@
 //! PTY (Pseudo-Terminal) management
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use tracing::{debug, error, info, instrument, trace, warn};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
 pub type PtyId = Uuid;
@@ -95,12 +95,10 @@ fn create_pty_session(rows: u16, cols: u16) -> Result<InternalPtySession, PtyErr
         pixel_height: 0,
     };
 
-    let pair = pty_system
-        .openpty(size)
-        .map_err(|e| {
-            error!(error = %e, "Failed to open PTY");
-            PtyError::SpawnFailed(e.to_string())
-        })?;
+    let pair = pty_system.openpty(size).map_err(|e| {
+        error!(error = %e, "Failed to open PTY");
+        PtyError::SpawnFailed(e.to_string())
+    })?;
 
     let shell = default_shell();
     debug!(shell = %shell, "Using shell");
@@ -110,13 +108,10 @@ fn create_pty_session(rows: u16, cols: u16) -> Result<InternalPtySession, PtyErr
     cmd.cwd(&working_dir);
     cmd.env("TERM", "xterm-256color");
 
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| {
-            error!(error = %e, "Failed to spawn shell command");
-            PtyError::SpawnFailed(e.to_string())
-        })?;
+    let child = pair.slave.spawn_command(cmd).map_err(|e| {
+        error!(error = %e, "Failed to spawn shell command");
+        PtyError::SpawnFailed(e.to_string())
+    })?;
 
     info!("PTY session created successfully");
 
@@ -361,12 +356,10 @@ impl PtyManager {
                 PtyError::Channel(e.to_string())
             })?;
 
-        response_rx
-            .recv()
-            .map_err(|e| {
-                error!(error = %e, "Failed to receive write response");
-                PtyError::Channel(e.to_string())
-            })?
+        response_rx.recv().map_err(|e| {
+            error!(error = %e, "Failed to receive write response");
+            PtyError::Channel(e.to_string())
+        })?
     }
 
     #[instrument(skip(self), fields(session_id = %id))]

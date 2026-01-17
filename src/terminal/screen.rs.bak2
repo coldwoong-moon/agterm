@@ -2,9 +2,8 @@
 
 use iced::Color;
 use std::cmp::{max, min};
-use std::collections::VecDeque;
-use unicode_width::UnicodeWidthChar;
 use vte::{Params, Parser, Perform};
+use std::collections::VecDeque;
 
 /// Maximum scrollback buffer lines
 const MAX_SCROLLBACK: usize = 10000;
@@ -26,9 +25,11 @@ impl AnsiColor {
         match self {
             AnsiColor::Indexed(idx) => indexed_to_color(*idx),
             AnsiColor::Palette256(idx) => palette256_to_color(*idx),
-            AnsiColor::Rgb(r, g, b) => {
-                Color::from_rgb(*r as f32 / 255.0, *g as f32 / 255.0, *b as f32 / 255.0)
-            }
+            AnsiColor::Rgb(r, g, b) => Color::from_rgb(
+                *r as f32 / 255.0,
+                *g as f32 / 255.0,
+                *b as f32 / 255.0,
+            ),
         }
     }
 }
@@ -36,23 +37,23 @@ impl AnsiColor {
 /// Convert 16-color index to Iced Color
 fn indexed_to_color(idx: u8) -> Color {
     match idx {
-        0 => Color::from_rgb(0.0, 0.0, 0.0),  // Black
-        1 => Color::from_rgb(0.8, 0.2, 0.2),  // Red
-        2 => Color::from_rgb(0.2, 0.8, 0.2),  // Green
-        3 => Color::from_rgb(0.8, 0.8, 0.2),  // Yellow
-        4 => Color::from_rgb(0.2, 0.2, 0.8),  // Blue
-        5 => Color::from_rgb(0.8, 0.2, 0.8),  // Magenta
-        6 => Color::from_rgb(0.2, 0.8, 0.8),  // Cyan
-        7 => Color::from_rgb(0.8, 0.8, 0.8),  // White
-        8 => Color::from_rgb(0.5, 0.5, 0.5),  // Bright Black (Gray)
-        9 => Color::from_rgb(1.0, 0.3, 0.3),  // Bright Red
-        10 => Color::from_rgb(0.3, 1.0, 0.3), // Bright Green
-        11 => Color::from_rgb(1.0, 1.0, 0.3), // Bright Yellow
-        12 => Color::from_rgb(0.3, 0.3, 1.0), // Bright Blue
-        13 => Color::from_rgb(1.0, 0.3, 1.0), // Bright Magenta
-        14 => Color::from_rgb(0.3, 1.0, 1.0), // Bright Cyan
-        15 => Color::from_rgb(1.0, 1.0, 1.0), // Bright White
-        _ => Color::from_rgb(0.8, 0.8, 0.8),  // Default
+        0 => Color::from_rgb(0.0, 0.0, 0.0),         // Black
+        1 => Color::from_rgb(0.8, 0.2, 0.2),         // Red
+        2 => Color::from_rgb(0.2, 0.8, 0.2),         // Green
+        3 => Color::from_rgb(0.8, 0.8, 0.2),         // Yellow
+        4 => Color::from_rgb(0.2, 0.2, 0.8),         // Blue
+        5 => Color::from_rgb(0.8, 0.2, 0.8),         // Magenta
+        6 => Color::from_rgb(0.2, 0.8, 0.8),         // Cyan
+        7 => Color::from_rgb(0.8, 0.8, 0.8),         // White
+        8 => Color::from_rgb(0.5, 0.5, 0.5),         // Bright Black (Gray)
+        9 => Color::from_rgb(1.0, 0.3, 0.3),         // Bright Red
+        10 => Color::from_rgb(0.3, 1.0, 0.3),        // Bright Green
+        11 => Color::from_rgb(1.0, 1.0, 0.3),        // Bright Yellow
+        12 => Color::from_rgb(0.3, 0.3, 1.0),        // Bright Blue
+        13 => Color::from_rgb(1.0, 0.3, 1.0),        // Bright Magenta
+        14 => Color::from_rgb(0.3, 1.0, 1.0),        // Bright Cyan
+        15 => Color::from_rgb(1.0, 1.0, 1.0),        // Bright White
+        _ => Color::from_rgb(0.8, 0.8, 0.8),         // Default
     }
 }
 
@@ -72,11 +73,7 @@ fn palette256_to_color(idx: u8) -> Color {
         // 232-255: Grayscale
         232..=255 => {
             let gray = 8 + (idx - 232) * 10;
-            Color::from_rgb(
-                gray as f32 / 255.0,
-                gray as f32 / 255.0,
-                gray as f32 / 255.0,
-            )
+            Color::from_rgb(gray as f32 / 255.0, gray as f32 / 255.0, gray as f32 / 255.0)
         }
     }
 }
@@ -114,10 +111,6 @@ pub struct Cell {
     pub bold: bool,
     pub underline: bool,
     pub reverse: bool,
-    /// This cell is the first cell of a wide character (CJK, emoji, etc.)
-    pub wide: bool,
-    /// This cell is a placeholder for the second cell of a wide character
-    pub placeholder: bool,
 }
 
 impl Default for Cell {
@@ -129,8 +122,6 @@ impl Default for Cell {
             bold: false,
             underline: false,
             reverse: false,
-            wide: false,
-            placeholder: false,
         }
     }
 }
@@ -187,8 +178,6 @@ pub struct TerminalScreen {
     auto_wrap_mode: bool,
     /// Bracketed paste mode (CSI ?2004h/l)
     bracketed_paste_mode: bool,
-    /// Application cursor keys mode (DECCKM - CSI ?1h/l)
-    application_cursor_keys: bool,
 }
 
 impl TerminalScreen {
@@ -226,7 +215,6 @@ impl TerminalScreen {
             cursor_visible: true,
             auto_wrap_mode: true,
             bracketed_paste_mode: false,
-            application_cursor_keys: false,
         }
     }
 
@@ -364,11 +352,6 @@ impl TerminalScreen {
     /// Get bracketed paste mode state
     pub fn bracketed_paste_mode(&self) -> bool {
         self.bracketed_paste_mode
-    }
-
-    /// Get application cursor keys mode state (DECCKM)
-    pub fn application_cursor_keys(&self) -> bool {
-        self.application_cursor_keys
     }
 
     /// Scroll screen up by n lines
@@ -658,11 +641,8 @@ impl TerminalScreen {
                         match next[0] {
                             2 => {
                                 // RGB
-                                if let (Some(r), Some(g), Some(b)) =
-                                    (iter.next(), iter.next(), iter.next())
-                                {
-                                    self.current_fg =
-                                        Some(AnsiColor::Rgb(r[0] as u8, g[0] as u8, b[0] as u8));
+                                if let (Some(r), Some(g), Some(b)) = (iter.next(), iter.next(), iter.next()) {
+                                    self.current_fg = Some(AnsiColor::Rgb(r[0] as u8, g[0] as u8, b[0] as u8));
                                 }
                             }
                             5 => {
@@ -684,11 +664,8 @@ impl TerminalScreen {
                         match next[0] {
                             2 => {
                                 // RGB
-                                if let (Some(r), Some(g), Some(b)) =
-                                    (iter.next(), iter.next(), iter.next())
-                                {
-                                    self.current_bg =
-                                        Some(AnsiColor::Rgb(r[0] as u8, g[0] as u8, b[0] as u8));
+                                if let (Some(r), Some(g), Some(b)) = (iter.next(), iter.next(), iter.next()) {
+                                    self.current_bg = Some(AnsiColor::Rgb(r[0] as u8, g[0] as u8, b[0] as u8));
                                 }
                             }
                             5 => {
@@ -714,12 +691,8 @@ impl TerminalScreen {
 
 impl Perform for TerminalScreen {
     fn print(&mut self, c: char) {
-        // Get character width (1 for regular, 2 for wide characters like CJK)
-        let width = UnicodeWidthChar::width(c).unwrap_or(1);
-
         // Handle line wrapping based on auto_wrap_mode
-        // For wide characters, check if we have enough space (need 2 columns)
-        if self.cursor_col >= self.cols || (width == 2 && self.cursor_col >= self.cols - 1) {
+        if self.cursor_col >= self.cols {
             if self.auto_wrap_mode {
                 // Auto-wrap enabled: move to next line
                 self.cursor_col = 0;
@@ -727,68 +700,20 @@ impl Perform for TerminalScreen {
             } else {
                 // Auto-wrap disabled: stay at last column (overwrite)
                 self.cursor_col = self.cols - 1;
-                // For wide characters at the edge, skip them
-                if width == 2 {
-                    return;
-                }
             }
         }
 
         // Write character
         if self.cursor_row < self.rows && self.cursor_col < self.cols {
-            // If this is overwriting a wide character placeholder, clear the wide char too
-            if self.buffer[self.cursor_row][self.cursor_col].placeholder && self.cursor_col > 0 {
-                self.buffer[self.cursor_row][self.cursor_col - 1] = Cell::default();
-            }
-
-            // If this is overwriting a wide character, clear its placeholder too
-            if self.buffer[self.cursor_row][self.cursor_col].wide && self.cursor_col + 1 < self.cols
-            {
-                self.buffer[self.cursor_row][self.cursor_col + 1] = Cell::default();
-            }
-
-            if width == 2 {
-                // Wide character: write to first cell and placeholder to second cell
-                self.buffer[self.cursor_row][self.cursor_col] = Cell {
-                    c,
-                    fg: self.current_fg,
-                    bg: self.current_bg,
-                    bold: self.bold,
-                    underline: self.underline,
-                    reverse: self.reverse,
-                    wide: true,
-                    placeholder: false,
-                };
-
-                // Write placeholder to next cell if there's space
-                if self.cursor_col + 1 < self.cols {
-                    self.buffer[self.cursor_row][self.cursor_col + 1] = Cell {
-                        c: ' ', // Placeholder character
-                        fg: self.current_fg,
-                        bg: self.current_bg,
-                        bold: self.bold,
-                        underline: self.underline,
-                        reverse: self.reverse,
-                        wide: false,
-                        placeholder: true,
-                    };
-                }
-
-                self.cursor_col += 2;
-            } else {
-                // Regular character: write normally
-                self.buffer[self.cursor_row][self.cursor_col] = Cell {
-                    c,
-                    fg: self.current_fg,
-                    bg: self.current_bg,
-                    bold: self.bold,
-                    underline: self.underline,
-                    reverse: self.reverse,
-                    wide: false,
-                    placeholder: false,
-                };
-                self.cursor_col += 1;
-            }
+            self.buffer[self.cursor_row][self.cursor_col] = Cell {
+                c,
+                fg: self.current_fg,
+                bg: self.current_bg,
+                bold: self.bold,
+                underline: self.underline,
+                reverse: self.reverse,
+            };
+            self.cursor_col += 1;
         }
     }
 
@@ -901,9 +826,9 @@ impl Perform for TerminalScreen {
             // Set private mode (DEC Private Mode Set - DECSET)
             for param in params.iter() {
                 match param[0] {
-                    1 => {
-                        // DECCKM - Application Cursor Keys (CSI ?1h)
-                        self.application_cursor_keys = true;
+                    7 => {
+                        // DECAWM - Auto-wrap mode enable (CSI ?7h)
+                        self.auto_wrap_mode = true;
                     }
                     9 | 1000 => {
                         // X10 Mouse Reporting (CSI ?9h or CSI ?1000h)
@@ -924,6 +849,10 @@ impl Perform for TerminalScreen {
                     1006 => {
                         // SGR Extended Mouse Mode (CSI ?1006h)
                         self.mouse_encoding = MouseEncoding::Sgr;
+                    }
+                    2004 => {
+                        // Bracketed Paste Mode (CSI ?2004h)
+                        self.bracketed_paste_mode = true;
                     }
                     1049 => {
                         // Save cursor and switch to alternate screen
@@ -946,9 +875,9 @@ impl Perform for TerminalScreen {
             // Reset private mode (DEC Private Mode Reset - DECRST)
             for param in params.iter() {
                 match param[0] {
-                    1 => {
-                        // DECCKM - Normal Cursor Keys (CSI ?1l)
-                        self.application_cursor_keys = false;
+                    7 => {
+                        // DECAWM - Auto-wrap mode disable (CSI ?7l)
+                        self.auto_wrap_mode = false;
                     }
                     9 | 1000 | 1002 | 1003 => {
                         // Disable mouse reporting (CSI ?9l, ?1000l, ?1002l, ?1003l)
@@ -961,6 +890,10 @@ impl Perform for TerminalScreen {
                     1006 => {
                         // Disable SGR Extended Mouse Mode (CSI ?1006l)
                         self.mouse_encoding = MouseEncoding::Default;
+                    }
+                    2004 => {
+                        // Disable Bracketed Paste Mode (CSI ?2004l)
+                        self.bracketed_paste_mode = false;
                     }
                     1049 => {
                         // Switch to normal screen and restore cursor
@@ -1009,14 +942,8 @@ impl Perform for TerminalScreen {
             'H' | 'f' => {
                 // Cursor Position (CUP) or Horizontal Vertical Position (HVP)
                 let mut iter = params.iter();
-                let row = iter
-                    .next()
-                    .map(|p| p[0].saturating_sub(1) as usize)
-                    .unwrap_or(0);
-                let col = iter
-                    .next()
-                    .map(|p| p[0].saturating_sub(1) as usize)
-                    .unwrap_or(0);
+                let row = iter.next().map(|p| p[0].saturating_sub(1) as usize).unwrap_or(0);
+                let col = iter.next().map(|p| p[0].saturating_sub(1) as usize).unwrap_or(0);
                 self.cursor_row = min(row, self.rows - 1);
                 self.cursor_col = min(col, self.cols - 1);
             }
@@ -1037,15 +964,12 @@ impl Perform for TerminalScreen {
             'r' => {
                 // Set Scrolling Region (DECSTBM)
                 let mut iter = params.iter();
-                let top = iter
-                    .next()
-                    .map(|p| p[0].saturating_sub(1) as usize)
-                    .unwrap_or(0);
-                let bottom = iter
-                    .next()
-                    .map(|p| p[0].saturating_sub(1) as usize)
-                    .unwrap_or(self.rows - 1);
-                self.scroll_region = Some((min(top, self.rows - 1), min(bottom, self.rows - 1)));
+                let top = iter.next().map(|p| p[0].saturating_sub(1) as usize).unwrap_or(0);
+                let bottom = iter.next().map(|p| p[0].saturating_sub(1) as usize).unwrap_or(self.rows - 1);
+                self.scroll_region = Some((
+                    min(top, self.rows - 1),
+                    min(bottom, self.rows - 1),
+                ));
             }
             's' => {
                 // Save Cursor Position (SCOSC)
@@ -1070,20 +994,12 @@ impl Perform for TerminalScreen {
             }
             'L' => {
                 // Insert Lines (IL)
-                let n = params
-                    .iter()
-                    .next()
-                    .map(|p| max(1, p[0] as usize))
-                    .unwrap_or(1);
+                let n = params.iter().next().map(|p| p[0] as usize).unwrap_or(1);
                 self.insert_lines(n);
             }
             'M' => {
                 // Delete Lines (DL)
-                let n = params
-                    .iter()
-                    .next()
-                    .map(|p| max(1, p[0] as usize))
-                    .unwrap_or(1);
+                let n = params.iter().next().map(|p| p[0] as usize).unwrap_or(1);
                 self.delete_lines(n);
             }
             '@' => {
@@ -1102,92 +1018,8 @@ impl Perform for TerminalScreen {
         }
     }
 
-    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
-        match byte {
-            b'7' => {
-                // DECSC - Save Cursor (ESC 7)
-                // Save cursor position and attributes
-                self.saved_cursor_state = Some((
-                    self.cursor_row,
-                    self.cursor_col,
-                    self.current_fg,
-                    self.current_bg,
-                    self.bold,
-                ));
-            }
-            b'8' => {
-                // DECRC - Restore Cursor (ESC 8)
-                // Restore cursor position and attributes
-                if let Some((row, col, fg, bg, bold)) = self.saved_cursor_state {
-                    self.cursor_row = min(row, self.rows - 1);
-                    self.cursor_col = min(col, self.cols - 1);
-                    self.current_fg = fg;
-                    self.current_bg = bg;
-                    self.bold = bold;
-                }
-            }
-            b'M' => {
-                // RI - Reverse Index (ESC M)
-                // Move cursor up one line, scroll down if at top of scroll region
-                let (top, _) = self.scroll_region.unwrap_or((0, self.rows - 1));
-
-                if self.cursor_row == top {
-                    // At top of scroll region, scroll down
-                    self.scroll_down(1);
-                } else if self.cursor_row > 0 {
-                    // Not at top, just move up
-                    self.cursor_row -= 1;
-                }
-            }
-            b'D' => {
-                // IND - Index (ESC D)
-                // Move cursor down one line, scroll up if at bottom of scroll region
-                let (_, bottom) = self.scroll_region.unwrap_or((0, self.rows - 1));
-
-                if self.cursor_row == bottom {
-                    // At bottom of scroll region, scroll up
-                    self.scroll_up(1);
-                } else if self.cursor_row < self.rows - 1 {
-                    // Not at bottom, just move down
-                    self.cursor_row += 1;
-                }
-            }
-            b'E' => {
-                // NEL - Next Line (ESC E)
-                // Move to first column of next line
-                self.cursor_col = 0;
-                let (_, bottom) = self.scroll_region.unwrap_or((0, self.rows - 1));
-
-                if self.cursor_row == bottom {
-                    // At bottom of scroll region, scroll up
-                    self.scroll_up(1);
-                } else if self.cursor_row < self.rows - 1 {
-                    // Not at bottom, just move down
-                    self.cursor_row += 1;
-                }
-            }
-            b'c' => {
-                // RIS - Reset to Initial State (ESC c)
-                // Full terminal reset
-                self.buffer = vec![vec![Cell::default(); self.cols]; self.rows];
-                self.scrollback.clear();
-                self.cursor_row = 0;
-                self.cursor_col = 0;
-                self.current_fg = None;
-                self.current_bg = None;
-                self.bold = false;
-                self.underline = false;
-                self.reverse = false;
-                self.scroll_region = None;
-                self.saved_cursor = None;
-                self.saved_cursor_state = None;
-                self.cursor_visible = true;
-                self.auto_wrap_mode = true;
-            }
-            _ => {
-                // Unknown ESC sequence - ignore
-            }
-        }
+    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {
+        // ESC sequences - not implemented yet (for compatibility)
     }
 }
 
@@ -1326,191 +1158,7 @@ mod tests {
         screen.process(b"\x1b[?25l");
         assert!(!screen.cursor_visible());
     }
-
-    #[test]
-    fn test_esc_decsc_decrc() {
-        let mut screen = TerminalScreen::new(80, 24);
-
-        // Move cursor and set attributes
-        screen.process(b"\x1b[10;20H"); // Move to (9, 19)
-        screen.process(b"\x1b[1m"); // Set bold
-        screen.process(b"\x1b[31m"); // Set red foreground
-        screen.process(b"\x1b[42m"); // Set green background
-
-        assert_eq!(screen.cursor_position(), (9, 19));
-        assert!(screen.bold);
-        assert_eq!(screen.current_fg, Some(AnsiColor::Indexed(1)));
-        assert_eq!(screen.current_bg, Some(AnsiColor::Indexed(2)));
-
-        // Save cursor (ESC 7)
-        screen.process(b"\x1b7");
-
-        // Move cursor and change attributes
-        screen.process(b"\x1b[5;10H"); // Move to (4, 9)
-        screen.process(b"\x1b[0m"); // Reset attributes
-
-        assert_eq!(screen.cursor_position(), (4, 9));
-        assert!(!screen.bold);
-        assert_eq!(screen.current_fg, None);
-        assert_eq!(screen.current_bg, None);
-
-        // Restore cursor (ESC 8)
-        screen.process(b"\x1b8");
-
-        // Should be back to saved position and attributes
-        assert_eq!(screen.cursor_position(), (9, 19));
-        assert!(screen.bold);
-        assert_eq!(screen.current_fg, Some(AnsiColor::Indexed(1)));
-        assert_eq!(screen.current_bg, Some(AnsiColor::Indexed(2)));
-    }
-
-    #[test]
-    fn test_esc_reverse_index() {
-        let mut screen = TerminalScreen::new(10, 5);
-
-        // Fill screen with text
-        for i in 0..5 {
-            screen.process(format!("Line {}\r\n", i).as_bytes());
-        }
-
-        // Move to middle line
-        screen.process(b"\x1b[3;1H");
-        assert_eq!(screen.cursor_position(), (2, 0));
-
-        // Reverse index (ESC M) - should move up one line
-        screen.process(b"\x1bM");
-        assert_eq!(screen.cursor_position(), (1, 0));
-
-        // Reverse index again
-        screen.process(b"\x1bM");
-        assert_eq!(screen.cursor_position(), (0, 0));
-
-        // Reverse index at top - should scroll down
-        screen.process(b"\x1bM");
-        assert_eq!(screen.cursor_position(), (0, 0)); // Stay at top
-                                                      // (scrolling behavior is tested by checking the buffer contents)
-    }
-
-    #[test]
-    fn test_esc_index() {
-        let mut screen = TerminalScreen::new(10, 5);
-
-        // Fill screen with text
-        for i in 0..5 {
-            screen.process(format!("Line {}\r\n", i).as_bytes());
-        }
-
-        // Move to second line
-        screen.process(b"\x1b[2;1H");
-        assert_eq!(screen.cursor_position(), (1, 0));
-
-        // Index (ESC D) - should move down one line
-        screen.process(b"\x1bD");
-        assert_eq!(screen.cursor_position(), (2, 0));
-
-        // Move to bottom line
-        screen.process(b"\x1b[5;1H");
-        assert_eq!(screen.cursor_position(), (4, 0));
-
-        // Index at bottom - should scroll up
-        screen.process(b"\x1bD");
-        assert_eq!(screen.cursor_position(), (4, 0)); // Stay at bottom
-    }
-
-    #[test]
-    fn test_esc_next_line() {
-        let mut screen = TerminalScreen::new(10, 5);
-
-        // Move to position
-        screen.process(b"\x1b[2;5H");
-        assert_eq!(screen.cursor_position(), (1, 4));
-
-        // Next line (ESC E) - should move to next line, column 0
-        screen.process(b"\x1bE");
-        assert_eq!(screen.cursor_position(), (2, 0));
-
-        // Next line again
-        screen.process(b"\x1bE");
-        assert_eq!(screen.cursor_position(), (3, 0));
-
-        // Move to bottom
-        screen.process(b"\x1b[5;10H");
-        assert_eq!(screen.cursor_position(), (4, 9));
-
-        // Next line at bottom - should scroll and stay at column 0
-        screen.process(b"\x1bE");
-        assert_eq!(screen.cursor_position(), (4, 0));
-    }
-
-    #[test]
-    fn test_esc_reset() {
-        let mut screen = TerminalScreen::new(80, 24);
-
-        // Set up screen with various state
-        screen.process(b"Some text\r\n");
-        screen.process(b"\x1b[10;20H"); // Move cursor
-        screen.process(b"\x1b[1;4;31;42m"); // Bold, underline, red fg, green bg
-        screen.process(b"\x1b[5;10r"); // Set scroll region
-        screen.process(b"\x1b[s"); // Save cursor
-        screen.process(b"\x1b[?25l"); // Hide cursor
-
-        assert_eq!(screen.cursor_position(), (9, 19));
-        assert!(screen.bold);
-        assert!(screen.underline);
-        assert!(!screen.cursor_visible);
-
-        // Reset (ESC c)
-        screen.process(b"\x1bc");
-
-        // Everything should be reset
-        assert_eq!(screen.cursor_position(), (0, 0));
-        assert!(!screen.bold);
-        assert!(!screen.underline);
-        assert!(!screen.reverse);
-        assert_eq!(screen.current_fg, None);
-        assert_eq!(screen.current_bg, None);
-        assert!(screen.cursor_visible);
-        assert_eq!(screen.scroll_region, None);
-        assert_eq!(screen.saved_cursor, None);
-        assert_eq!(screen.saved_cursor_state, None);
-
-        // Buffer should be cleared
-        let buffer = &screen.buffer;
-        for row in buffer.iter() {
-            for cell in row.iter() {
-                assert_eq!(cell.c, ' ');
-            }
-        }
-    }
-
-    #[test]
-    fn test_esc_sequences_with_scroll_region() {
-        let mut screen = TerminalScreen::new(10, 10);
-
-        // Fill with text
-        for i in 0..10 {
-            screen.process(format!("Line {}\r\n", i).as_bytes());
-        }
-
-        // Set scroll region to lines 3-7 (indices 2-6)
-        screen.process(b"\x1b[3;7r");
-
-        // Move to top of scroll region
-        screen.process(b"\x1b[3;1H");
-        assert_eq!(screen.cursor_position(), (2, 0));
-
-        // Reverse index at top of scroll region - should scroll down within region
-        screen.process(b"\x1bM");
-        assert_eq!(screen.cursor_position(), (2, 0));
-
-        // Move to bottom of scroll region
-        screen.process(b"\x1b[7;1H");
-        assert_eq!(screen.cursor_position(), (6, 0));
-
-        // Index at bottom of scroll region - should scroll up within region
-        screen.process(b"\x1bD");
-        assert_eq!(screen.cursor_position(), (6, 0));
-    }
+}
 
     #[test]
     fn test_insert_lines_basic() {
@@ -1552,6 +1200,38 @@ mod tests {
         assert_eq!(buffer[2][0].c, ' '); // New blank line
         assert_eq!(buffer[3][0].c, 'L'); // Old Line 1
         assert_eq!(buffer[4][0].c, 'L'); // Old Line 2
+    }
+
+    #[test]
+    fn test_insert_lines_with_scroll_region() {
+        let mut screen = TerminalScreen::new(10, 10);
+        // Write lines
+        for i in 0..10 {
+            screen.process(format!("Line {}\r\n", i).as_bytes());
+        }
+
+        // Set scroll region to lines 2-7 (CSI 2;7r)
+        screen.process(b"\x1b[2;7r");
+
+        // Move cursor to line 3 (within scroll region)
+        screen.process(b"\x1b[3;1H");
+
+        // Insert 1 line
+        screen.process(b"\x1b[L");
+
+        let buffer = &screen.buffer;
+        // Lines 0-1 should be unchanged (outside scroll region)
+        assert_eq!(buffer[0][0].c, 'L');
+        assert_eq!(buffer[1][0].c, 'L');
+        // Line 2 should now be blank
+        assert_eq!(buffer[2][0].c, ' ');
+        // Old line 2 should be at line 3
+        assert_eq!(buffer[3][0].c, 'L');
+        assert_eq!(buffer[3][5].c, '2');
+        // Lines 7-9 should be unchanged (outside scroll region)
+        assert_eq!(buffer[7][5].c, '7');
+        assert_eq!(buffer[8][5].c, '8');
+        assert_eq!(buffer[9][5].c, '9');
     }
 
     #[test]
@@ -1600,330 +1280,105 @@ mod tests {
         assert_eq!(buffer[3][0].c, ' '); // Blank line
         assert_eq!(buffer[4][0].c, ' '); // Blank line
     }
-}
-#[cfg(test)]
-mod test_il {
-    use crate::terminal::screen::TerminalScreen;
-}
-
-#[test]
-fn test_application_cursor_keys_default() {
-    let screen = TerminalScreen::new(80, 24);
-    assert!(!screen.application_cursor_keys());
-}
-
-#[test]
-fn test_application_cursor_keys_enable() {
-    let mut screen = TerminalScreen::new(80, 24);
-    // CSI ?1h - Enable application cursor keys (DECCKM)
-    screen.process(b"\x1b[?1h");
-    assert!(screen.application_cursor_keys());
-}
-
-#[test]
-fn test_application_cursor_keys_disable() {
-    let mut screen = TerminalScreen::new(80, 24);
-    // Enable first
-    screen.process(b"\x1b[?1h");
-    assert!(screen.application_cursor_keys());
-    // CSI ?1l - Disable application cursor keys
-    screen.process(b"\x1b[?1l");
-    assert!(!screen.application_cursor_keys());
-}
-
-#[test]
-fn test_application_cursor_keys_toggle() {
-    let mut screen = TerminalScreen::new(80, 24);
-    // Default is false (normal mode)
-    assert!(!screen.application_cursor_keys());
-    // Enable
-    screen.process(b"\x1b[?1h");
-    assert!(screen.application_cursor_keys());
-    // Disable
-    screen.process(b"\x1b[?1l");
-    assert!(!screen.application_cursor_keys());
-    // Enable again
-    screen.process(b"\x1b[?1h");
-    assert!(screen.application_cursor_keys());
-}
-
-#[test]
-fn test_wide_character_korean() {
-    let mut screen = TerminalScreen::new(10, 3);
-
-    // Write Korean character (한) which is a wide character
-    screen.process("한".as_bytes());
-
-    let buffer = &screen.buffer;
-    // First cell should contain the character and be marked as wide
-    assert_eq!(buffer[0][0].c, '한');
-    assert!(buffer[0][0].wide);
-    assert!(!buffer[0][0].placeholder);
-
-    // Second cell should be a placeholder
-    assert_eq!(buffer[0][1].c, ' ');
-    assert!(!buffer[0][1].wide);
-    assert!(buffer[0][1].placeholder);
-
-    // Cursor should have advanced by 2
-    assert_eq!(screen.cursor_position(), (0, 2));
-}
-
-#[test]
-fn test_wide_character_chinese() {
-    let mut screen = TerminalScreen::new(10, 3);
-
-    // Write Chinese character (中) which is a wide character
-    screen.process("中".as_bytes());
-
-    let buffer = &screen.buffer;
-    assert_eq!(buffer[0][0].c, '中');
-    assert!(buffer[0][0].wide);
-    assert!(buffer[0][1].placeholder);
-    assert_eq!(screen.cursor_position(), (0, 2));
-}
-
-#[test]
-fn test_wide_character_japanese() {
-    let mut screen = TerminalScreen::new(10, 3);
-
-    // Write Japanese character (日) which is a wide character
-    screen.process("日".as_bytes());
-
-    let buffer = &screen.buffer;
-    assert_eq!(buffer[0][0].c, '日');
-    assert!(buffer[0][0].wide);
-    assert!(buffer[0][1].placeholder);
-    assert_eq!(screen.cursor_position(), (0, 2));
-}
-
-#[test]
-fn test_mixed_ascii_and_wide() {
-    let mut screen = TerminalScreen::new(10, 3);
-
-    // Write mixed ASCII and Korean: "A한B"
-    screen.process("A한B".as_bytes());
-
-    let buffer = &screen.buffer;
-    // A at position 0
-    assert_eq!(buffer[0][0].c, 'A');
-    assert!(!buffer[0][0].wide);
-    assert!(!buffer[0][0].placeholder);
-
-    // 한 at positions 1-2
-    assert_eq!(buffer[0][1].c, '한');
-    assert!(buffer[0][1].wide);
-    assert!(!buffer[0][1].placeholder);
-    assert!(buffer[0][2].placeholder);
-
-    // B at position 3
-    assert_eq!(buffer[0][3].c, 'B');
-    assert!(!buffer[0][3].wide);
-    assert!(!buffer[0][3].placeholder);
-
-    assert_eq!(screen.cursor_position(), (0, 4));
-}
-
-#[test]
-fn test_wide_character_with_colors() {
-    let mut screen = TerminalScreen::new(10, 3);
-
-    // Set red foreground and write Korean character
-    screen.process(b"\x1b[31m");
-    screen.process("한".as_bytes());
-
-    let buffer = &screen.buffer;
-    // Check both cells have the same foreground color
-    assert_eq!(buffer[0][0].fg, Some(AnsiColor::Indexed(1)));
-    assert_eq!(buffer[0][1].fg, Some(AnsiColor::Indexed(1)));
-    assert!(buffer[0][0].wide);
-    assert!(buffer[0][1].placeholder);
-}
-
-#[test]
-fn test_wide_character_wrapping() {
-    let mut screen = TerminalScreen::new(5, 3);
-
-    // Write "ABC한" - the wide character should fit on the first line
-    // at positions 3-4 (exactly 2 columns available)
-    screen.process("ABC한".as_bytes());
-
-    let buffer = &screen.buffer;
-    // First line: "ABC한" (한 occupies positions 3-4)
-    assert_eq!(buffer[0][0].c, 'A');
-    assert_eq!(buffer[0][1].c, 'B');
-    assert_eq!(buffer[0][2].c, 'C');
-    assert_eq!(buffer[0][3].c, '한');
-    assert!(buffer[0][3].wide);
-    assert!(buffer[0][4].placeholder);
-
-    // Cursor should be at the end of the first line
-    assert_eq!(screen.cursor_position(), (0, 5));
-
-    // Now test actual wrapping: write "ABCD한" where 한 should wrap
-    let mut screen2 = TerminalScreen::new(5, 3);
-    screen2.process("ABCD한".as_bytes());
-
-    let buffer2 = &screen2.buffer;
-    // First line: "ABCD"
-    assert_eq!(buffer2[0][0].c, 'A');
-    assert_eq!(buffer2[0][1].c, 'B');
-    assert_eq!(buffer2[0][2].c, 'C');
-    assert_eq!(buffer2[0][3].c, 'D');
-
-    // Wide character should wrap to next line (only 1 column left)
-    assert_eq!(buffer2[1][0].c, '한');
-    assert!(buffer2[1][0].wide);
-    assert!(buffer2[1][1].placeholder);
-
-    assert_eq!(screen2.cursor_position(), (1, 2));
-}
-
-#[test]
-fn test_wide_character_at_edge() {
-    let mut screen = TerminalScreen::new(5, 3);
-
-    // Move to position 4 (last column)
-    screen.process(b"\x1b[1;5H");
-    assert_eq!(screen.cursor_position(), (0, 4));
-
-    // Try to write wide character - should wrap to next line
-    screen.process("한".as_bytes());
-
-    let buffer = &screen.buffer;
-    // Wide character should be on the next line
-    assert_eq!(buffer[1][0].c, '한');
-    assert!(buffer[1][0].wide);
-    assert!(buffer[1][1].placeholder);
-
-    assert_eq!(screen.cursor_position(), (1, 2));
-}
-
-#[test]
-fn test_overwrite_wide_character() {
-    let mut screen = TerminalScreen::new(10, 3);
-
-    // Write wide character
-    screen.process("한".as_bytes());
-    assert!(screen.buffer[0][0].wide);
-    assert!(screen.buffer[0][1].placeholder);
-
-    // Move cursor back to position 0
-    screen.process(b"\x1b[1;1H");
-
-    // Overwrite with regular character
-    screen.process(b"X");
-
-    let buffer = &screen.buffer;
-    // X should be at position 0
-    assert_eq!(buffer[0][0].c, 'X');
-    assert!(!buffer[0][0].wide);
-
-    // Placeholder should be cleared
-    assert_eq!(buffer[0][1].c, ' ');
-    assert!(!buffer[0][1].wide);
-    assert!(!buffer[0][1].placeholder);
-}
-
-#[test]
-fn test_overwrite_wide_character_placeholder() {
-    let mut screen = TerminalScreen::new(10, 3);
-
-    // Write wide character
-    screen.process("한".as_bytes());
-    assert!(screen.buffer[0][0].wide);
-    assert!(screen.buffer[0][1].placeholder);
-
-    // Move cursor to placeholder position
-    screen.process(b"\x1b[1;2H");
-
-    // Overwrite placeholder with regular character
-    screen.process(b"X");
-
-    let buffer = &screen.buffer;
-    // Wide character should be cleared
-    assert_eq!(buffer[0][0].c, ' ');
-    assert!(!buffer[0][0].wide);
-
-    // X should be at position 1
-    assert_eq!(buffer[0][1].c, 'X');
-    assert!(!buffer[0][1].wide);
-    assert!(!buffer[0][1].placeholder);
-}
-
-#[test]
-fn test_multiple_wide_characters() {
-    let mut screen = TerminalScreen::new(10, 3);
-
-    // Write multiple Korean characters: "한글"
-    screen.process("한글".as_bytes());
-
-    let buffer = &screen.buffer;
-    // First character at positions 0-1
-    assert_eq!(buffer[0][0].c, '한');
-    assert!(buffer[0][0].wide);
-    assert!(buffer[0][1].placeholder);
-
-    // Second character at positions 2-3
-    assert_eq!(buffer[0][2].c, '글');
-    assert!(buffer[0][2].wide);
-    assert!(buffer[0][3].placeholder);
-
-    assert_eq!(screen.cursor_position(), (0, 4));
-}
-
-#[test]
-fn test_wide_character_with_formatting() {
-    let mut screen = TerminalScreen::new(10, 3);
-
-    // Write bold, underlined Korean character
-    screen.process(b"\x1b[1;4m");
-    screen.process("한".as_bytes());
-
-    let buffer = &screen.buffer;
-    // Both cells should have the same formatting
-    assert!(buffer[0][0].bold);
-    assert!(buffer[0][0].underline);
-    assert!(buffer[0][1].bold);
-    assert!(buffer[0][1].underline);
-    assert!(buffer[0][0].wide);
-    assert!(buffer[0][1].placeholder);
-}
-
-#[test]
-fn test_emoji_wide_character() {
-    let mut screen = TerminalScreen::new(10, 3);
-
-    // Some emojis are wide characters
-    // Note: emoji width depends on unicode-width crate's classification
-    screen.process("👋".as_bytes());
-
-    // Check that cursor moved (exact behavior depends on emoji width)
-    let pos = screen.cursor_position();
-    assert!(pos.1 > 0);
-}
 
     #[test]
-    fn test_application_cursor_keys_mode_sequences() {
-        let mut screen = TerminalScreen::new(80, 24);
-        
-        // Test that mode changes are correctly applied via escape sequences
-        // Normal mode (default)
-        assert!(!screen.application_cursor_keys());
-        
-        // Enable application mode (like vim does)
-        screen.process(b"\x1b[?1h");
-        assert!(screen.application_cursor_keys());
-        
-        // Disable application mode (back to normal)
-        screen.process(b"\x1b[?1l");
-        assert!(!screen.application_cursor_keys());
-        
-        // Test multiple mode changes
-        for _ in 0..3 {
-            screen.process(b"\x1b[?1h");
-            assert!(screen.application_cursor_keys());
-            screen.process(b"\x1b[?1l");
-            assert!(!screen.application_cursor_keys());
+    fn test_delete_lines_with_scroll_region() {
+        let mut screen = TerminalScreen::new(10, 10);
+        // Write lines
+        for i in 0..10 {
+            screen.process(format!("Line {}\r\n", i).as_bytes());
         }
+
+        // Set scroll region to lines 2-7 (CSI 2;7r)
+        screen.process(b"\x1b[2;7r");
+
+        // Move cursor to line 3 (within scroll region)
+        screen.process(b"\x1b[3;1H");
+
+        // Delete 1 line
+        screen.process(b"\x1b[M");
+
+        let buffer = &screen.buffer;
+        // Lines 0-1 should be unchanged (outside scroll region)
+        assert_eq!(buffer[0][0].c, 'L');
+        assert_eq!(buffer[0][5].c, '0');
+        assert_eq!(buffer[1][0].c, 'L');
+        assert_eq!(buffer[1][5].c, '1');
+        // Line 2 should now have old line 3's content
+        assert_eq!(buffer[2][0].c, 'L');
+        assert_eq!(buffer[2][5].c, '3');
+        // Line 6 (last in scroll region) should be blank
+        assert_eq!(buffer[6][0].c, ' ');
+        // Lines 7-9 should be unchanged (outside scroll region)
+        assert_eq!(buffer[7][5].c, '7');
+        assert_eq!(buffer[8][5].c, '8');
+        assert_eq!(buffer[9][5].c, '9');
     }
+
+    #[test]
+    fn test_insert_lines_default_param() {
+        let mut screen = TerminalScreen::new(10, 3);
+        screen.process(b"AAA\r\nBBB\r\nCCC");
+
+        // Move to line 1
+        screen.process(b"\x1b[2;1H");
+
+        // Insert line with no parameter (should default to 1)
+        screen.process(b"\x1b[L");
+
+        let buffer = &screen.buffer;
+        assert_eq!(buffer[0][0].c, 'A');
+        assert_eq!(buffer[1][0].c, ' '); // Blank line inserted
+        assert_eq!(buffer[2][0].c, 'B'); // Old line 1 moved down
+    }
+
+    #[test]
+    fn test_delete_lines_default_param() {
+        let mut screen = TerminalScreen::new(10, 3);
+        screen.process(b"AAA\r\nBBB\r\nCCC");
+
+        // Move to line 1
+        screen.process(b"\x1b[2;1H");
+
+        // Delete line with no parameter (should default to 1)
+        screen.process(b"\x1b[M");
+
+        let buffer = &screen.buffer;
+        assert_eq!(buffer[0][0].c, 'A');
+        assert_eq!(buffer[1][0].c, 'C'); // Old line 2 moved up
+        assert_eq!(buffer[2][0].c, ' '); // Last line is blank
+    }
+
+    #[test]
+    fn test_insert_delete_outside_scroll_region() {
+        let mut screen = TerminalScreen::new(10, 10);
+        // Write lines
+        for i in 0..10 {
+            screen.process(format!("Line {}\r\n", i).as_bytes());
+        }
+
+        // Set scroll region to lines 3-6
+        screen.process(b"\x1b[3;6r");
+
+        // Move cursor to line 1 (outside scroll region)
+        screen.process(b"\x1b[1;1H");
+
+        // Try to insert line - should not work
+        screen.process(b"\x1b[L");
+
+        // Line 0 should be unchanged
+        let buffer = &screen.buffer;
+        assert_eq!(buffer[0][0].c, 'L');
+        assert_eq!(buffer[0][5].c, '0');
+
+        // Move cursor to line 8 (outside scroll region)
+        screen.process(b"\x1b[8;1H");
+
+        // Try to delete line - should not work
+        screen.process(b"\x1b[M");
+
+        // Line 7 should be unchanged
+        assert_eq!(buffer[7][0].c, 'L');
+        assert_eq!(buffer[7][5].c, '7');
+    }
+}

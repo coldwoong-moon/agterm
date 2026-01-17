@@ -5,8 +5,8 @@
 //! - Hardware acceleration (GPU when using wgpu backend)
 //! - Geometry caching between frames
 
-use iced::mouse;
 use iced::widget::canvas::{self, Cache, Frame, Geometry, Text};
+use iced::mouse;
 use iced::{Color, Font, Point, Rectangle, Renderer, Size, Theme};
 
 use crate::StyledSpan;
@@ -83,11 +83,9 @@ pub struct CursorState {
 
 /// Terminal rendering configuration
 pub mod config {
-    // Base configuration (font_size = 14.0)
-    pub const BASE_FONT_SIZE: f32 = 14.0;
-    pub const BASE_LINE_HEIGHT: f32 = 18.0;
-    pub const BASE_CHAR_WIDTH: f32 = 8.4;
-
+    pub const LINE_HEIGHT: f32 = 18.0;
+    pub const FONT_SIZE: f32 = 14.0;
+    pub const CHAR_WIDTH: f32 = 8.4;  // Approximate monospace char width
     pub const PADDING_LEFT: f32 = 8.0;
     pub const PADDING_TOP: f32 = 4.0;
     pub const SCROLL_SPEED: f32 = 3.0;
@@ -98,21 +96,6 @@ pub mod config {
     pub const STREAMING_COUNT_THRESHOLD: u8 = 3;
     /// Time without updates to exit streaming mode (ms)
     pub const STREAMING_EXIT_MS: u64 = 200;
-
-    /// Calculate line height based on font size
-    pub fn line_height(font_size: f32) -> f32 {
-        BASE_LINE_HEIGHT * (font_size / BASE_FONT_SIZE)
-    }
-
-    /// Calculate character width based on font size
-    pub fn char_width(font_size: f32) -> f32 {
-        BASE_CHAR_WIDTH * (font_size / BASE_FONT_SIZE)
-    }
-
-    // Legacy constants for backward compatibility
-    pub const LINE_HEIGHT: f32 = BASE_LINE_HEIGHT;
-    pub const FONT_SIZE: f32 = BASE_FONT_SIZE;
-    pub const CHAR_WIDTH: f32 = BASE_CHAR_WIDTH;
 }
 
 /// Canvas state for virtual scrolling
@@ -175,16 +158,16 @@ impl TerminalCanvasState {
     }
 
     /// Scroll to bottom
-    pub fn scroll_to_bottom(&mut self, total_lines: usize, font_size: f32) {
-        let content_height = total_lines as f32 * config::line_height(font_size);
+    pub fn scroll_to_bottom(&mut self, total_lines: usize) {
+        let content_height = total_lines as f32 * config::LINE_HEIGHT;
         let max_scroll = (content_height - self.viewport_height).max(0.0);
         self.scroll_offset = max_scroll;
         self.cache.clear();
     }
 
     /// Check if scrolled to bottom
-    pub fn is_at_bottom(&self, total_lines: usize, font_size: f32) -> bool {
-        let content_height = total_lines as f32 * config::line_height(font_size);
+    pub fn is_at_bottom(&self, total_lines: usize) -> bool {
+        let content_height = total_lines as f32 * config::LINE_HEIGHT;
         let max_scroll = (content_height - self.viewport_height).max(0.0);
         self.scroll_offset >= max_scroll - 1.0
     }
@@ -203,7 +186,6 @@ pub struct TerminalCanvas<'a> {
     pub default_color: Color,
     pub font: Font,
     pub cursor: Option<CursorState>,
-    pub font_size: f32,
 }
 
 impl<'a> TerminalCanvas<'a> {
@@ -219,7 +201,6 @@ impl<'a> TerminalCanvas<'a> {
             default_color,
             font,
             cursor: None,
-            font_size: config::BASE_FONT_SIZE,
         }
     }
 
@@ -229,20 +210,13 @@ impl<'a> TerminalCanvas<'a> {
         self
     }
 
-    /// Set font size for rendering
-    pub fn with_font_size(mut self, font_size: f32) -> Self {
-        self.font_size = font_size;
-        self
-    }
-
     fn content_height(&self) -> f32 {
-        self.lines.len() as f32 * config::line_height(self.font_size)
+        self.lines.len() as f32 * config::LINE_HEIGHT
     }
 
     fn visible_range(&self, scroll_offset: f32, viewport_height: f32) -> (usize, usize) {
-        let first = (scroll_offset / config::line_height(self.font_size)).floor() as usize;
-        let visible_count =
-            (viewport_height / config::line_height(self.font_size)).ceil() as usize + 2;
+        let first = (scroll_offset / config::LINE_HEIGHT).floor() as usize;
+        let visible_count = (viewport_height / config::LINE_HEIGHT).ceil() as usize + 2;
         let last = (first + visible_count).min(self.lines.len());
         (first, last)
     }
@@ -252,8 +226,8 @@ impl<'a> TerminalCanvas<'a> {
         let adjusted_x = (x - config::PADDING_LEFT).max(0.0);
         let adjusted_y = (y - config::PADDING_TOP + scroll_offset).max(0.0);
 
-        let col = (adjusted_x / config::char_width(self.font_size)) as usize;
-        let row = (adjusted_y / config::line_height(self.font_size)) as usize;
+        let col = (adjusted_x / config::CHAR_WIDTH) as usize;
+        let row = (adjusted_y / config::LINE_HEIGHT) as usize;
 
         // Clamp to valid ranges
         let row = row.min(self.lines.len().saturating_sub(1));
@@ -279,7 +253,7 @@ impl<'a> TerminalCanvas<'a> {
 
         let (start, end) = selection.normalized();
         let (first_visible, last_visible) = self.visible_range(state.scroll_offset, bounds.height);
-        let y_offset = -(state.scroll_offset % config::line_height(self.font_size));
+        let y_offset = -(state.scroll_offset % config::LINE_HEIGHT);
 
         // Selection color - semi-transparent blue
         let selection_color = Color::from_rgba(0.3, 0.5, 0.8, 0.3);
@@ -290,11 +264,9 @@ impl<'a> TerminalCanvas<'a> {
             }
 
             let visible_row = row - first_visible;
-            let y = config::PADDING_TOP
-                + y_offset
-                + (visible_row as f32 * config::line_height(self.font_size));
+            let y = config::PADDING_TOP + y_offset + (visible_row as f32 * config::LINE_HEIGHT);
 
-            if y + config::line_height(self.font_size) < 0.0 || y > bounds.height {
+            if y + config::LINE_HEIGHT < 0.0 || y > bounds.height {
                 continue;
             }
 
@@ -330,14 +302,12 @@ impl<'a> TerminalCanvas<'a> {
             };
 
             // Draw selection rectangle
-            let x_start =
-                config::PADDING_LEFT + (start_col as f32 * config::char_width(self.font_size));
-            let width = ((end_col - start_col + 1) as f32 * config::char_width(self.font_size))
-                .max(config::char_width(self.font_size));
+            let x_start = config::PADDING_LEFT + (start_col as f32 * config::CHAR_WIDTH);
+            let width = ((end_col - start_col + 1) as f32 * config::CHAR_WIDTH).max(config::CHAR_WIDTH);
 
             frame.fill_rectangle(
                 Point::new(x_start, y),
-                Size::new(width, config::line_height(self.font_size)),
+                Size::new(width, config::LINE_HEIGHT),
                 selection_color,
             );
         }
@@ -345,17 +315,16 @@ impl<'a> TerminalCanvas<'a> {
 
     fn draw_lines(&self, frame: &mut Frame, state: &TerminalCanvasState, bounds: Rectangle) {
         let (first, last) = self.visible_range(state.scroll_offset, bounds.height);
-        let y_offset = -(state.scroll_offset % config::line_height(self.font_size));
+        let y_offset = -(state.scroll_offset % config::LINE_HEIGHT);
 
         for (i, line_idx) in (first..last).enumerate() {
             if line_idx >= self.lines.len() {
                 break;
             }
 
-            let y =
-                config::PADDING_TOP + y_offset + (i as f32 * config::line_height(self.font_size));
+            let y = config::PADDING_TOP + y_offset + (i as f32 * config::LINE_HEIGHT);
 
-            if y + config::line_height(self.font_size) < 0.0 || y > bounds.height {
+            if y + config::LINE_HEIGHT < 0.0 || y > bounds.height {
                 continue;
             }
 
@@ -391,13 +360,7 @@ impl<'a> TerminalCanvas<'a> {
             } else {
                 // Different color - draw accumulated segment and start new one
                 if !merged_text.is_empty() {
-                    self.draw_text_segment(
-                        frame,
-                        &merged_text,
-                        segment_start_x,
-                        y.round(),
-                        current,
-                    );
+                    self.draw_text_segment(frame, &merged_text, segment_start_x, y.round(), current);
                 }
                 merged_text = span.text.clone();
                 current_color = span.color;
@@ -405,7 +368,7 @@ impl<'a> TerminalCanvas<'a> {
             }
 
             // Advance x position
-            x += span.text.chars().count() as f32 * config::char_width(self.font_size);
+            x += span.text.chars().count() as f32 * config::CHAR_WIDTH;
         }
 
         // Draw final segment
@@ -420,7 +383,7 @@ impl<'a> TerminalCanvas<'a> {
             content: text.to_string(),
             position: Point::new(x, y),
             color,
-            size: self.font_size.into(),
+            size: config::FONT_SIZE.into(),
             font: self.font,
             horizontal_alignment: iced::alignment::Horizontal::Left,
             vertical_alignment: iced::alignment::Vertical::Top,
@@ -443,11 +406,9 @@ impl<'a> TerminalCanvas<'a> {
 
         // Calculate cursor screen position
         let visible_row = cursor.row - first_visible;
-        let y_offset = -(state.scroll_offset % config::line_height(self.font_size));
-        let x = config::PADDING_LEFT + (cursor.col as f32 * config::char_width(self.font_size));
-        let y = config::PADDING_TOP
-            + y_offset
-            + (visible_row as f32 * config::line_height(self.font_size));
+        let y_offset = -(state.scroll_offset % config::LINE_HEIGHT);
+        let x = config::PADDING_LEFT + (cursor.col as f32 * config::CHAR_WIDTH);
+        let y = config::PADDING_TOP + y_offset + (visible_row as f32 * config::LINE_HEIGHT);
 
         let cursor_color = Color::from_rgba(0.9, 0.9, 0.9, 0.9);
 
@@ -456,18 +417,15 @@ impl<'a> TerminalCanvas<'a> {
                 // Semi-transparent block cursor
                 frame.fill_rectangle(
                     Point::new(x, y),
-                    Size::new(
-                        config::char_width(self.font_size),
-                        config::line_height(self.font_size),
-                    ),
+                    Size::new(config::CHAR_WIDTH, config::LINE_HEIGHT),
                     Color::from_rgba(0.9, 0.9, 0.9, 0.7),
                 );
             }
             CursorStyle::Underline => {
                 // Underline cursor (2px height)
                 frame.fill_rectangle(
-                    Point::new(x, y + config::line_height(self.font_size) - 2.0),
-                    Size::new(config::char_width(self.font_size), 2.0),
+                    Point::new(x, y + config::LINE_HEIGHT - 2.0),
+                    Size::new(config::CHAR_WIDTH, 2.0),
                     cursor_color,
                 );
             }
@@ -475,7 +433,7 @@ impl<'a> TerminalCanvas<'a> {
                 // Bar/I-beam cursor (2px width)
                 frame.fill_rectangle(
                     Point::new(x, y),
-                    Size::new(2.0, config::line_height(self.font_size)),
+                    Size::new(2.0, config::LINE_HEIGHT),
                     cursor_color,
                 );
             }
@@ -536,8 +494,7 @@ where
         match event {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(position) = cursor.position() {
-                    let (row, col) =
-                        self.pixel_to_cell(position.x, position.y, state.scroll_offset);
+                    let (row, col) = self.pixel_to_cell(position.x, position.y, state.scroll_offset);
                     state.selection = Some(Selection::new(row, col));
                     state.is_dragging = true;
                     state.cache.clear();
@@ -548,8 +505,7 @@ where
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 if state.is_dragging {
                     if let Some(position) = cursor.position() {
-                        let (row, col) =
-                            self.pixel_to_cell(position.x, position.y, state.scroll_offset);
+                        let (row, col) = self.pixel_to_cell(position.x, position.y, state.scroll_offset);
                         if let Some(selection) = &mut state.selection {
                             selection.end = (row, col);
                             state.cache.clear();
@@ -576,7 +532,7 @@ where
             canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                 let scroll_amount = match delta {
                     mouse::ScrollDelta::Lines { y, .. } => {
-                        -y * config::line_height(self.font_size) * config::SCROLL_SPEED
+                        -y * config::LINE_HEIGHT * config::SCROLL_SPEED
                     }
                     mouse::ScrollDelta::Pixels { y, .. } => -y,
                 };
@@ -611,7 +567,11 @@ where
             let mut frame = Frame::new(renderer, bounds.size());
 
             // Draw background
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), Color::TRANSPARENT);
+            frame.fill_rectangle(
+                Point::ORIGIN,
+                bounds.size(),
+                Color::TRANSPARENT,
+            );
 
             // Draw selection highlight
             self.draw_selection(&mut frame, state, bounds);
@@ -628,7 +588,11 @@ where
         // Normal mode: use geometry cache for text
         let text_geometry = state.cache.draw(renderer, bounds.size(), |frame| {
             // Draw background
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), Color::TRANSPARENT);
+            frame.fill_rectangle(
+                Point::ORIGIN,
+                bounds.size(),
+                Color::TRANSPARENT,
+            );
 
             // Draw selection highlight
             self.draw_selection(frame, state, bounds);

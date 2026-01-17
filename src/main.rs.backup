@@ -32,6 +32,7 @@ const D2CODING_FONT: &[u8] = include_bytes!("../assets/fonts/D2Coding.ttf");
 /// Monospace font with Korean/CJK support
 const MONO_FONT: Font = Font::with_name("D2Coding");
 
+
 // ============================================================================
 // Warp-inspired Dark Theme Colors
 // ============================================================================
@@ -125,6 +126,8 @@ mod theme {
         }
     }
 
+
+
     /// Container style for primary background
     pub fn primary_background_style(_theme: &iced::Theme) -> container::Style {
         container::Style {
@@ -132,6 +135,7 @@ mod theme {
             ..Default::default()
         }
     }
+
 }
 
 // ============================================================================
@@ -155,11 +159,6 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
     let mut current_bold = false;
 
     for cell in cells {
-        // Skip placeholder cells (second cell of wide characters)
-        if cell.placeholder {
-            continue;
-        }
-
         let color = if let Some(fg) = &cell.fg {
             Some(fg.to_color())
         } else {
@@ -193,6 +192,10 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
 
     spans
 }
+
+
+
+
 
 /// Global log buffer for debug panel (initialized once at startup)
 static LOG_BUFFER: std::sync::OnceLock<LogBuffer> = std::sync::OnceLock::new();
@@ -301,11 +304,11 @@ struct TerminalTab {
     #[allow(dead_code)]
     id: usize,
     session_id: Option<uuid::Uuid>,
-    raw_input: String, // Input buffer for Raw mode (IME support)
+    raw_input: String,           // Input buffer for Raw mode (IME support)
     #[allow(dead_code)]
     input: String,
     #[allow(dead_code)]
-    cwd: String, // Current working directory display
+    cwd: String,                   // Current working directory display
     #[allow(dead_code)]
     error_message: Option<String>, // PTY error message if creation failed
     // Command history
@@ -314,7 +317,7 @@ struct TerminalTab {
     #[allow(dead_code)]
     history_index: Option<usize>, // Current position in history (None = not browsing)
     #[allow(dead_code)]
-    history_temp_input: String, // Temporary storage for current input when browsing
+    history_temp_input: String,   // Temporary storage for current input when browsing
     // Terminal mode
     mode: TerminalMode,
     // ANSI parsing cache for Raw mode
@@ -476,6 +479,7 @@ impl AgTerm {
                 text_input::focus(raw_input_id())
             }
 
+
             Message::CloseCurrentTab => {
                 if self.tabs.len() > 1 {
                     if let Some(tab) = self.tabs.get(self.active_tab) {
@@ -588,9 +592,7 @@ impl AgTerm {
                             return iced::clipboard::read().map(Message::ClipboardContent)
                         }
                         Key::Character("d") => return self.update(Message::ToggleDebugPanel), // Toggle debug panel
-                        Key::Character("+") | Key::Character("=") => {
-                            return self.update(Message::IncreaseFontSize)
-                        }
+                        Key::Character("+") | Key::Character("=") => return self.update(Message::IncreaseFontSize),
                         Key::Character("-") => return self.update(Message::DecreaseFontSize),
                         Key::Character("0") => return self.update(Message::ResetFontSize),
                         _ => {}
@@ -605,29 +607,13 @@ impl AgTerm {
                 // Raw mode: send special keys directly to PTY
                 // Regular characters are handled via RawInputChanged (for IME support)
                 if !modifiers.command() {
-                    // Check application cursor keys mode for arrow keys
-                    let app_cursor_keys = self
-                        .tabs
-                        .get(self.active_tab)
-                        .map(|tab| tab.screen.application_cursor_keys())
-                        .unwrap_or(false);
-
                     let input = match key.as_ref() {
                         // Special/named keys only - NOT characters (handled by text_input for IME)
                         Key::Named(keyboard::key::Named::Escape) => Some("\x1b".to_string()),
-                        // Arrow keys: switch between normal (\x1b[) and application (\x1bO) mode
-                        Key::Named(keyboard::key::Named::ArrowUp) => {
-                            Some(if app_cursor_keys { "\x1bOA" } else { "\x1b[A" }.to_string())
-                        }
-                        Key::Named(keyboard::key::Named::ArrowDown) => {
-                            Some(if app_cursor_keys { "\x1bOB" } else { "\x1b[B" }.to_string())
-                        }
-                        Key::Named(keyboard::key::Named::ArrowRight) => {
-                            Some(if app_cursor_keys { "\x1bOC" } else { "\x1b[C" }.to_string())
-                        }
-                        Key::Named(keyboard::key::Named::ArrowLeft) => {
-                            Some(if app_cursor_keys { "\x1bOD" } else { "\x1b[D" }.to_string())
-                        }
+                        Key::Named(keyboard::key::Named::ArrowUp) => Some("\x1b[A".to_string()),
+                        Key::Named(keyboard::key::Named::ArrowDown) => Some("\x1b[B".to_string()),
+                        Key::Named(keyboard::key::Named::ArrowRight) => Some("\x1b[C".to_string()),
+                        Key::Named(keyboard::key::Named::ArrowLeft) => Some("\x1b[D".to_string()),
                         Key::Named(keyboard::key::Named::Home) => Some("\x1b[H".to_string()),
                         Key::Named(keyboard::key::Named::End) => Some("\x1b[F".to_string()),
                         Key::Named(keyboard::key::Named::PageUp) => Some("\x1b[5~".to_string()),
@@ -755,17 +741,15 @@ impl AgTerm {
 
                                 // Convert screen buffer to parsed line cache for rendering
                                 let all_lines = tab.screen.get_all_lines();
-                                tab.parsed_line_cache = all_lines
-                                    .iter()
-                                    .map(|cells| cells_to_styled_spans(cells))
-                                    .collect();
+                                tab.parsed_line_cache = all_lines.iter().map(|cells| {
+                                    cells_to_styled_spans(cells)
+                                }).collect();
 
                                 // Increment content version for canvas cache invalidation
                                 tab.content_version += 1;
 
                                 // Auto-scroll to bottom
-                                tab.canvas_state
-                                    .scroll_to_bottom(tab.parsed_line_cache.len(), self.font_size);
+                                tab.canvas_state.scroll_to_bottom(tab.parsed_line_cache.len());
                             }
                         }
                     }
@@ -835,90 +819,57 @@ impl AgTerm {
     fn view_tab_bar(&self) -> Element<Message> {
         let mut tab_elements = Vec::with_capacity(self.tabs.len());
         for (i, _) in self.tabs.iter().enumerate() {
-            let is_active = i == self.active_tab;
-            let label = format!("Terminal {}", i + 1);
-            let can_close = self.tabs.len() > 1;
+                let is_active = i == self.active_tab;
+                let label = format!("Terminal {}", i + 1);
+                let can_close = self.tabs.len() > 1;
 
-            let icon_color = if is_active {
-                theme::TAB_ACTIVE
-            } else {
-                theme::TEXT_MUTED
-            };
-            let label_color = if is_active {
-                theme::TEXT_PRIMARY
-            } else {
-                theme::TEXT_SECONDARY
-            };
-
-            // Tab label button (clickable to select)
-            let tab_label_button = button(
-                row![
-                    text("▶").size(11).color(icon_color),
-                    Space::with_width(8),
-                    text(label.clone()).size(13).color(label_color)
-                ]
-                .align_y(Alignment::Center),
-            )
-            .padding([8, 12])
-            .style(move |_, status| {
-                let bg = match status {
-                    button::Status::Hovered => {
-                        if is_active {
-                            theme::BG_SECONDARY
-                        } else {
-                            theme::BG_BLOCK_HOVER
-                        }
-                    }
-                    _ => {
-                        if is_active {
-                            theme::BG_SECONDARY
-                        } else {
-                            theme::BG_PRIMARY
-                        }
-                    }
+                let icon_color = if is_active {
+                    theme::TAB_ACTIVE
+                } else {
+                    theme::TEXT_MUTED
                 };
-                button::Style {
-                    background: Some(bg.into()),
-                    text_color: theme::TEXT_PRIMARY,
-                    border: Border {
-                        color: Color::TRANSPARENT,
-                        width: 0.0,
-                        radius: iced::border::Radius {
-                            top_left: 6.0,
-                            top_right: 0.0,
-                            bottom_left: 0.0,
-                            bottom_right: 0.0,
-                        },
-                    },
-                    ..Default::default()
-                }
-            })
-            .on_press(Message::SelectTab(i));
+                let label_color = if is_active {
+                    theme::TEXT_PRIMARY
+                } else {
+                    theme::TEXT_SECONDARY
+                };
 
-            // Close button (separate, clickable to close)
-            let close_button = button(text("×").size(14))
-                .padding([8, 10])
+                // Tab label button (clickable to select)
+                let tab_label_button = button(
+                    row![
+                        text("▶").size(11).color(icon_color),
+                        Space::with_width(8),
+                        text(label.clone()).size(13).color(label_color)
+                    ]
+                    .align_y(Alignment::Center),
+                )
+                .padding([8, 12])
                 .style(move |_, status| {
-                    let (bg, text_color) = match status {
-                        button::Status::Hovered => (theme::BG_BLOCK_HOVER, theme::ACCENT_RED),
+                    let bg = match status {
+                        button::Status::Hovered => {
+                            if is_active {
+                                theme::BG_SECONDARY
+                            } else {
+                                theme::BG_BLOCK_HOVER
+                            }
+                        }
                         _ => {
-                            let bg = if is_active {
+                            if is_active {
                                 theme::BG_SECONDARY
                             } else {
                                 theme::BG_PRIMARY
-                            };
-                            (bg, theme::TEXT_MUTED)
+                            }
                         }
                     };
                     button::Style {
                         background: Some(bg.into()),
-                        text_color,
+                        text_color: theme::TEXT_PRIMARY,
                         border: Border {
                             color: Color::TRANSPARENT,
                             width: 0.0,
                             radius: iced::border::Radius {
-                                top_left: 0.0,
-                                top_right: 6.0,
+                                top_left: 6.0,
+                                top_right: 0.0,
                                 bottom_left: 0.0,
                                 bottom_right: 0.0,
                             },
@@ -926,56 +877,89 @@ impl AgTerm {
                         ..Default::default()
                     }
                 })
-                .on_press_maybe(if can_close {
-                    Some(Message::CloseTab(i))
-                } else {
-                    None
-                });
+                .on_press(Message::SelectTab(i));
 
-            // Tab content with accent line
-            let tab_content = column![
-                row![tab_label_button, close_button],
-                // Active tab bottom accent line
-                container(Space::with_height(0))
-                    .width(Length::Fill)
-                    .height(2)
-                    .style(move |_| container::Style {
-                        background: if is_active {
-                            Some(theme::TAB_ACTIVE.into())
-                        } else {
-                            None
-                        },
-                        ..Default::default()
-                    })
-            ];
-
-            tab_elements.push(container(tab_content).into());
-        }
-
-        row(tab_elements)
-            .spacing(2)
-            .push(Space::with_width(8))
-            .push(
-                button(text("+").size(16).color(theme::TEXT_SECONDARY))
-                    .padding([8, 14])
-                    .style(|_, status| {
-                        let bg = match status {
-                            button::Status::Hovered => theme::BG_BLOCK_HOVER,
-                            _ => theme::BG_BLOCK,
+                // Close button (separate, clickable to close)
+                let close_button = button(text("×").size(14))
+                    .padding([8, 10])
+                    .style(move |_, status| {
+                        let (bg, text_color) = match status {
+                            button::Status::Hovered => (theme::BG_BLOCK_HOVER, theme::ACCENT_RED),
+                            _ => {
+                                let bg = if is_active {
+                                    theme::BG_SECONDARY
+                                } else {
+                                    theme::BG_PRIMARY
+                                };
+                                (bg, theme::TEXT_MUTED)
+                            }
                         };
                         button::Style {
                             background: Some(bg.into()),
-                            text_color: theme::TEXT_SECONDARY,
+                            text_color,
                             border: Border {
-                                radius: 6.0.into(),
-                                ..Default::default()
+                                color: Color::TRANSPARENT,
+                                width: 0.0,
+                                radius: iced::border::Radius {
+                                    top_left: 0.0,
+                                    top_right: 6.0,
+                                    bottom_left: 0.0,
+                                    bottom_right: 0.0,
+                                },
                             },
                             ..Default::default()
                         }
                     })
-                    .on_press(Message::NewTab),
-            )
-            .into()
+                    .on_press_maybe(if can_close {
+                        Some(Message::CloseTab(i))
+                    } else {
+                        None
+                    });
+
+                // Tab content with accent line
+                let tab_content = column![
+                    row![tab_label_button, close_button],
+                    // Active tab bottom accent line
+                    container(Space::with_height(0))
+                        .width(Length::Fill)
+                        .height(2)
+                        .style(move |_| container::Style {
+                            background: if is_active {
+                                Some(theme::TAB_ACTIVE.into())
+                            } else {
+                                None
+                            },
+                            ..Default::default()
+                        })
+                ];
+
+                tab_elements.push(container(tab_content).into());
+        }
+
+        row(tab_elements)
+        .spacing(2)
+        .push(Space::with_width(8))
+        .push(
+            button(text("+").size(16).color(theme::TEXT_SECONDARY))
+                .padding([8, 14])
+                .style(|_, status| {
+                    let bg = match status {
+                        button::Status::Hovered => theme::BG_BLOCK_HOVER,
+                        _ => theme::BG_BLOCK,
+                    };
+                    button::Style {
+                        background: Some(bg.into()),
+                        text_color: theme::TEXT_SECONDARY,
+                        border: Border {
+                            radius: 6.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }
+                })
+                .on_press(Message::NewTab),
+        )
+        .into()
     }
 
     /// Render the terminal content area (output + input + status bar)
@@ -1099,6 +1083,7 @@ impl AgTerm {
             .height(Length::Fill)
             .into()
     }
+
 
     fn subscription(&self) -> Subscription<Message> {
         // Dynamic tick interval based on PTY activity
@@ -1323,4 +1308,5 @@ mod tests {
 
         let _ = pty_manager.close_session(&session_id);
     }
+
 }
