@@ -13,6 +13,10 @@ categories = ["command-line-interface", "development-tools", "gui"]
 name = "agterm"
 path = "src/main.rs"
 
+[lib]
+name = "agterm"
+path = "src/lib.rs"
+
 [dependencies]
 # GUI Framework (tiny-skia CPU renderer - faster for many small text widgets)
 iced = { version = "0.13", default-features = false, features = ["tokio", "advanced", "tiny-skia", "canvas"] }

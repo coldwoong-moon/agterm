@@ -17,7 +17,7 @@ mod terminal_canvas;
 
 use debug::{DebugPanel, DebugPanelMessage};
 use logging::{LogBuffer, LoggingConfig};
-use terminal_canvas::{TerminalCanvas, TerminalCanvasState};
+use terminal_canvas::{CursorState, CursorStyle, TerminalCanvas, TerminalCanvasState};
 
 use terminal::pty::PtyManager;
 use terminal::screen::{Cell, TerminalScreen};
@@ -32,8 +32,6 @@ const D2CODING_FONT: &[u8] = include_bytes!("../assets/fonts/D2Coding.ttf");
 /// Monospace font with Korean/CJK support
 const MONO_FONT: Font = Font::with_name("D2Coding");
 
-/// Maximum number of command blocks per tab
-const MAX_BLOCKS_PER_TAB: usize = 500;
 
 // ============================================================================
 // Warp-inspired Dark Theme Colors
@@ -45,8 +43,10 @@ mod theme {
     // Background colors
     pub const BG_PRIMARY: Color = Color::from_rgb(0.09, 0.09, 0.11); // #17171c
     pub const BG_SECONDARY: Color = Color::from_rgb(0.12, 0.12, 0.15); // #1e1e26
+    #[allow(dead_code)]
     pub const BG_BLOCK: Color = Color::from_rgb(0.14, 0.14, 0.18); // #242430
     pub const BG_BLOCK_HOVER: Color = Color::from_rgb(0.18, 0.18, 0.22); // #2d2d38
+    #[allow(dead_code)]
     pub const BG_INPUT: Color = Color::from_rgb(0.11, 0.11, 0.14); // #1c1c24
 
     // Text colors
@@ -55,88 +55,63 @@ mod theme {
     pub const TEXT_MUTED: Color = Color::from_rgb(0.45, 0.47, 0.52); // #737885
 
     // Accent colors
+    #[allow(dead_code)]
     pub const ACCENT_BLUE: Color = Color::from_rgb(0.36, 0.54, 0.98); // #5c8afa
     pub const ACCENT_GREEN: Color = Color::from_rgb(0.35, 0.78, 0.55); // #59c78c
+    #[allow(dead_code)]
     pub const ACCENT_YELLOW: Color = Color::from_rgb(0.95, 0.77, 0.36); // #f2c55c
+    #[allow(dead_code)]
     pub const ACCENT_RED: Color = Color::from_rgb(0.92, 0.39, 0.45); // #eb6473
 
     // UI elements
     pub const BORDER: Color = Color::from_rgb(0.22, 0.22, 0.28); // #383847
     pub const TAB_ACTIVE: Color = Color::from_rgb(0.36, 0.54, 0.98); // #5c8afa
 
-    // Prompt symbol
+    // Prompt symbol (may be used in future features)
+    #[allow(dead_code)]
     pub const PROMPT: Color = Color::from_rgb(0.55, 0.36, 0.98); // #8c5cfa (purple)
 
-    // ANSI colors (standard 16-color palette)
+    // ANSI colors (standard 16-color palette) - May be used for ANSI parsing in future
+    #[allow(dead_code)]
     pub const ANSI_BLACK: Color = Color::from_rgb(0.0, 0.0, 0.0);
+    #[allow(dead_code)]
     pub const ANSI_RED: Color = Color::from_rgb(0.8, 0.2, 0.2);
+    #[allow(dead_code)]
     pub const ANSI_GREEN: Color = Color::from_rgb(0.2, 0.8, 0.2);
+    #[allow(dead_code)]
     pub const ANSI_YELLOW: Color = Color::from_rgb(0.8, 0.8, 0.2);
+    #[allow(dead_code)]
     pub const ANSI_BLUE: Color = Color::from_rgb(0.2, 0.2, 0.8);
+    #[allow(dead_code)]
     pub const ANSI_MAGENTA: Color = Color::from_rgb(0.8, 0.2, 0.8);
+    #[allow(dead_code)]
     pub const ANSI_CYAN: Color = Color::from_rgb(0.2, 0.8, 0.8);
+    #[allow(dead_code)]
     pub const ANSI_WHITE: Color = Color::from_rgb(0.8, 0.8, 0.8);
     // Bright variants
+    #[allow(dead_code)]
     pub const ANSI_BRIGHT_BLACK: Color = Color::from_rgb(0.5, 0.5, 0.5);
+    #[allow(dead_code)]
     pub const ANSI_BRIGHT_RED: Color = Color::from_rgb(1.0, 0.3, 0.3);
+    #[allow(dead_code)]
     pub const ANSI_BRIGHT_GREEN: Color = Color::from_rgb(0.3, 1.0, 0.3);
+    #[allow(dead_code)]
     pub const ANSI_BRIGHT_YELLOW: Color = Color::from_rgb(1.0, 1.0, 0.3);
+    #[allow(dead_code)]
     pub const ANSI_BRIGHT_BLUE: Color = Color::from_rgb(0.3, 0.3, 1.0);
+    #[allow(dead_code)]
     pub const ANSI_BRIGHT_MAGENTA: Color = Color::from_rgb(1.0, 0.3, 1.0);
+    #[allow(dead_code)]
     pub const ANSI_BRIGHT_CYAN: Color = Color::from_rgb(0.3, 1.0, 1.0);
+    #[allow(dead_code)]
     pub const ANSI_BRIGHT_WHITE: Color = Color::from_rgb(1.0, 1.0, 1.0);
 
     // ============================================================================
     // Reusable Style Functions
     // ============================================================================
 
-    use iced::widget::{button, container, scrollable, text_input};
+    use iced::widget::container;
     use iced::Border;
-
-    /// Common input field style for text inputs
-    pub fn input_style(_theme: &iced::Theme, _status: text_input::Status) -> text_input::Style {
-        text_input::Style {
-            background: BG_INPUT.into(),
-            border: Border {
-                color: BORDER,
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            icon: TEXT_MUTED,
-            placeholder: TEXT_MUTED,
-            value: TEXT_PRIMARY,
-            selection: ACCENT_BLUE,
-        }
-    }
-
-    /// Raw mode input field style (slightly smaller radius)
-    pub fn raw_input_style(_theme: &iced::Theme, _status: text_input::Status) -> text_input::Style {
-        text_input::Style {
-            background: BG_INPUT.into(),
-            border: Border {
-                color: BORDER,
-                width: 1.0,
-                radius: 6.0.into(),
-            },
-            icon: TEXT_MUTED,
-            placeholder: TEXT_MUTED,
-            value: TEXT_PRIMARY,
-            selection: ACCENT_BLUE,
-        }
-    }
-
-    /// Common container style for input rows and status bars
-    pub fn section_container_style(_theme: &iced::Theme) -> container::Style {
-        container::Style {
-            background: Some(BG_SECONDARY.into()),
-            border: Border {
-                color: BORDER,
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        }
-    }
 
     /// Container style for status bar
     pub fn status_bar_style(_theme: &iced::Theme) -> container::Style {
@@ -151,26 +126,7 @@ mod theme {
         }
     }
 
-    /// Container style for command blocks
-    pub fn block_container_style(_theme: &iced::Theme) -> container::Style {
-        container::Style {
-            background: Some(BG_BLOCK.into()),
-            border: Border {
-                color: BORDER,
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            ..Default::default()
-        }
-    }
 
-    /// Container style for terminal output area
-    pub fn terminal_output_style(_theme: &iced::Theme) -> container::Style {
-        container::Style {
-            background: Some(BG_BLOCK.into()),
-            ..Default::default()
-        }
-    }
 
     /// Container style for primary background
     pub fn primary_background_style(_theme: &iced::Theme) -> container::Style {
@@ -180,52 +136,6 @@ mod theme {
         }
     }
 
-    /// Common scrollable style with custom scrollbar
-    pub fn scrollable_style(
-        _theme: &iced::Theme,
-        _status: scrollable::Status,
-    ) -> scrollable::Style {
-        scrollable::Style {
-            container: container::Style::default(),
-            vertical_rail: scrollable::Rail {
-                background: Some(BG_PRIMARY.into()),
-                border: Border::default(),
-                scroller: scrollable::Scroller {
-                    color: BG_BLOCK_HOVER,
-                    border: Border {
-                        radius: 4.0.into(),
-                        ..Default::default()
-                    },
-                },
-            },
-            horizontal_rail: scrollable::Rail {
-                background: Some(BG_PRIMARY.into()),
-                border: Border::default(),
-                scroller: scrollable::Scroller {
-                    color: BG_BLOCK_HOVER,
-                    border: Border {
-                        radius: 4.0.into(),
-                        ..Default::default()
-                    },
-                },
-            },
-            gap: None,
-        }
-    }
-
-    /// Copy button style
-    pub fn copy_button_style(_theme: &iced::Theme, _status: button::Status) -> button::Style {
-        button::Style {
-            background: Some(BG_SECONDARY.into()),
-            text_color: TEXT_MUTED,
-            border: Border {
-                color: BORDER,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        }
-    }
 }
 
 // ============================================================================
@@ -283,257 +193,9 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
     spans
 }
 
-/// Parse ANSI-colored text into styled spans
-fn parse_ansi_text(input: &str) -> Vec<StyledSpan> {
-    let mut spans = Vec::new();
-    let mut current_text = String::new();
-    let mut current_color: Option<Color> = None;
-    let mut bold = false;
-    let mut chars = input.chars().peekable();
 
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Save current text if any
-            if !current_text.is_empty() {
-                spans.push(StyledSpan {
-                    text: std::mem::take(&mut current_text),
-                    color: current_color,
-                    bold,
-                });
-            }
 
-            // Parse escape sequence
-            if chars.peek() == Some(&'[') {
-                chars.next(); // consume '['
-                let mut codes = String::new();
-                while let Some(&ch) = chars.peek() {
-                    if ch.is_ascii_digit() || ch == ';' {
-                        codes.push(ch);
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                // Consume the command character (usually 'm')
-                if chars.peek() == Some(&'m') {
-                    chars.next();
-                }
 
-                // Parse SGR codes
-                for code_str in codes.split(';') {
-                    if let Ok(code) = code_str.parse::<u8>() {
-                        match code {
-                            0 => {
-                                current_color = None;
-                                bold = false;
-                            } // Reset
-                            1 => bold = true,
-                            22 => bold = false,
-                            30 => current_color = Some(theme::ANSI_BLACK),
-                            31 => current_color = Some(theme::ANSI_RED),
-                            32 => current_color = Some(theme::ANSI_GREEN),
-                            33 => current_color = Some(theme::ANSI_YELLOW),
-                            34 => current_color = Some(theme::ANSI_BLUE),
-                            35 => current_color = Some(theme::ANSI_MAGENTA),
-                            36 => current_color = Some(theme::ANSI_CYAN),
-                            37 => current_color = Some(theme::ANSI_WHITE),
-                            39 => current_color = None, // Default foreground
-                            90 => current_color = Some(theme::ANSI_BRIGHT_BLACK),
-                            91 => current_color = Some(theme::ANSI_BRIGHT_RED),
-                            92 => current_color = Some(theme::ANSI_BRIGHT_GREEN),
-                            93 => current_color = Some(theme::ANSI_BRIGHT_YELLOW),
-                            94 => current_color = Some(theme::ANSI_BRIGHT_BLUE),
-                            95 => current_color = Some(theme::ANSI_BRIGHT_MAGENTA),
-                            96 => current_color = Some(theme::ANSI_BRIGHT_CYAN),
-                            97 => current_color = Some(theme::ANSI_BRIGHT_WHITE),
-                            _ => {} // Ignore other codes
-                        }
-                    }
-                }
-            } else if chars.peek() == Some(&']') {
-                // OSC sequence - skip until BEL or ST
-                chars.next();
-                while let Some(&ch) = chars.peek() {
-                    chars.next();
-                    if ch == '\x07' || ch == '\\' {
-                        break;
-                    }
-                }
-            }
-        } else if c == '\r' {
-            // Skip carriage return
-        } else {
-            current_text.push(c);
-        }
-    }
-
-    // Don't forget the last span
-    if !current_text.is_empty() {
-        spans.push(StyledSpan {
-            text: current_text,
-            color: current_color,
-            bold,
-        });
-    }
-
-    spans
-}
-
-/// Update the ANSI parsing cache for a terminal tab
-/// Parses only new lines since the last cache update
-fn update_line_cache(tab: &mut TerminalTab) {
-    // If buffer length hasn't changed, no update needed
-    if tab.raw_output_buffer.len() == tab.cache_buffer_len {
-        return;
-    }
-
-    // Normalize line endings
-    let normalized = tab
-        .raw_output_buffer
-        .replace("\r\n", "\n")
-        .replace('\r', "\n");
-
-    // Split into lines
-    let lines: Vec<&str> = normalized.lines().collect();
-    let new_line_count = lines.len();
-
-    // If we have cached lines and the buffer grew, parse only new lines
-    if tab.cache_buffer_len > 0 && tab.parsed_line_cache.len() <= new_line_count {
-        // Parse only new lines (from cached count to current count)
-        for line in lines.iter().skip(tab.parsed_line_cache.len()) {
-            let spans = parse_ansi_text(line);
-            tab.parsed_line_cache.push(spans);
-        }
-    } else {
-        // Full reparse (buffer was cleared or is initial)
-        tab.parsed_line_cache.clear();
-        for line in lines.iter() {
-            let spans = parse_ansi_text(line);
-            tab.parsed_line_cache.push(spans);
-        }
-    }
-
-    // Update cache length tracker
-    tab.cache_buffer_len = tab.raw_output_buffer.len();
-}
-
-// ============================================================================
-// Command Block - Warp-style grouped command + output
-// ============================================================================
-
-#[derive(Clone)]
-struct CommandBlock {
-    command: String,
-    output: Vec<String>, // Raw output with ANSI codes preserved
-    /// Cached parsed ANSI spans for output lines
-    parsed_output_cache: Vec<Vec<StyledSpan>>,
-    timestamp: Instant,
-    completed_at: Option<Instant>,
-    exit_code: Option<i32>,
-    is_running: bool,
-}
-
-/// Shorten path for display (replace home dir with ~)
-fn shorten_path(path: &str) -> String {
-    if let Some(home) = dirs::home_dir() {
-        let home_str = home.display().to_string();
-        if path.starts_with(&home_str) {
-            return path.replacen(&home_str, "~", 1);
-        }
-    }
-    path.to_string()
-}
-
-/// Strip ANSI escape sequences from text
-fn strip_ansi(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Skip escape sequence
-            if let Some(&'[') = chars.peek() {
-                chars.next(); // consume '['
-                              // Skip until we hit a letter (command character)
-                while let Some(&next) = chars.peek() {
-                    chars.next();
-                    if next.is_ascii_alphabetic()
-                        || next == 'm'
-                        || next == 'K'
-                        || next == 'H'
-                        || next == 'J'
-                    {
-                        break;
-                    }
-                }
-            } else if let Some(&']') = chars.peek() {
-                // OSC sequence - skip until BEL or ST
-                chars.next();
-                while let Some(&next) = chars.peek() {
-                    chars.next();
-                    if next == '\x07' || next == '\\' {
-                        break;
-                    }
-                }
-            }
-        } else if c == '\r' {
-            // Skip carriage return
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
-
-/// Format relative time for display (e.g., "2m ago", "just now")
-fn format_relative_time(timestamp: &Instant) -> String {
-    let elapsed = timestamp.elapsed().as_secs();
-
-    if elapsed < 5 {
-        "just now".to_string()
-    } else if elapsed < 60 {
-        format!("{}s ago", elapsed)
-    } else if elapsed < 3600 {
-        format!("{}m ago", elapsed / 60)
-    } else if elapsed < 86400 {
-        format!("{}h ago", elapsed / 3600)
-    } else {
-        format!("{}d ago", elapsed / 86400)
-    }
-}
-
-/// Format execution duration (e.g., "0.5s", "2m 30s")
-fn format_duration(duration: Duration) -> String {
-    let secs = duration.as_secs();
-    let millis = duration.as_millis();
-
-    if millis < 1000 {
-        format!("{}ms", millis)
-    } else if secs < 60 {
-        let decimal = millis % 1000 / 100;
-        if decimal > 0 {
-            format!("{}.{}s", secs, decimal)
-        } else {
-            format!("{}s", secs)
-        }
-    } else if secs < 3600 {
-        let mins = secs / 60;
-        let rem_secs = secs % 60;
-        if rem_secs > 0 {
-            format!("{}m {}s", mins, rem_secs)
-        } else {
-            format!("{}m", mins)
-        }
-    } else {
-        let hours = secs / 3600;
-        let mins = (secs % 3600) / 60;
-        if mins > 0 {
-            format!("{}h {}m", hours, mins)
-        } else {
-            format!("{}h", hours)
-        }
-    }
-}
 
 /// Global log buffer for debug panel (initialized once at startup)
 static LOG_BUFFER: std::sync::OnceLock<LogBuffer> = std::sync::OnceLock::new();
@@ -572,6 +234,8 @@ struct AgTerm {
     debug_panel: DebugPanel,
     /// Last time PTY activity was detected (for dynamic tick optimization)
     last_pty_activity: Instant,
+    /// Last cursor blink toggle time
+    last_cursor_blink: Instant,
 }
 
 impl Default for AgTerm {
@@ -597,9 +261,6 @@ impl Default for AgTerm {
         let tab = TerminalTab {
             id: 0,
             session_id,
-            blocks: Vec::new(),
-            pending_output: Vec::new(),
-            raw_output_buffer: String::new(),
             raw_input: String::new(),
             input: String::new(),
             cwd,
@@ -609,10 +270,10 @@ impl Default for AgTerm {
             history_temp_input: String::new(),
             mode: TerminalMode::Raw, // Default to Raw mode for interactive apps
             parsed_line_cache: Vec::new(),
-            cache_buffer_len: 0,
             canvas_state: TerminalCanvasState::new(),
             content_version: 0,
             screen: TerminalScreen::new(80, 24),
+            cursor_blink_on: true,
         };
 
         let mut debug_panel = DebugPanel::new();
@@ -630,6 +291,7 @@ impl Default for AgTerm {
             startup_focus_count: 10,
             debug_panel,
             last_pty_activity: Instant::now(),
+            last_cursor_blink: Instant::now(),
         }
     }
 }
@@ -639,30 +301,34 @@ struct TerminalTab {
     #[allow(dead_code)]
     id: usize,
     session_id: Option<uuid::Uuid>,
-    blocks: Vec<CommandBlock>,
-    pending_output: Vec<String>, // Output before first command
-    raw_output_buffer: String,   // Raw PTY output for Raw mode display
     raw_input: String,           // Input buffer for Raw mode (IME support)
+    #[allow(dead_code)]
     input: String,
+    #[allow(dead_code)]
     cwd: String,                   // Current working directory display
+    #[allow(dead_code)]
     error_message: Option<String>, // PTY error message if creation failed
     // Command history
+    #[allow(dead_code)]
     history: Vec<String>,
+    #[allow(dead_code)]
     history_index: Option<usize>, // Current position in history (None = not browsing)
+    #[allow(dead_code)]
     history_temp_input: String,   // Temporary storage for current input when browsing
     // Terminal mode
     mode: TerminalMode,
     // ANSI parsing cache for Raw mode
     /// Cached parsed lines for Raw mode (line index -> parsed spans)
     parsed_line_cache: Vec<Vec<StyledSpan>>,
-    /// Last known buffer length when cache was updated
-    cache_buffer_len: usize,
     // Canvas state for virtual scrolling
+    #[allow(dead_code)]
     canvas_state: TerminalCanvasState,
     /// Content version for cache invalidation
     content_version: u64,
     /// Terminal screen buffer with VTE parser
     screen: TerminalScreen,
+    /// Cursor blink state
+    cursor_blink_on: bool,
 }
 
 /// Terminal input mode
@@ -714,7 +380,6 @@ enum Message {
     SendSignal(SignalType),
 
     // Clipboard
-    CopyToClipboard(String),
     ClipboardContent(Option<String>),
 
     // Window resize
@@ -765,9 +430,6 @@ impl AgTerm {
                 let tab = TerminalTab {
                     id,
                     session_id,
-                    blocks: Vec::new(),
-                    pending_output: Vec::new(),
-                    raw_output_buffer: String::new(),
                     raw_input: String::new(),
                     input: String::new(),
                     cwd,
@@ -777,10 +439,10 @@ impl AgTerm {
                     history_temp_input: String::new(),
                     mode: TerminalMode::Raw,
                     parsed_line_cache: Vec::new(),
-                    cache_buffer_len: 0,
                     canvas_state: TerminalCanvasState::new(),
                     content_version: 0,
                     screen: TerminalScreen::new(80, 24),
+                    cursor_blink_on: true,
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
@@ -931,10 +593,11 @@ impl AgTerm {
                     return self.update(Message::ToggleDebugPanel);
                 }
 
-                // Raw mode: send all keys directly to PTY
+                // Raw mode: send special keys directly to PTY
+                // Regular characters are handled via RawInputChanged (for IME support)
                 if !modifiers.command() {
                     let input = match key.as_ref() {
-                        // Special/named keys
+                        // Special/named keys only - NOT characters (handled by text_input for IME)
                         Key::Named(keyboard::key::Named::Escape) => Some("\x1b".to_string()),
                         Key::Named(keyboard::key::Named::ArrowUp) => Some("\x1b[A".to_string()),
                         Key::Named(keyboard::key::Named::ArrowDown) => Some("\x1b[B".to_string()),
@@ -947,11 +610,8 @@ impl AgTerm {
                         Key::Named(keyboard::key::Named::Delete) => Some("\x1b[3~".to_string()),
                         Key::Named(keyboard::key::Named::Insert) => Some("\x1b[2~".to_string()),
                         Key::Named(keyboard::key::Named::Tab) => Some("\t".to_string()),
-                        Key::Named(keyboard::key::Named::Enter) => Some("\r".to_string()),
-                        Key::Named(keyboard::key::Named::Backspace) => Some("\x7f".to_string()),
-                        Key::Named(keyboard::key::Named::Space) => Some(" ".to_string()),
-                        // Regular characters - send directly to PTY
-                        Key::Character(c) => Some(c.to_string()),
+                        // Note: Enter, Backspace, Space are handled by text_input's on_submit and input changes
+                        // Only handle them here as fallback if text_input doesn't capture them
                         _ => None,
                     };
 
@@ -973,8 +633,6 @@ impl AgTerm {
                 }
                 Task::none()
             }
-
-            Message::CopyToClipboard(content) => iced::clipboard::write(content),
 
             Message::ClipboardContent(clipboard_opt) => {
                 if let Some(content) = clipboard_opt {
@@ -1022,6 +680,15 @@ impl AgTerm {
                 // Update input debug state
                 if let Some(tab) = self.tabs.get(self.active_tab) {
                     self.debug_panel.input_state.raw_mode = tab.mode == TerminalMode::Raw;
+                }
+
+                // Cursor blinking (every 530ms, like Alacritty)
+                const CURSOR_BLINK_INTERVAL_MS: u64 = 530;
+                if self.last_cursor_blink.elapsed().as_millis() as u64 >= CURSOR_BLINK_INTERVAL_MS {
+                    self.last_cursor_blink = Instant::now();
+                    if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                        tab.cursor_blink_on = !tab.cursor_blink_on;
+                    }
                 }
 
                 // Auto-focus on raw input for IME support
@@ -1292,7 +959,10 @@ impl AgTerm {
                 .padding([8, 12])
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .style(theme::terminal_output_style),
+                .style(|_| container::Style {
+                    background: Some(theme::BG_SECONDARY.into()),
+                    ..Default::default()
+                }),
                 status_bar
             ]
             .width(Length::Fill)
@@ -1349,13 +1019,26 @@ impl AgTerm {
     fn render_raw_terminal<'a>(&self, parsed_cache: &'a [Vec<StyledSpan>]) -> Element<'a, Message> {
         use iced::widget::canvas;
 
+        let tab = &self.tabs[self.active_tab];
+        let (cursor_row, cursor_col) = tab.screen.cursor_position();
+
+        // Create cursor state
+        let cursor = CursorState {
+            row: cursor_row,
+            col: cursor_col,
+            style: CursorStyle::Block,
+            visible: true,
+            blink_on: tab.cursor_blink_on,
+        };
+
         // Create terminal canvas with all lines (virtual scrolling will handle visibility)
         let terminal_canvas = TerminalCanvas::new(
             parsed_cache,
-            self.tabs[self.active_tab].content_version,
+            tab.content_version,
             theme::TEXT_PRIMARY,
             MONO_FONT,
-        );
+        )
+        .with_cursor(cursor);
 
         canvas(terminal_canvas)
             .width(Length::Fill)
@@ -1363,166 +1046,6 @@ impl AgTerm {
             .into()
     }
 
-    /// Render welcome/info block (for initial output)
-    fn render_welcome_block<'a>(&self, lines: &'a [String]) -> Element<'a, Message> {
-        // Pre-allocate Vec for line elements
-        let mut line_elements = Vec::with_capacity(lines.len());
-        for line in lines {
-            line_elements.push(
-                text(line)
-                    .size(13)
-                    .font(MONO_FONT)
-                    .color(theme::TEXT_SECONDARY)
-                    .into(),
-            );
-        }
-
-        let content = column(line_elements).spacing(4);
-
-        container(content)
-            .padding([12, 16])
-            .width(Length::Fill)
-            .style(theme::block_container_style)
-            .into()
-    }
-
-    /// Render error block for PTY failures
-    fn render_error_block<'a>(&self, message: &'a str) -> Element<'a, Message> {
-        container(
-            text(format!("⚠ Error: {}", message))
-                .size(13)
-                .font(MONO_FONT)
-                .color(theme::ACCENT_RED),
-        )
-        .padding([12, 16])
-        .width(Length::Fill)
-        .style(|_| container::Style {
-            background: Some(Color::from_rgb(0.2, 0.1, 0.1).into()),
-            border: Border {
-                color: theme::ACCENT_RED,
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
-    }
-
-    /// Render a command block (Warp-style)
-    fn render_command_block<'a>(&self, block: &'a CommandBlock) -> Element<'a, Message> {
-        // Command header with status indicator
-        let status_color = if block.is_running {
-            theme::ACCENT_YELLOW
-        } else if block.exit_code.unwrap_or(0) == 0 {
-            theme::ACCENT_GREEN
-        } else {
-            theme::ACCENT_RED
-        };
-
-        let status_indicator = text(if block.is_running { "●" } else { "●" })
-            .size(10)
-            .color(status_color);
-
-        let command_text = text(&block.command)
-            .size(14)
-            .font(MONO_FONT)
-            .color(theme::TEXT_PRIMARY);
-
-        // Timestamp display
-        let timestamp_text = text(format_relative_time(&block.timestamp))
-            .size(11)
-            .color(theme::TEXT_MUTED);
-
-        // Execution time display (if completed)
-        let execution_time_element: Element<Message> =
-            if let Some(completed_at) = block.completed_at {
-                let duration = completed_at.duration_since(block.timestamp);
-                let duration_str = format_duration(duration);
-                row![
-                    text(" • ").size(11).color(theme::TEXT_MUTED),
-                    text(duration_str).size(11).color(theme::ACCENT_GREEN)
-                ]
-                .into()
-            } else {
-                Space::with_width(0).into()
-            };
-
-        // Copy button
-        let copy_button = button(text("Copy").size(11).color(theme::TEXT_MUTED))
-            .padding([4, 8])
-            .style(theme::copy_button_style)
-            .on_press(Message::CopyToClipboard(block.command.clone()));
-
-        // Header row: status + command + metadata + copy button
-        let command_header = row![
-            status_indicator,
-            Space::with_width(10),
-            text("$").size(14).font(MONO_FONT).color(theme::PROMPT),
-            Space::with_width(8),
-            command_text,
-            Space::with_width(12),
-            timestamp_text,
-            execution_time_element,
-            Space::with_width(Length::Fill),
-            copy_button
-        ]
-        .align_y(Alignment::Center);
-
-        // Output lines
-        let output_content: Element<Message> = if block.output.is_empty() {
-            if block.is_running {
-                text("Running...")
-                    .size(12)
-                    .font(MONO_FONT)
-                    .color(theme::TEXT_MUTED)
-                    .into()
-            } else {
-                Space::with_height(0).into()
-            }
-        } else {
-            // Pre-allocate Vec for output line elements
-            let mut output_elements = Vec::with_capacity(block.parsed_output_cache.len());
-
-            for spans in &block.parsed_output_cache {
-                let line_element = if spans.is_empty() {
-                    Space::with_height(0).into()
-                } else if spans.len() == 1 && spans[0].color.is_none() {
-                    // Simple case: no colors, just text (clone to own)
-                    text(spans[0].text.clone())
-                        .size(13)
-                        .font(MONO_FONT)
-                        .color(theme::TEXT_SECONDARY)
-                        .into()
-                } else {
-                    // Multiple spans with colors - pre-allocate Vec for span elements
-                    let mut span_elements = Vec::with_capacity(spans.len());
-                    for span in spans {
-                        let color = span.color.unwrap_or(theme::TEXT_SECONDARY);
-                        span_elements.push(
-                            text(span.text.clone())
-                                .size(13)
-                                .font(MONO_FONT)
-                                .color(color)
-                                .into(),
-                        );
-                    }
-                    row(span_elements).into()
-                };
-                output_elements.push(line_element);
-            }
-
-            column(output_elements).spacing(2).into()
-        };
-
-        let block_content =
-            column![command_header, Space::with_height(8), output_content].width(Length::Fill);
-
-        container(block_content)
-            .padding([12, 16])
-            .width(Length::Fill)
-            .style(theme::block_container_style)
-            .into()
-    }
 
     fn subscription(&self) -> Subscription<Message> {
         // Dynamic tick interval based on PTY activity
@@ -1568,100 +1091,6 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    // ========== Utility Function Tests ==========
-
-    #[test]
-    fn test_strip_ansi_basic() {
-        // Test basic ANSI color codes
-        let input = "\x1b[31mRed Text\x1b[0m";
-        let result = strip_ansi(input);
-        assert_eq!(result, "Red Text");
-    }
-
-    #[test]
-    fn test_strip_ansi_multiple_codes() {
-        let input = "\x1b[1m\x1b[32mBold Green\x1b[0m Normal";
-        let result = strip_ansi(input);
-        assert_eq!(result, "Bold Green Normal");
-    }
-
-    #[test]
-    fn test_strip_ansi_cursor_movement() {
-        let input = "\x1b[2K\x1b[1GLine content";
-        let result = strip_ansi(input);
-        assert_eq!(result, "Line content");
-    }
-
-    #[test]
-    fn test_strip_ansi_osc_sequence() {
-        // OSC sequence (e.g., terminal title)
-        let input = "\x1b]0;Terminal Title\x07Content";
-        let result = strip_ansi(input);
-        assert_eq!(result, "Content");
-    }
-
-    #[test]
-    fn test_strip_ansi_carriage_return() {
-        let input = "Line1\rLine2";
-        let result = strip_ansi(input);
-        assert_eq!(result, "Line1Line2");
-    }
-
-    #[test]
-    fn test_strip_ansi_no_sequences() {
-        let input = "Plain text without ANSI";
-        let result = strip_ansi(input);
-        assert_eq!(result, "Plain text without ANSI");
-    }
-
-    #[test]
-    fn test_strip_ansi_korean() {
-        let input = "\x1b[32m한글 테스트\x1b[0m";
-        let result = strip_ansi(input);
-        assert_eq!(result, "한글 테스트");
-    }
-
-    #[test]
-    fn test_shorten_path_with_home() {
-        if let Some(home) = dirs::home_dir() {
-            let home_str = home.display().to_string();
-            let path = format!("{}/projects/test", home_str);
-            let result = shorten_path(&path);
-            assert_eq!(result, "~/projects/test");
-        }
-    }
-
-    #[test]
-    fn test_shorten_path_without_home() {
-        let path = "/usr/local/bin";
-        let result = shorten_path(path);
-        assert_eq!(result, "/usr/local/bin");
-    }
-
-    #[test]
-    fn test_format_duration_milliseconds() {
-        let duration = Duration::from_millis(500);
-        assert_eq!(format_duration(duration), "500ms");
-    }
-
-    #[test]
-    fn test_format_duration_seconds() {
-        let duration = Duration::from_millis(2500);
-        assert_eq!(format_duration(duration), "2.5s");
-    }
-
-    #[test]
-    fn test_format_duration_minutes() {
-        let duration = Duration::from_secs(90);
-        assert_eq!(format_duration(duration), "1m 30s");
-    }
-
-    #[test]
-    fn test_format_duration_hours() {
-        let duration = Duration::from_secs(3700);
-        assert_eq!(format_duration(duration), "1h 1m");
-    }
-
     // ========== Tab Management Tests ==========
 
     /// Create a mock AgTerm instance for testing (without PTY)
@@ -1671,9 +1100,6 @@ mod tests {
         let tab = TerminalTab {
             id: 0,
             session_id: None, // No actual PTY for tests
-            blocks: Vec::new(),
-            pending_output: vec!["Test Welcome".to_string()],
-            raw_output_buffer: String::new(),
             raw_input: String::new(),
             input: String::new(),
             cwd: "/test/path".to_string(),
@@ -1683,10 +1109,10 @@ mod tests {
             history_temp_input: String::new(),
             mode: TerminalMode::Raw,
             parsed_line_cache: Vec::new(),
-            cache_buffer_len: 0,
             canvas_state: TerminalCanvasState::new(),
             content_version: 0,
             screen: TerminalScreen::new(80, 24),
+            cursor_blink_on: true,
         };
 
         AgTerm {
@@ -1697,6 +1123,7 @@ mod tests {
             startup_focus_count: 0,
             debug_panel: DebugPanel::new(),
             last_pty_activity: Instant::now(),
+            last_cursor_blink: Instant::now(),
         }
     }
 
@@ -1784,26 +1211,6 @@ mod tests {
 
         let _ = app.update(Message::PrevTab);
         assert_eq!(app.active_tab, 2); // Should cycle to last tab
-    }
-
-    // ========== Command Block Tests ==========
-
-    #[test]
-    fn test_command_block_creation() {
-        let block = CommandBlock {
-            command: "test".to_string(),
-            output: vec!["line1".to_string(), "line2".to_string()],
-            parsed_output_cache: vec![parse_ansi_text("line1"), parse_ansi_text("line2")],
-            timestamp: Instant::now(),
-            completed_at: None,
-            exit_code: None,
-            is_running: true,
-        };
-
-        assert_eq!(block.command, "test");
-        assert_eq!(block.output.len(), 2);
-        assert!(block.is_running);
-        assert!(block.completed_at.is_none());
     }
 
     // ========== Theme Tests ==========

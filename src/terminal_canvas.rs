@@ -7,10 +7,29 @@
 
 use iced::widget::canvas::{self, Cache, Frame, Geometry, Text};
 use iced::mouse;
-use iced::{Color, Font, Point, Rectangle, Renderer, Theme};
+use iced::{Color, Font, Point, Rectangle, Renderer, Size, Theme};
 
 use crate::StyledSpan;
 use std::time::Instant;
+
+/// Cursor style for terminal rendering
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum CursorStyle {
+    #[default]
+    Block,
+    Underline,
+    Bar,
+}
+
+/// Cursor state for rendering
+#[derive(Clone, Debug)]
+pub struct CursorState {
+    pub row: usize,
+    pub col: usize,
+    pub style: CursorStyle,
+    pub visible: bool,
+    pub blink_on: bool,
+}
 
 /// Terminal rendering configuration
 pub mod config {
@@ -110,6 +129,7 @@ pub struct TerminalCanvas<'a> {
     pub content_version: u64,
     pub default_color: Color,
     pub font: Font,
+    pub cursor: Option<CursorState>,
 }
 
 impl<'a> TerminalCanvas<'a> {
@@ -124,7 +144,14 @@ impl<'a> TerminalCanvas<'a> {
             content_version,
             default_color,
             font,
+            cursor: None,
         }
+    }
+
+    /// Set cursor state for rendering
+    pub fn with_cursor(mut self, cursor: CursorState) -> Self {
+        self.cursor = Some(cursor);
+        self
     }
 
     fn content_height(&self) -> f32 {
@@ -182,6 +209,54 @@ impl<'a> TerminalCanvas<'a> {
 
             // Advance x position
             x += span.text.chars().count() as f32 * config::CHAR_WIDTH;
+        }
+    }
+
+    fn draw_cursor(&self, frame: &mut Frame, state: &TerminalCanvasState, bounds: Rectangle) {
+        let cursor = match &self.cursor {
+            Some(c) if c.visible && c.blink_on => c,
+            _ => return,
+        };
+
+        // Check if cursor is in visible range
+        let (first_visible, last_visible) = self.visible_range(state.scroll_offset, bounds.height);
+        if cursor.row < first_visible || cursor.row >= last_visible {
+            return;
+        }
+
+        // Calculate cursor screen position
+        let visible_row = cursor.row - first_visible;
+        let y_offset = -(state.scroll_offset % config::LINE_HEIGHT);
+        let x = config::PADDING_LEFT + (cursor.col as f32 * config::CHAR_WIDTH);
+        let y = config::PADDING_TOP + y_offset + (visible_row as f32 * config::LINE_HEIGHT);
+
+        let cursor_color = Color::from_rgba(0.9, 0.9, 0.9, 0.9);
+
+        match cursor.style {
+            CursorStyle::Block => {
+                // Semi-transparent block cursor
+                frame.fill_rectangle(
+                    Point::new(x, y),
+                    Size::new(config::CHAR_WIDTH, config::LINE_HEIGHT),
+                    Color::from_rgba(0.9, 0.9, 0.9, 0.7),
+                );
+            }
+            CursorStyle::Underline => {
+                // Underline cursor (2px height)
+                frame.fill_rectangle(
+                    Point::new(x, y + config::LINE_HEIGHT - 2.0),
+                    Size::new(config::CHAR_WIDTH, 2.0),
+                    cursor_color,
+                );
+            }
+            CursorStyle::Bar => {
+                // Bar/I-beam cursor (2px width)
+                frame.fill_rectangle(
+                    Point::new(x, y),
+                    Size::new(2.0, config::LINE_HEIGHT),
+                    cursor_color,
+                );
+            }
         }
     }
 }
@@ -284,11 +359,14 @@ where
             // Draw visible lines directly
             self.draw_lines(&mut frame, state, bounds);
 
+            // Draw cursor
+            self.draw_cursor(&mut frame, state, bounds);
+
             return vec![frame.into_geometry()];
         }
 
-        // Normal mode: use geometry cache
-        let geometry = state.cache.draw(renderer, bounds.size(), |frame| {
+        // Normal mode: use geometry cache for text
+        let text_geometry = state.cache.draw(renderer, bounds.size(), |frame| {
             // Draw background
             frame.fill_rectangle(
                 Point::ORIGIN,
@@ -300,6 +378,11 @@ where
             self.draw_lines(frame, state, bounds);
         });
 
-        vec![geometry]
+        // Cursor is drawn separately (no cache) for blinking support
+        let mut cursor_frame = Frame::new(renderer, bounds.size());
+        self.draw_cursor(&mut cursor_frame, state, bounds);
+        let cursor_geometry = cursor_frame.into_geometry();
+
+        vec![text_geometry, cursor_geometry]
     }
 }

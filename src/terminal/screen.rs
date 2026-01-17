@@ -77,6 +77,30 @@ fn palette256_to_color(idx: u8) -> Color {
     }
 }
 
+/// Mouse reporting mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MouseMode {
+    /// No mouse reporting
+    #[default]
+    None,
+    /// X10 Mouse Reporting (CSI ?9h or CSI ?1000h)
+    X10,
+    /// Button-Event Mouse Tracking (CSI ?1002h)
+    ButtonEvent,
+    /// Any-Event Mouse Tracking (CSI ?1003h)
+    AnyEvent,
+}
+
+/// Mouse encoding mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MouseEncoding {
+    /// Default X10/UTF-8 encoding
+    #[default]
+    Default,
+    /// SGR Extended Mouse Mode (CSI ?1006h)
+    Sgr,
+}
+
 /// Terminal cell with character and styling
 #[derive(Clone, Debug)]
 pub struct Cell {
@@ -124,6 +148,27 @@ pub struct TerminalScreen {
     scroll_region: Option<(usize, usize)>,
     /// Saved cursor position (for save/restore)
     saved_cursor: Option<(usize, usize)>,
+    /// OSC sequence fields
+    /// Window title (OSC 0 or OSC 2)
+    window_title: Option<String>,
+    /// Icon name (OSC 1)
+    icon_name: Option<String>,
+    /// Current working directory from shell (OSC 7)
+    cwd_from_shell: Option<String>,
+    /// Clipboard request data (OSC 52)
+    clipboard_request: Option<String>,
+    /// Alternate screen buffer (for applications like vim, less, etc.)
+    alternate_buffer: Option<Vec<Vec<Cell>>>,
+    /// Alternate scrollback buffer
+    alternate_scrollback: Option<Vec<Vec<Cell>>>,
+    /// Whether we're currently using the alternate screen
+    use_alternate_screen: bool,
+    /// Saved cursor position for alternate screen
+    alternate_saved_cursor: Option<(usize, usize)>,
+    /// Mouse reporting mode
+    mouse_mode: MouseMode,
+    /// Mouse encoding mode
+    mouse_encoding: MouseEncoding,
 }
 
 impl TerminalScreen {
@@ -147,6 +192,16 @@ impl TerminalScreen {
             parser: Parser::new(),
             scroll_region: None,
             saved_cursor: None,
+            window_title: None,
+            icon_name: None,
+            cwd_from_shell: None,
+            clipboard_request: None,
+            alternate_buffer: None,
+            alternate_scrollback: None,
+            use_alternate_screen: false,
+            alternate_saved_cursor: None,
+            mouse_mode: MouseMode::None,
+            mouse_encoding: MouseEncoding::Default,
         }
     }
 
@@ -207,6 +262,68 @@ impl TerminalScreen {
     /// Get cursor position (row, col)
     pub fn cursor_position(&self) -> (usize, usize) {
         (self.cursor_row, self.cursor_col)
+    }
+
+    /// Get window title (OSC 0 or OSC 2)
+    pub fn window_title(&self) -> Option<&str> {
+        self.window_title.as_deref()
+    }
+
+    /// Get icon name (OSC 1)
+    pub fn icon_name(&self) -> Option<&str> {
+        self.icon_name.as_deref()
+    }
+
+    /// Get current working directory from shell (OSC 7)
+    pub fn cwd_from_shell(&self) -> Option<&str> {
+        self.cwd_from_shell.as_deref()
+    }
+
+    /// Get clipboard request data (OSC 52)
+    pub fn clipboard_request(&self) -> Option<&str> {
+        self.clipboard_request.as_deref()
+    }
+
+    /// Clear clipboard request after it has been read
+    pub fn clear_clipboard_request(&mut self) {
+        self.clipboard_request = None;
+    }
+
+    /// Parse file:// URI to extract path
+    fn parse_file_uri(&self, uri: &str) -> Option<String> {
+        if let Some(path_part) = uri.strip_prefix("file://") {
+            // Handle both file://hostname/path and file:///path
+            if let Some(slash_pos) = path_part.find('/') {
+                // file://hostname/path -> extract /path
+                Some(path_part[slash_pos..].to_string())
+            } else if path_part.is_empty() {
+                // file:/// -> next part is the path (malformed, but handle it)
+                None
+            } else {
+                // file://path (no hostname) -> use as is
+                Some(format!("/{}", path_part))
+            }
+        } else if uri.starts_with("file:/") {
+            // file:/path (missing one slash)
+            Some(uri.strip_prefix("file:").unwrap().to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Get current mouse reporting mode
+    pub fn mouse_mode(&self) -> MouseMode {
+        self.mouse_mode
+    }
+
+    /// Get current mouse encoding mode
+    pub fn mouse_encoding(&self) -> MouseEncoding {
+        self.mouse_encoding
+    }
+
+    /// Check if mouse reporting is enabled
+    pub fn is_mouse_reporting_enabled(&self) -> bool {
+        self.mouse_mode != MouseMode::None
     }
 
     /// Scroll screen up by n lines
@@ -334,6 +451,42 @@ impl TerminalScreen {
                 self.buffer[self.cursor_row] = vec![Cell::default(); self.cols];
             }
             _ => {}
+        }
+    }
+
+    /// Switch to alternate screen buffer
+    fn switch_to_alternate_screen(&mut self) {
+        if !self.use_alternate_screen {
+            // Save current buffer and scrollback
+            self.alternate_buffer = Some(self.buffer.clone());
+            self.alternate_scrollback = Some(self.scrollback.clone());
+            self.alternate_saved_cursor = self.saved_cursor;
+
+            // Create fresh alternate screen
+            self.buffer = vec![vec![Cell::default(); self.cols]; self.rows];
+            self.scrollback = Vec::new();
+            self.cursor_row = 0;
+            self.cursor_col = 0;
+            self.scroll_region = None;
+            self.saved_cursor = None;
+
+            self.use_alternate_screen = true;
+        }
+    }
+
+    /// Switch back to normal screen buffer
+    fn switch_to_normal_screen(&mut self) {
+        if self.use_alternate_screen {
+            // Restore saved buffer and scrollback
+            if let Some(saved_buffer) = self.alternate_buffer.take() {
+                self.buffer = saved_buffer;
+            }
+            if let Some(saved_scrollback) = self.alternate_scrollback.take() {
+                self.scrollback = saved_scrollback;
+            }
+            self.saved_cursor = self.alternate_saved_cursor;
+
+            self.use_alternate_screen = false;
         }
     }
 
@@ -473,11 +626,144 @@ impl Perform for TerminalScreen {
         // End of DCS - not implemented yet
     }
 
-    fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {
-        // OSC sequences (e.g., set title) - not implemented yet
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        // OSC sequences: ESC ] <command> ; <data> ST (or BEL)
+        // Parse OSC command number and data
+        if params.is_empty() {
+            return;
+        }
+
+        // First param is the command number
+        let command_str = String::from_utf8_lossy(params[0]);
+        let command = command_str.parse::<u16>().unwrap_or(0);
+
+        match command {
+            0 => {
+                // OSC 0 ; title - Set icon name and window title
+                if params.len() > 1 {
+                    let title = String::from_utf8_lossy(params[1]).to_string();
+                    self.window_title = Some(title.clone());
+                    self.icon_name = Some(title);
+                }
+            }
+            1 => {
+                // OSC 1 ; name - Set icon name
+                if params.len() > 1 {
+                    self.icon_name = Some(String::from_utf8_lossy(params[1]).to_string());
+                }
+            }
+            2 => {
+                // OSC 2 ; title - Set window title
+                if params.len() > 1 {
+                    self.window_title = Some(String::from_utf8_lossy(params[1]).to_string());
+                }
+            }
+            7 => {
+                // OSC 7 ; file://hostname/path - Set current working directory
+                if params.len() > 1 {
+                    let cwd_uri = String::from_utf8_lossy(params[1]).to_string();
+                    // Extract path from file:// URI
+                    // Format: file://hostname/path or file:///path
+                    if let Some(path) = self.parse_file_uri(&cwd_uri) {
+                        self.cwd_from_shell = Some(path);
+                    }
+                }
+            }
+            52 => {
+                // OSC 52 ; c ; <base64-data> - Clipboard operations
+                // c = clipboard selection (usually 'c' for clipboard, 'p' for primary)
+                // base64-data = clipboard content in base64
+                if params.len() > 2 {
+                    let _selection = String::from_utf8_lossy(params[1]);
+                    let data = String::from_utf8_lossy(params[2]).to_string();
+
+                    // Store the base64 data for external handling
+                    // Applications can read this and decode it
+                    if !data.is_empty() && data != "?" {
+                        self.clipboard_request = Some(data);
+                    }
+                }
+            }
+            _ => {
+                // Unknown OSC command - ignore
+            }
+        }
     }
 
-    fn csi_dispatch(&mut self, params: &Params, _intermediates: &[u8], _ignore: bool, action: char) {
+    fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
+        // Check for private mode sequences (CSI ? ...)
+        let is_private = intermediates.contains(&b'?');
+
+        if is_private && action == 'h' {
+            // Set private mode (DEC Private Mode Set - DECSET)
+            for param in params.iter() {
+                match param[0] {
+                    9 | 1000 => {
+                        // X10 Mouse Reporting (CSI ?9h or CSI ?1000h)
+                        self.mouse_mode = MouseMode::X10;
+                    }
+                    1002 => {
+                        // Button-Event Mouse Tracking (CSI ?1002h)
+                        self.mouse_mode = MouseMode::ButtonEvent;
+                    }
+                    1003 => {
+                        // Any-Event Mouse Tracking (CSI ?1003h)
+                        self.mouse_mode = MouseMode::AnyEvent;
+                    }
+                    1006 => {
+                        // SGR Extended Mouse Mode (CSI ?1006h)
+                        self.mouse_encoding = MouseEncoding::Sgr;
+                    }
+                    1049 => {
+                        // Save cursor and switch to alternate screen
+                        self.saved_cursor = Some((self.cursor_row, self.cursor_col));
+                        self.switch_to_alternate_screen();
+                    }
+                    47 | 1047 => {
+                        // Switch to alternate screen (without saving cursor)
+                        self.switch_to_alternate_screen();
+                    }
+                    _ => {
+                        // Other private modes not implemented yet
+                    }
+                }
+            }
+            return;
+        }
+
+        if is_private && action == 'l' {
+            // Reset private mode (DEC Private Mode Reset - DECRST)
+            for param in params.iter() {
+                match param[0] {
+                    9 | 1000 | 1002 | 1003 => {
+                        // Disable mouse reporting (CSI ?9l, ?1000l, ?1002l, ?1003l)
+                        self.mouse_mode = MouseMode::None;
+                    }
+                    1006 => {
+                        // Disable SGR Extended Mouse Mode (CSI ?1006l)
+                        self.mouse_encoding = MouseEncoding::Default;
+                    }
+                    1049 => {
+                        // Switch to normal screen and restore cursor
+                        self.switch_to_normal_screen();
+                        if let Some((row, col)) = self.saved_cursor {
+                            self.cursor_row = min(row, self.rows - 1);
+                            self.cursor_col = min(col, self.cols - 1);
+                        }
+                    }
+                    47 | 1047 => {
+                        // Switch to normal screen (without restoring cursor)
+                        self.switch_to_normal_screen();
+                    }
+                    _ => {
+                        // Other private modes not implemented yet
+                    }
+                }
+            }
+            return;
+        }
+
+        // Standard CSI sequences
         match action {
             'A' => {
                 // Cursor Up (CUU)
@@ -562,5 +848,101 @@ impl Perform for TerminalScreen {
 
     fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {
         // ESC sequences - not implemented yet (for compatibility)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mouse_mode_default() {
+        let screen = TerminalScreen::new(80, 24);
+        assert_eq!(screen.mouse_mode(), MouseMode::None);
+        assert_eq!(screen.mouse_encoding(), MouseEncoding::Default);
+        assert!(!screen.is_mouse_reporting_enabled());
+    }
+
+    #[test]
+    fn test_mouse_mode_x10_enable() {
+        let mut screen = TerminalScreen::new(80, 24);
+        // CSI ?1000h - Enable X10 mouse reporting
+        screen.process(b"\x1b[?1000h");
+        assert_eq!(screen.mouse_mode(), MouseMode::X10);
+        assert!(screen.is_mouse_reporting_enabled());
+    }
+
+    #[test]
+    fn test_mouse_mode_x10_disable() {
+        let mut screen = TerminalScreen::new(80, 24);
+        // Enable then disable
+        screen.process(b"\x1b[?1000h");
+        assert_eq!(screen.mouse_mode(), MouseMode::X10);
+        screen.process(b"\x1b[?1000l");
+        assert_eq!(screen.mouse_mode(), MouseMode::None);
+        assert!(!screen.is_mouse_reporting_enabled());
+    }
+
+    #[test]
+    fn test_mouse_mode_button_event() {
+        let mut screen = TerminalScreen::new(80, 24);
+        // CSI ?1002h - Enable button-event tracking
+        screen.process(b"\x1b[?1002h");
+        assert_eq!(screen.mouse_mode(), MouseMode::ButtonEvent);
+        assert!(screen.is_mouse_reporting_enabled());
+    }
+
+    #[test]
+    fn test_mouse_mode_any_event() {
+        let mut screen = TerminalScreen::new(80, 24);
+        // CSI ?1003h - Enable any-event tracking
+        screen.process(b"\x1b[?1003h");
+        assert_eq!(screen.mouse_mode(), MouseMode::AnyEvent);
+        assert!(screen.is_mouse_reporting_enabled());
+    }
+
+    #[test]
+    fn test_mouse_encoding_sgr() {
+        let mut screen = TerminalScreen::new(80, 24);
+        // CSI ?1006h - Enable SGR extended mouse mode
+        screen.process(b"\x1b[?1006h");
+        assert_eq!(screen.mouse_encoding(), MouseEncoding::Sgr);
+        // Disable
+        screen.process(b"\x1b[?1006l");
+        assert_eq!(screen.mouse_encoding(), MouseEncoding::Default);
+    }
+
+    #[test]
+    fn test_mouse_mode_multiple_enables() {
+        let mut screen = TerminalScreen::new(80, 24);
+        // Enable X10
+        screen.process(b"\x1b[?1000h");
+        assert_eq!(screen.mouse_mode(), MouseMode::X10);
+        // Upgrade to ButtonEvent
+        screen.process(b"\x1b[?1002h");
+        assert_eq!(screen.mouse_mode(), MouseMode::ButtonEvent);
+        // Upgrade to AnyEvent
+        screen.process(b"\x1b[?1003h");
+        assert_eq!(screen.mouse_mode(), MouseMode::AnyEvent);
+    }
+
+    #[test]
+    fn test_mouse_mode_with_sgr_encoding() {
+        let mut screen = TerminalScreen::new(80, 24);
+        // Enable X10 mouse + SGR encoding
+        screen.process(b"\x1b[?1000h\x1b[?1006h");
+        assert_eq!(screen.mouse_mode(), MouseMode::X10);
+        assert_eq!(screen.mouse_encoding(), MouseEncoding::Sgr);
+        assert!(screen.is_mouse_reporting_enabled());
+    }
+
+    #[test]
+    fn test_mouse_mode_csi_9() {
+        let mut screen = TerminalScreen::new(80, 24);
+        // CSI ?9h - Alternative X10 mouse reporting
+        screen.process(b"\x1b[?9h");
+        assert_eq!(screen.mouse_mode(), MouseMode::X10);
+        screen.process(b"\x1b[?9l");
+        assert_eq!(screen.mouse_mode(), MouseMode::None);
     }
 }
