@@ -85,7 +85,7 @@ pub fn view<'a, Message: 'a>(
     bg_color: Color,
 ) -> Element<'a, Message> {
     if !config.visible {
-        return container(text("")).height(0).into();
+        return container(text("")).height(Length::Shrink).into();
     }
 
     // Left section: shell and cwd

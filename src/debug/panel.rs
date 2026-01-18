@@ -196,7 +196,7 @@ impl DebugPanel {
     /// Render the debug panel
     pub fn view<'a, M: 'a + Clone + From<DebugPanelMessage>>(&'a self) -> Element<'a, M> {
         if !self.visible {
-            return Space::new(0, 0).into();
+            return Space::new(Length::Shrink, Length::Shrink).into();
         }
 
         // Header
