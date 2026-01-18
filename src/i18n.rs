@@ -189,9 +189,9 @@ impl Locale {
     /// ```
     /// use agterm::i18n::Locale;
     /// let locale = Locale::with_region("en", "US");
-    /// assert_eq!(locale.to_string(), "en-US");
+    /// assert_eq!(locale.to_bcp47(), "en-US");
     /// ```
-    pub fn to_string(&self) -> String {
+    pub fn to_bcp47(&self) -> String {
         let mut parts = vec![self.language.clone()];
 
         if let Some(script) = &self.script {
@@ -260,7 +260,7 @@ impl Locale {
 
 impl fmt::Display for Locale {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(f, "{}", self.to_bcp47())
     }
 }
 
