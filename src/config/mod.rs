@@ -68,6 +68,8 @@ pub struct AppConfig {
     pub debug: DebugConfig,
     #[serde(default)]
     pub notification: NotificationConfig,
+    #[serde(default)]
+    pub status_bar: StatusBarConfig,
 }
 
 /// General application settings
@@ -97,12 +99,27 @@ impl Default for GeneralConfig {
 /// Session management configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionConfig {
+    /// Restore previous session on startup
     #[serde(default = "default_true")]
     pub restore_on_startup: bool,
+    /// Save session on normal exit
     #[serde(default = "default_true")]
     pub save_on_exit: bool,
+    /// Enable automatic saving at intervals
+    #[serde(default = "default_true")]
+    pub auto_save: bool,
+    /// Auto-save interval in seconds
+    #[serde(default = "default_auto_save_interval")]
+    pub auto_save_interval_seconds: u64,
+    /// Maximum number of backup files to keep
+    #[serde(default = "default_max_backups")]
+    pub max_backups: usize,
+    /// Custom session file path (None = use default)
     #[serde(default)]
     pub session_file: Option<PathBuf>,
+    /// Prompt user before restoring crashed session
+    #[serde(default = "default_true")]
+    pub prompt_on_recovery: bool,
 }
 
 impl Default for SessionConfig {
@@ -110,7 +127,11 @@ impl Default for SessionConfig {
         Self {
             restore_on_startup: true,
             save_on_exit: true,
+            auto_save: true,
+            auto_save_interval_seconds: default_auto_save_interval(),
+            max_backups: default_max_backups(),
             session_file: None,
+            prompt_on_recovery: true,
         }
     }
 }
@@ -281,6 +302,8 @@ pub struct TerminalConfig {
     pub bracket: BracketConfig,
     #[serde(default)]
     pub link: LinkConfig,
+    #[serde(default)]
+    pub title: TitleConfig,
 }
 
 impl Default for TerminalConfig {
@@ -302,6 +325,7 @@ impl Default for TerminalConfig {
             images: ImageConfig::default(),
             bracket: BracketConfig::default(),
             link: LinkConfig::default(),
+            title: TitleConfig::default(),
         }
     }
 }
@@ -397,6 +421,30 @@ impl Default for LinkConfig {
             enabled: true,
             modifier: default_link_modifier(),
             underline: true,
+        }
+    }
+}
+
+/// Title configuration for window and tab titles
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TitleConfig {
+    /// Format string for tab titles (supports ${command}, ${cwd}, ${title})
+    #[serde(default = "default_title_format")]
+    pub format: String,
+    /// Show current working directory in title
+    #[serde(default = "default_true")]
+    pub show_cwd: bool,
+    /// Maximum length of title before truncation
+    #[serde(default = "default_title_max_length")]
+    pub max_length: usize,
+}
+
+impl Default for TitleConfig {
+    fn default() -> Self {
+        Self {
+            format: default_title_format(),
+            show_cwd: true,
+            max_length: default_title_max_length(),
         }
     }
 }
@@ -1151,6 +1199,36 @@ impl Default for NotificationConfig {
     }
 }
 
+/// Status bar configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusBarConfig {
+    #[serde(default = "default_true")]
+    pub visible: bool,
+    #[serde(default = "default_true")]
+    pub show_cwd: bool,
+    #[serde(default = "default_true")]
+    pub show_size: bool,
+    #[serde(default = "default_true")]
+    pub show_encoding: bool,
+    #[serde(default = "default_true")]
+    pub show_scroll_position: bool,
+    #[serde(default = "default_true")]
+    pub show_mode: bool,
+}
+
+impl Default for StatusBarConfig {
+    fn default() -> Self {
+        Self {
+            visible: true,
+            show_cwd: true,
+            show_size: true,
+            show_encoding: true,
+            show_scroll_position: true,
+            show_mode: true,
+        }
+    }
+}
+
 // ============================================================================
 // Default value functions
 // ============================================================================
@@ -1222,6 +1300,14 @@ fn default_link_modifier() -> String {
     return "ctrl".to_string();
 }
 
+fn default_title_format() -> String {
+    "${title}".to_string()
+}
+
+fn default_title_max_length() -> usize {
+    50
+}
+
 fn default_keybinding_mode() -> String {
     "default".to_string()
 }
@@ -1287,7 +1373,13 @@ fn default_notification_timeout() -> u64 {
     5
 }
 
+fn default_auto_save_interval() -> u64 {
+    30 // Auto-save every 30 seconds
+}
 
+fn default_max_backups() -> usize {
+    5 // Keep up to 5 backup files
+}
 
 // ============================================================================
 // Configuration loading
@@ -1388,6 +1480,7 @@ impl AppConfig {
             logging: overlay.logging,
             debug: overlay.debug,
             notification: overlay.notification,
+            status_bar: overlay.status_bar,
         }
     }
 
@@ -1428,6 +1521,7 @@ impl Default for AppConfig {
             logging: LoggingConfig::default(),
             debug: DebugConfig::default(),
             notification: NotificationConfig::default(),
+            status_bar: StatusBarConfig::default(),
         })
     }
 }

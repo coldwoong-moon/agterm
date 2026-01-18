@@ -10,9 +10,13 @@ app_name = "agterm"
 
 # Session management
 [general.session]
-restore_on_startup = true      # Restore previous session on startup
-save_on_exit = true            # Save session on exit
-# session_file = "~/.config/agterm/session.json"
+restore_on_startup = true        # Restore previous session on startup
+save_on_exit = true              # Save session on exit
+auto_save = true                 # Enable automatic saving at intervals
+auto_save_interval_seconds = 30  # Auto-save interval (seconds)
+max_backups = 5                  # Maximum number of backup files to keep
+prompt_on_recovery = true        # Prompt user before restoring crashed session
+# session_file = "~/.config/agterm/session.json"  # Custom session file path (default: auto-detected)
 
 # ============================================================================
 # Appearance Settings

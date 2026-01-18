@@ -20,6 +20,7 @@ mod sound;
 mod terminal;
 mod terminal_canvas;
 mod theme;
+mod ui;
 
 use config::AppConfig;
 use debug::panel::TerminalState;
@@ -529,6 +530,7 @@ impl Default for AgTerm {
                     pane_layout: PaneLayout::Single,
                     panes: Vec::new(),
                     focused_pane: 0,
+                    title_info: terminal::title::TitleInfo::new(),
                 };
 
                 (vec![tab], 0, config.appearance.font.size, 1)
@@ -701,6 +703,8 @@ struct TerminalTab {
     bell_pending: bool,
     /// Custom tab title (set via OSC 0/2 or manually)
     title: Option<String>,
+    /// Dynamic title information from OSC sequences and shell integration
+    title_info: terminal::title::TitleInfo,
     /// Track last copied selection coordinates to avoid duplicate copies
     last_copied_selection: Option<(terminal_canvas::SelectionPoint, terminal_canvas::SelectionPoint)>,
     /// Bracket matching state
@@ -821,6 +825,12 @@ enum Message {
     TabRenameInput(String),
     TabRenameSubmit,
     TabRenameCancel,
+}
+
+impl From<DebugPanelMessage> for Message {
+    fn from(msg: DebugPanelMessage) -> Self {
+        Message::DebugPanelMessage(msg)
+    }
 }
 
 impl AgTerm {
@@ -1001,6 +1011,7 @@ impl AgTerm {
                         pane_layout: PaneLayout::Single,
                         panes: Vec::new(),
                         focused_pane: 0,
+                        title_info: terminal::title::TitleInfo::new(),
                     };
 
                     tabs.push(tab);
@@ -1057,6 +1068,7 @@ impl AgTerm {
                     pane_layout: PaneLayout::Single,
                     panes: Vec::new(),
                     focused_pane: 0,
+                    title_info: terminal::title::TitleInfo::new(),
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
@@ -1101,6 +1113,7 @@ impl AgTerm {
                         cursor_blink_on: true,
                         bell_pending: false,
                         title: None, // New tab starts with no custom title
+                        title_info: terminal::title::TitleInfo::new(),
                         last_copied_selection: None,
                         bracket_match: None,
                         pane_layout: PaneLayout::Single,
@@ -2236,76 +2249,56 @@ impl AgTerm {
 
     /// Render the status bar with shell name, mode, and shortcuts
     fn view_status_bar(&self) -> Element<Message> {
-        let shell_name = self.get_shell_name();
-        let mode_indicator = text("STREAMING").size(11).color(inline_theme::ACCENT_GREEN);
-        let tab_info = format!("Tab {} of {}", self.active_tab + 1, self.tabs.len());
+        let config = get_config();
 
-        // Build left section with environment indicators
-        let mut status_left_parts = vec![
-            text(shell_name)
-                .size(12)
-                .color(inline_theme::TEXT_MUTED)
-                .into(),
-            Space::with_width(12).into(),
-            Element::from(mode_indicator),
-        ];
-
-        // Add environment indicators if in constrained/special environments
-        if self.env_info.is_ssh {
-            status_left_parts.push(Space::with_width(12).into());
-            status_left_parts.push(
-                text("SSH")
-                    .size(11)
-                    .color(inline_theme::ACCENT_YELLOW)
-                    .into(),
-            );
-        }
-        if self.env_info.is_container {
-            status_left_parts.push(Space::with_width(8).into());
-            status_left_parts.push(
-                text("Container")
-                    .size(11)
-                    .color(inline_theme::ACCENT_BLUE)
-                    .into(),
-            );
-        }
-        if self.env_info.is_tmux {
-            status_left_parts.push(Space::with_width(8).into());
-            status_left_parts.push(text("tmux").size(11).color(inline_theme::TEXT_MUTED).into());
-        }
-        if self.env_info.is_screen {
-            status_left_parts.push(Space::with_width(8).into());
-            status_left_parts.push(
-                text("screen")
-                    .size(11)
-                    .color(inline_theme::TEXT_MUTED)
-                    .into(),
-            );
+        // If status bar is disabled, return empty container
+        if !config.status_bar.visible {
+            return container(text("")).height(0).into();
         }
 
-        let status_left = row(status_left_parts).align_y(Alignment::Center);
+        // Gather terminal information from active tab
+        let tab = &self.tabs[self.active_tab];
+        let (cols, rows) = tab.screen.dimensions();
+        let scrollback_lines = tab.screen.scrollback_size();
+        let total_lines = scrollback_lines + rows;
+        let visible_lines = rows;
 
-        let status_center = text(tab_info).size(12).color(inline_theme::TEXT_MUTED);
+        // Calculate scroll position
+        let scroll_position = if total_lines > visible_lines {
+            // Assume we're viewing the bottom of the buffer (streaming mode)
+            Some((total_lines, total_lines))
+        } else {
+            Some((visible_lines, total_lines))
+        };
 
-        let status_right = text("⌘T New | ⌘W Close | ⌘D Debug")
-            .size(12)
-            .color(inline_theme::TEXT_MUTED);
+        // Create status bar info
+        let info = ui::status_bar::StatusBarInfo {
+            shell: self.get_shell_name(),
+            cwd: Some(tab.cwd.clone()),
+            cols: cols as u16,
+            rows: rows as u16,
+            encoding: String::from("UTF-8"),
+            mode: Some(String::from("streaming")),
+            scroll_position,
+        };
 
-        container(
-            row![
-                status_left,
-                Space::with_width(Length::Fill),
-                status_center,
-                Space::with_width(Length::Fill),
-                status_right
-            ]
-            .align_y(Alignment::Center)
-            .width(Length::Fill),
+        // Create status bar config from app config
+        let status_config = ui::status_bar::StatusBarConfig {
+            visible: config.status_bar.visible,
+            show_cwd: config.status_bar.show_cwd,
+            show_size: config.status_bar.show_size,
+            show_encoding: config.status_bar.show_encoding,
+            show_scroll_position: config.status_bar.show_scroll_position,
+            show_mode: config.status_bar.show_mode,
+        };
+
+        // Render the status bar using the new modular component
+        ui::status_bar::view(
+            info,
+            status_config,
+            inline_theme::TEXT_MUTED,
+            inline_theme::BG_SECONDARY,
         )
-        .padding([4, 12])
-        .width(Length::Fill)
-        .style(inline_theme::status_bar_style)
-        .into()
     }
 
     /// Render raw terminal output (for Raw mode)
@@ -2426,6 +2419,7 @@ mod tests {
             cursor_blink_on: true,
             bell_pending: false,
             title: None,
+            title_info: terminal::title::TitleInfo::new(),
             last_copied_selection: None,
             bracket_match: None,
             pane_layout: PaneLayout::Single,

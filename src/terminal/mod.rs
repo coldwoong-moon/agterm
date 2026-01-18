@@ -10,4 +10,5 @@ pub mod pty;
 pub mod screen;
 pub mod search;
 pub mod selection;
+pub mod title;
 pub mod url;

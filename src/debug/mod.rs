@@ -4,9 +4,12 @@
 //! - Debug UI panel with runtime information
 //! - Performance metrics collection
 //! - State inspection tools
+//! - Event logging for debugging
 
+pub mod event_log;
 pub mod panel;
 
+pub use event_log::{EventLog, EventType, LogEntry};
 pub use panel::{DebugPanel, DebugPanelMessage};
 
 use std::collections::VecDeque;

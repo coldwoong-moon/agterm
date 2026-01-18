@@ -741,11 +741,18 @@ fn test_session_config_custom() {
     let session_config = agterm::config::SessionConfig {
         restore_on_startup: false,
         save_on_exit: true,
+        auto_save: true,
+        auto_save_interval_seconds: 30,
+        max_backups: 5,
         session_file: Some(PathBuf::from("/custom/session.json")),
+        prompt_on_recovery: true,
     };
 
     assert!(!session_config.restore_on_startup);
     assert!(session_config.save_on_exit);
+    assert!(session_config.auto_save);
+    assert_eq!(session_config.auto_save_interval_seconds, 30);
+    assert_eq!(session_config.max_backups, 5);
     assert_eq!(
         session_config.session_file,
         Some(PathBuf::from("/custom/session.json"))

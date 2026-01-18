@@ -9,6 +9,8 @@
 
 pub mod config;
 pub mod notification;
+pub mod session;
 pub mod shell;
 pub mod terminal;
 pub mod theme;
+pub mod ui;

@@ -6,9 +6,9 @@
 //! - Performance metrics
 //! - Recent log entries
 
-use super::{InputDebugState, Metrics, PtyDebugInfo};
+use super::{EventLog, InputDebugState, Metrics, PtyDebugInfo};
 use crate::logging::layers::LogBuffer;
-use iced::widget::{column, container, row, scrollable, text, Space};
+use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Alignment, Border, Element, Font, Length};
 use std::time::Instant;
 use tracing::Level;
@@ -22,8 +22,12 @@ mod colors {
 
     pub const BG_PANEL: Color = Color::from_rgba(0.05, 0.05, 0.08, 0.95);
     pub const BG_SECTION: Color = Color::from_rgba(0.1, 0.1, 0.13, 0.9);
+    pub const BG_BLOCK_HOVER: Color = Color::from_rgb(0.18, 0.18, 0.22);
     pub const BORDER: Color = Color::from_rgb(0.25, 0.25, 0.3);
     pub const TEXT_TITLE: Color = Color::from_rgb(0.8, 0.85, 1.0);
+    pub const TEXT_PRIMARY: Color = Color::from_rgb(0.93, 0.93, 0.95);
+    pub const TEXT_SECONDARY: Color = Color::from_rgb(0.6, 0.62, 0.68);
+    pub const TEXT_MUTED: Color = Color::from_rgb(0.45, 0.47, 0.52);
     pub const TEXT_LABEL: Color = Color::from_rgb(0.6, 0.65, 0.7);
     pub const TEXT_VALUE: Color = Color::from_rgb(0.9, 0.9, 0.95);
     pub const ACCENT_GREEN: Color = Color::from_rgb(0.4, 0.9, 0.5);
@@ -52,6 +56,19 @@ pub enum DebugPanelMessage {
     ClearLogs,
     /// Search logs
     SearchLogs(String),
+    /// Switch to a different tab
+    SwitchTab(DebugTab),
+    /// Clear event log
+    ClearEventLog,
+}
+
+/// Debug panel tabs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DebugTab {
+    /// Performance metrics and system info
+    Metrics,
+    /// Event log
+    Events,
 }
 
 /// Terminal state information
@@ -89,6 +106,10 @@ pub struct DebugPanel {
     pub log_search: String,
     /// Panel creation time
     pub created_at: Instant,
+    /// Event log
+    pub event_log: EventLog,
+    /// Currently active tab
+    pub active_tab: DebugTab,
 }
 
 impl Default for DebugPanel {
@@ -112,6 +133,8 @@ impl DebugPanel {
             log_filter: Level::DEBUG,
             log_search: String::new(),
             created_at: Instant::now(),
+            event_log: EventLog::new(1000), // Keep last 1000 events
+            active_tab: DebugTab::Metrics,
         }
     }
 
@@ -161,50 +184,38 @@ impl DebugPanel {
             DebugPanelMessage::SearchLogs(query) => {
                 self.log_search = query;
             }
+            DebugPanelMessage::SwitchTab(tab) => {
+                self.active_tab = tab;
+            }
+            DebugPanelMessage::ClearEventLog => {
+                self.event_log.clear();
+            }
         }
     }
 
     /// Render the debug panel
-    pub fn view<'a, M: 'a + Clone>(&'a self) -> Element<'a, M> {
+    pub fn view<'a, M: 'a + Clone + From<DebugPanelMessage>>(&'a self) -> Element<'a, M> {
         if !self.visible {
             return Space::new(0, 0).into();
         }
 
-        // Performance section
-        let perf_section: Element<'a, M> = self.render_performance_section();
-
-        // Terminal section
-        let terminal_section: Element<'a, M> = self.render_terminal_section();
-
-        // PTY section
-        let pty_section: Element<'a, M> = self.render_pty_section();
-
-        // Input section
-        let input_section: Element<'a, M> = self.render_input_section();
-
-        // Log section
-        let log_section: Element<'a, M> = self.render_log_section();
-
         // Header
         let header: Element<'a, M> = self.render_header();
 
+        // Tab bar
+        let tab_bar: Element<'a, M> = self.render_tab_bar();
+
+        // Tab content based on active tab
+        let tab_content: Element<'a, M> = match self.active_tab {
+            DebugTab::Metrics => self.render_metrics_tab(),
+            DebugTab::Events => self.render_events_tab(),
+        };
+
         // Main panel content
-        let content = column![
-            header,
-            Space::with_height(8),
-            perf_section,
-            Space::with_height(8),
-            terminal_section,
-            Space::with_height(8),
-            pty_section,
-            Space::with_height(8),
-            input_section,
-            Space::with_height(8),
-            log_section,
-        ]
-        .spacing(4)
-        .padding(12)
-        .width(Length::Fixed(350.0));
+        let content = column![header, Space::with_height(8), tab_bar, Space::with_height(8), tab_content]
+            .spacing(4)
+            .padding(12)
+            .width(Length::Fixed(350.0));
 
         container(scrollable(content).height(Length::Fill))
             .style(|_| container::Style {
@@ -643,6 +654,190 @@ impl DebugPanel {
                 ..Default::default()
             })
             .into()
+    }
+
+    fn render_tab_bar<'a, M: 'a + Clone + From<DebugPanelMessage>>(&'a self) -> Element<'a, M> {
+        let metrics_button = button(
+            text(if self.active_tab == DebugTab::Metrics {
+                "● Metrics"
+            } else {
+                "Metrics"
+            })
+            .size(12)
+            .color(if self.active_tab == DebugTab::Metrics {
+                colors::TEXT_PRIMARY
+            } else {
+                colors::TEXT_SECONDARY
+            }),
+        )
+        .padding([4, 12])
+        .style(move |_, _| button::Style {
+            background: if self.active_tab == DebugTab::Metrics {
+                Some(colors::BG_BLOCK_HOVER.into())
+            } else {
+                Some(colors::BG_SECTION.into())
+            },
+            border: Border {
+                color: colors::BORDER,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            text_color: if self.active_tab == DebugTab::Metrics {
+                colors::TEXT_PRIMARY
+            } else {
+                colors::TEXT_SECONDARY
+            },
+            ..Default::default()
+        })
+        .on_press(M::from(DebugPanelMessage::SwitchTab(DebugTab::Metrics)));
+
+        let events_button = button(
+            text(if self.active_tab == DebugTab::Events {
+                "● Events"
+            } else {
+                "Events"
+            })
+            .size(12)
+            .color(if self.active_tab == DebugTab::Events {
+                colors::TEXT_PRIMARY
+            } else {
+                colors::TEXT_SECONDARY
+            }),
+        )
+        .padding([4, 12])
+        .style(move |_, _| button::Style {
+            background: if self.active_tab == DebugTab::Events {
+                Some(colors::BG_BLOCK_HOVER.into())
+            } else {
+                Some(colors::BG_SECTION.into())
+            },
+            border: Border {
+                color: colors::BORDER,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            text_color: if self.active_tab == DebugTab::Events {
+                colors::TEXT_PRIMARY
+            } else {
+                colors::TEXT_SECONDARY
+            },
+            ..Default::default()
+        })
+        .on_press(M::from(DebugPanelMessage::SwitchTab(DebugTab::Events)));
+
+        row![metrics_button, Space::with_width(4), events_button]
+            .spacing(2)
+            .into()
+    }
+
+    fn render_metrics_tab<'a, M: 'a>(&'a self) -> Element<'a, M> {
+        // Performance section
+        let perf_section: Element<'a, M> = self.render_performance_section();
+
+        // Terminal section
+        let terminal_section: Element<'a, M> = self.render_terminal_section();
+
+        // PTY section
+        let pty_section: Element<'a, M> = self.render_pty_section();
+
+        // Input section
+        let input_section: Element<'a, M> = self.render_input_section();
+
+        // Log section
+        let log_section: Element<'a, M> = self.render_log_section();
+
+        column![
+            perf_section,
+            Space::with_height(8),
+            terminal_section,
+            Space::with_height(8),
+            pty_section,
+            Space::with_height(8),
+            input_section,
+            Space::with_height(8),
+            log_section,
+        ]
+        .spacing(4)
+        .into()
+    }
+
+    fn render_events_tab<'a, M: 'a + Clone + From<DebugPanelMessage>>(&'a self) -> Element<'a, M> {
+        let mut content = column![
+            text("Event Log").size(13).color(colors::TEXT_TITLE),
+            Space::with_height(4),
+        ]
+        .spacing(2);
+
+        // Event count and clear button
+        let header_row = row![
+            text(format!("{}/{} events", self.event_log.len(), self.event_log.capacity()))
+                .size(11)
+                .color(colors::TEXT_LABEL),
+            Space::with_width(Length::Fill),
+            button(text("Clear").size(11))
+                .padding([2, 8])
+                .style(|_, _| button::Style {
+                    background: Some(colors::BG_BLOCK_HOVER.into()),
+                    border: Border {
+                        color: colors::BORDER,
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    text_color: colors::TEXT_SECONDARY,
+                    ..Default::default()
+                })
+                .on_press(M::from(DebugPanelMessage::ClearEventLog)),
+        ]
+        .align_y(Alignment::Center);
+
+        content = content.push(header_row);
+        content = content.push(Space::with_height(8));
+
+        // Display recent events (most recent first)
+        let recent_events = self.event_log.recent(50);
+
+        if recent_events.is_empty() {
+            content = content.push(
+                text("No events logged")
+                    .size(10)
+                    .color(colors::TEXT_MUTED),
+            );
+        } else {
+            for entry in recent_events {
+                let label_color = match entry.event_type {
+                    super::EventType::PtyOutput(_) => colors::ACCENT_GREEN,
+                    super::EventType::PtyInput(_) => colors::ACCENT_BLUE,
+                    super::EventType::KeyPress(_) => colors::ACCENT_CYAN,
+                    super::EventType::MouseClick(_, _) => colors::TEXT_SECONDARY,
+                    super::EventType::Bell => colors::ACCENT_YELLOW,
+                    super::EventType::Resize(_, _) => colors::ACCENT_BLUE,
+                    super::EventType::TabCreated | super::EventType::TabClosed => colors::ACCENT_GREEN,
+                    _ => colors::TEXT_LABEL,
+                };
+
+                let event_row = row![
+                    text(entry.elapsed_str())
+                        .size(9)
+                        .font(MONO_FONT)
+                        .color(colors::TEXT_MUTED),
+                    Space::with_width(4),
+                    text(entry.event_type.label())
+                        .size(9)
+                        .font(MONO_FONT)
+                        .color(label_color),
+                    Space::with_width(8),
+                    text(&entry.description)
+                        .size(9)
+                        .font(MONO_FONT)
+                        .color(colors::TEXT_VALUE),
+                ]
+                .spacing(2);
+
+                content = content.push(event_row);
+            }
+        }
+
+        self.section_container(content)
     }
 }
 

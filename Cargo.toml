@@ -49,6 +49,7 @@ arboard = "3"
 
 # URL handling
 open = "5"
+urlencoding = "2"  # URL decoding for file:// paths in OSC 7
 
 # Audio (for terminal bell sound)
 rodio = { version = "0.19", default-features = false, features = ["wav"] }
