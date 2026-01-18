@@ -2,8 +2,14 @@
 //!
 //! Provides a searchable command palette (Cmd+Shift+P) for quick access to terminal features.
 
+use iced::widget::text_input::Id as TextInputId;
 use iced::widget::{column, container, row, scrollable, text, text_input, Space};
-use iced::{Border, Color, Element, Length};
+use iced::{Border, Color, Element, Length, Task};
+
+/// Get the palette input ID
+pub fn palette_input_id() -> TextInputId {
+    TextInputId::new("palette_input")
+}
 
 /// A single command palette item
 #[derive(Debug, Clone)]
@@ -236,7 +242,8 @@ impl CommandPalette {
     /// Render the command palette
     pub fn view<'a>(&'a self) -> Element<'a, PaletteMessage> {
         if !self.visible {
-            return container(text("")).height(0).into();
+            // Return minimal invisible element (1px to avoid zero-height panic)
+            return Space::new(Length::Fill, Length::Fixed(1.0)).into();
         }
 
         // Background overlay (semi-transparent dark)
@@ -250,6 +257,7 @@ impl CommandPalette {
 
         // Build the search input
         let search_input = text_input("Search commands...", &self.input)
+            .id(palette_input_id())
             .on_input(PaletteMessage::InputChanged)
             .on_submit(PaletteMessage::Execute)
             .padding(12)

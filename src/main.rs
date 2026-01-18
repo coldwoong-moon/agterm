@@ -45,7 +45,7 @@ use notification::NotificationManager;
 use shell::ShellInfo;
 use terminal_canvas::{CursorState, CursorStyle, TerminalCanvas, TerminalCanvasState};
 use theme::Theme;
-use ui::palette::{CommandPalette, PaletteMessage};
+use ui::palette::{palette_input_id, CommandPalette, PaletteMessage};
 
 use terminal::env::EnvironmentInfo;
 use terminal::pty::PtyManager;
@@ -1943,6 +1943,10 @@ impl AgTerm {
             }
 
             Message::PaletteMessage(msg) => {
+                // Check if we're opening or closing the palette
+                let is_opening = matches!(msg, PaletteMessage::Open);
+                let is_closing = matches!(msg, PaletteMessage::Close | PaletteMessage::Execute);
+
                 if let Some(command_id) = self.command_palette.update(msg) {
                     // Execute the selected command by dispatching appropriate message
                     match command_id.as_str() {
@@ -1985,7 +1989,15 @@ impl AgTerm {
                         }
                     }
                 }
-                Task::none()
+
+                // Manage focus based on palette state
+                if is_opening {
+                    text_input::focus(palette_input_id())
+                } else if is_closing {
+                    text_input::focus(raw_input_id())
+                } else {
+                    Task::none()
+                }
             }
 
             Message::IncreaseFontSize => {
@@ -2558,16 +2570,12 @@ impl AgTerm {
             main_content
         };
 
-        // Add command palette overlay if visible
-        let final_content = if self.command_palette.is_visible() {
-            let palette_view: Element<Message> = self
-                .command_palette
-                .view()
-                .map(Message::PaletteMessage);
-            stack![with_flash, palette_view].into()
-        } else {
-            with_flash
-        };
+        // Add command palette overlay (always include in stack for consistent diff)
+        let palette_view: Element<Message> = self
+            .command_palette
+            .view()
+            .map(Message::PaletteMessage);
+        let final_content: Element<Message> = stack![with_flash, palette_view].into();
 
         container(final_content)
             .width(Length::Fill)
@@ -2704,10 +2712,10 @@ impl AgTerm {
             // Tab content with accent line
             let tab_content = column![
                 row![tab_label_button, close_button],
-                // Active tab bottom accent line
-                container(Space::with_height(0))
+                // Active tab bottom accent line (2px height)
+                container(Space::new(Length::Fill, Length::Fixed(2.0)))
                     .width(Length::Fill)
-                    .height(2)
+                    .height(Length::Fixed(2.0))
                     .style(move |_| container::Style {
                         background: if is_active {
                             Some(inline_theme::TAB_ACTIVE.into())
@@ -2805,9 +2813,9 @@ impl AgTerm {
     fn view_status_bar(&self) -> Element<Message> {
         let config = get_config();
 
-        // If status bar is disabled, return empty container
+        // If status bar is disabled, return minimal element (1px to avoid zero-height panic)
         if !config.status_bar.visible {
-            return container(text("")).height(0).into();
+            return Space::new(Length::Fill, Length::Fixed(1.0)).into();
         }
 
         // Gather terminal information from active tab

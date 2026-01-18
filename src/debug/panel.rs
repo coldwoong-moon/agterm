@@ -196,7 +196,8 @@ impl DebugPanel {
     /// Render the debug panel
     pub fn view<'a, M: 'a + Clone + From<DebugPanelMessage>>(&'a self) -> Element<'a, M> {
         if !self.visible {
-            return Space::new(Length::Shrink, Length::Shrink).into();
+            // Use 1px minimum to avoid zero-height panic in iced renderer
+            return Space::new(Length::Fixed(1.0), Length::Fixed(1.0)).into();
         }
 
         // Header

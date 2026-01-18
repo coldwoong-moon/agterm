@@ -2,7 +2,7 @@
 //!
 //! Displays terminal information like shell, working directory, dimensions, encoding, etc.
 
-use iced::widget::{container, horizontal_space, row, text};
+use iced::widget::{container, horizontal_space, row, text, Space};
 use iced::{Color, Element, Length};
 
 /// Information to display in the status bar
@@ -85,7 +85,8 @@ pub fn view<'a, Message: 'a>(
     bg_color: Color,
 ) -> Element<'a, Message> {
     if !config.visible {
-        return container(text("")).height(Length::Shrink).into();
+        // Use 1px minimum to avoid zero-height panic in iced renderer
+        return Space::new(Length::Fill, Length::Fixed(1.0)).into();
     }
 
     // Left section: shell and cwd
