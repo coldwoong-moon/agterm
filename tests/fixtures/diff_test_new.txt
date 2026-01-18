@@ -1,0 +1,18 @@
+AgTerm Terminal Emulator
+Version 1.0.0
+
+Features:
+- PTY support with enhanced handling
+- ANSI escape sequences
+- Advanced theme system
+- Configuration files
+- Diff viewer with Myers algorithm
+
+TODO:
+- Improve performance
+- Better error handling
+- Add MCP support
+
+This is an unchanged line.
+Another unchanged line.
+Additional line at the end.

@@ -18,6 +18,7 @@ mod encoding;
 mod history;
 mod keybind;
 mod logging;
+mod macros;
 mod notification;
 mod session;
 mod shell;

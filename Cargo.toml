@@ -65,7 +65,7 @@ serde_json = "1"
 toml = "0.8"
 dirs = "5"
 shellexpand = "3"
-chrono = "0.4"  # Timestamps for history entries
+chrono = { version = "0.4", features = ["serde"] }  # Timestamps for history entries
 
 # Clipboard
 arboard = "3"

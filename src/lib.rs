@@ -7,15 +7,43 @@
 //! - Theme system with popular presets
 //! - Configuration management
 //! - Character encoding support
+//! - Input macro system for automation
+//! - Clipboard history with pin functionality
+//! - Code snippet system with template expansion
+//! - Output filter system for real-time processing
+//! - Terminal session recording and playback
+//! - Terminal broadcast for multi-session input
+//! - Terminal annotation system for marking and bookmarking lines
+//! - Comprehensive link detection and handling
+//! - Terminal image protocol support (iTerm2, Kitty, SIXEL)
+//! - Terminal automation API with scripting DSL
+//! - Diff viewer with Myers algorithm for text comparison
 
+pub mod annotations;
+pub mod automation;
+pub mod broadcast;
+pub mod clipboard_history;
 pub mod config;
+pub mod diff_view;
 pub mod encoding;
+pub mod filters;
+pub mod image_protocol;
+pub mod keybind;
+pub mod link_handler;
+pub mod profiles;
+pub mod macros;
 pub mod markdown;
 pub mod notification;
+pub mod recording;
+pub mod render_cache;
 pub mod session;
 pub mod shell;
+pub mod snippets;
+pub mod splits;
 pub mod ssh;
 pub mod terminal;
 pub mod theme;
+pub mod theme_editor;
 pub mod trigger;
 pub mod ui;
+pub mod workspace;
