@@ -25,6 +25,14 @@ theme = "default"
 background_opacity = 1.0
 use_ligatures = true
 
+# Font configuration
+[appearance.font]
+family = "JetBrains Mono"       # Font family name
+size = 14.0                      # Font size in points
+line_height = 1.2                # Line height multiplier
+bold_as_bright = true            # Render bold text as bright colors
+use_thin_strokes = false         # Use thin strokes on macOS (antialiasing)
+
 # Optional: Custom color scheme (overrides theme)
 # [appearance.color_scheme]
 # background = "#17171c"
@@ -67,6 +75,12 @@ flash_color = "#FFFFFF80"        # Flash color in hex format (#RRGGBB or #RRGGBB
 flash_duration_ms = 100          # Flash duration in milliseconds
 bracketed_paste = true
 auto_scroll_on_output = true
+
+# Scrollback buffer configuration
+[terminal.scrollback]
+max_lines = 10000                # Maximum scrollback lines (0 = unlimited)
+compression = true               # Enable RLE compression
+save_to_file = false             # Save scrollback to file on exit (future)
 
 # ============================================================================
 # Keybindings

@@ -8,7 +8,9 @@ use unicode_width::UnicodeWidthChar;
 use vte::{Params, Parser, Perform};
 
 mod memory;
+mod scrollback;
 pub use memory::{MemoryStats, StringInterner};
+pub use scrollback::{ScrollbackBuffer, ScrollbackConfig};
 
 /// Maximum scrollback buffer lines
 const MAX_SCROLLBACK: usize = 10000;
@@ -313,7 +315,8 @@ impl CompressedLine {
 
         let original_length = line.len();
         let uncompressed_size = original_length * std::mem::size_of::<Cell>();
-        let compressed_size = segments.len() * (std::mem::size_of::<Cell>() + std::mem::size_of::<usize>());
+        let compressed_size =
+            segments.len() * (std::mem::size_of::<Cell>() + std::mem::size_of::<usize>());
 
         Self {
             segments,
@@ -347,6 +350,16 @@ impl CompressedLine {
     /// Get space saved in bytes
     fn space_saved(&self) -> isize {
         self.uncompressed_size as isize - self.compressed_size as isize
+    }
+
+    /// Get uncompressed size in bytes
+    pub fn uncompressed_size(&self) -> usize {
+        self.uncompressed_size
+    }
+
+    /// Get compressed size in bytes
+    pub fn compressed_size(&self) -> usize {
+        self.compressed_size
     }
 }
 

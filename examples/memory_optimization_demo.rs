@@ -50,12 +50,18 @@ fn main() {
 
     if stats.interned_strings > 0 {
         let hit_rate = (stats.interner_hits as f64)
-            / ((stats.interner_hits + stats.interner_misses) as f64) * 100.0;
+            / ((stats.interner_hits + stats.interner_misses) as f64)
+            * 100.0;
         println!("  Hit rate: {:.1}%", hit_rate);
         println!("\nString interning is working!");
-        println!("The same URL 'https://github.com/coldwoong-moon/agterm' appeared {} times",
-                 stats.interner_hits + 1);
-        println!("but is only stored {} time(s) in memory.", stats.interned_strings);
+        println!(
+            "The same URL 'https://github.com/coldwoong-moon/agterm' appeared {} times",
+            stats.interner_hits + 1
+        );
+        println!(
+            "but is only stored {} time(s) in memory.",
+            stats.interned_strings
+        );
     }
 
     // Fill scrollback with more data

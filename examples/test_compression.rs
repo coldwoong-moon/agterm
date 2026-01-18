@@ -39,10 +39,7 @@ fn main() {
         stats.space_saved(),
         stats.space_saved() as f64 / 1024.0
     );
-    println!(
-        "  Compression ratio: {:.1}%",
-        stats.space_saved_percent()
-    );
+    println!("  Compression ratio: {:.1}%", stats.space_saved_percent());
     println!(
         "  Average compression: {:.2}x smaller\n",
         1.0 / stats.avg_ratio
@@ -72,10 +69,7 @@ fn main() {
         stats2.space_saved(),
         stats2.space_saved() as f64 / 1024.0
     );
-    println!(
-        "  Compression ratio: {:.1}%",
-        stats2.space_saved_percent()
-    );
+    println!("  Compression ratio: {:.1}%", stats2.space_saved_percent());
     println!(
         "  Average compression: {:.2}x smaller\n",
         1.0 / stats2.avg_ratio
@@ -113,10 +107,7 @@ fn main() {
         stats3.space_saved(),
         stats3.space_saved() as f64 / 1024.0
     );
-    println!(
-        "  Compression ratio: {:.1}%",
-        stats3.space_saved_percent()
-    );
+    println!("  Compression ratio: {:.1}%", stats3.space_saved_percent());
     println!(
         "  Average compression: {:.2}x smaller\n",
         1.0 / stats3.avg_ratio

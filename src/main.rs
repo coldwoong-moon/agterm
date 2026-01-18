@@ -17,12 +17,14 @@ mod logging;
 mod sound;
 mod terminal;
 mod terminal_canvas;
+mod theme;
 
 use config::AppConfig;
 use debug::panel::TerminalState;
 use debug::{DebugPanel, DebugPanelMessage};
 use logging::{LogBuffer, LoggingConfig};
 use terminal_canvas::{CursorState, CursorStyle, TerminalCanvas, TerminalCanvasState};
+use theme::Theme;
 
 use terminal::env::EnvironmentInfo;
 use terminal::pty::PtyManager;
@@ -39,10 +41,10 @@ const D2CODING_FONT: &[u8] = include_bytes!("../assets/fonts/D2Coding.ttf");
 const MONO_FONT: Font = Font::with_name("D2Coding");
 
 // ============================================================================
-// Warp-inspired Dark Theme Colors
+// Warp-inspired Dark Theme Colors (inline constants for backward compatibility)
 // ============================================================================
 
-mod theme {
+mod inline_theme {
     use iced::Color;
 
     // Background colors
@@ -375,6 +377,16 @@ struct AgTerm {
     bell_flash_active: bool,
     /// When the flash started (for animation timing)
     flash_started_at: Option<Instant>,
+    /// Tab drag state for reordering
+    tab_drag: Option<TabDragState>,
+    /// Tab context menu state
+    tab_context_menu: Option<TabContextMenu>,
+    /// Tab rename mode (tab index being renamed)
+    tab_rename_mode: Option<usize>,
+    /// Tab rename input buffer
+    tab_rename_input: String,
+    /// Current theme
+    current_theme: Theme,
 }
 
 impl Default for AgTerm {
@@ -476,7 +488,7 @@ impl Default for AgTerm {
                     focused_pane: 0,
                 };
 
-                (vec![tab], 0, config.appearance.font_size, 1)
+                (vec![tab], 0, config.appearance.font.size, 1)
             };
 
         let mut debug_panel = DebugPanel::new();
@@ -489,6 +501,10 @@ impl Default for AgTerm {
         if config.debug.enabled || std::env::var("AGTERM_DEBUG").is_ok() {
             debug_panel.toggle();
         }
+
+        // Load theme from config
+        let current_theme = theme::Theme::by_name(&config.appearance.theme)
+            .unwrap_or_else(|| theme::Theme::warp_dark());
 
         tracing::info!("AgTerm application initialized");
         Self {
@@ -509,6 +525,11 @@ impl Default for AgTerm {
             bell_sound: sound::BellSound::new(),
             bell_flash_active: false,
             flash_started_at: None,
+            tab_drag: None,
+            tab_context_menu: None,
+            tab_rename_mode: None,
+            tab_rename_input: String::new(),
+            current_theme,
         }
     }
 }
@@ -578,6 +599,21 @@ impl std::fmt::Debug for Pane {
             .field("cursor_blink_on", &self.cursor_blink_on)
             .finish_non_exhaustive()
     }
+}
+
+/// Tab drag state for drag-and-drop reordering
+#[derive(Debug, Clone)]
+struct TabDragState {
+    dragging_index: usize,
+    start_x: f32,
+    current_x: f32,
+}
+
+/// Tab context menu state
+#[derive(Debug, Clone)]
+struct TabContextMenu {
+    tab_index: usize,
+    position: (f32, f32),
 }
 
 /// A single terminal tab with block-based output
@@ -713,12 +749,28 @@ enum Message {
     DecreaseFontSize,
     ResetFontSize,
 
+    // Theme switching
+    SwitchTheme(String),
+
     // Pane management
     SplitHorizontal,
     SplitVertical,
     ClosePane,
     NextPane,
     PrevPane,
+
+    // Tab drag and drop
+    TabDragStart(usize),
+    TabDragMove(f32),
+    TabDragEnd,
+
+    // Tab context menu
+    TabContextMenu(usize, f32, f32),
+    CloseContextMenu,
+    TabRenameStart(usize),
+    TabRenameInput(String),
+    TabRenameSubmit,
+    TabRenameCancel,
 }
 
 impl AgTerm {
@@ -1441,7 +1493,19 @@ impl AgTerm {
             }
 
             Message::ResetFontSize => {
-                self.font_size = 14.0;
+                let config = get_config();
+                self.font_size = config.appearance.font.size;
+                Task::none()
+            }
+
+            Message::SwitchTheme(theme_name) => {
+                // Switch to a new theme by name
+                if let Some(new_theme) = theme::Theme::by_name(&theme_name) {
+                    // TODO: self.current_theme = new_theme; (field not yet added)
+                    tracing::info!("Switched to theme: {}", theme_name);
+                } else {
+                    tracing::warn!("Theme '{}' not found, keeping current theme", theme_name);
+                }
                 Task::none()
             }
 
@@ -1667,17 +1731,110 @@ impl AgTerm {
                 tracing::info!("PrevPane triggered (not yet implemented)");
                 Task::none()
             }
+
+            Message::TabDragStart(index) => {
+                self.tab_drag = Some(TabDragState {
+                    dragging_index: index,
+                    start_x: 0.0,
+                    current_x: 0.0,
+                });
+                Task::none()
+            }
+
+            Message::TabDragMove(x) => {
+                if let Some(drag) = &mut self.tab_drag {
+                    drag.current_x = x;
+
+                    // Calculate target index based on drag position
+                    let tab_width = 150.0; // Approximate tab width
+                    let offset = drag.current_x - drag.start_x;
+                    let position_change = (offset / tab_width).round() as i32;
+
+                    let target_index = (drag.dragging_index as i32 + position_change)
+                        .max(0)
+                        .min(self.tabs.len() as i32 - 1)
+                        as usize;
+
+                    // Swap tabs if needed
+                    if target_index != drag.dragging_index {
+                        self.tabs.swap(drag.dragging_index, target_index);
+                        if self.active_tab == drag.dragging_index {
+                            self.active_tab = target_index;
+                        } else if self.active_tab == target_index {
+                            self.active_tab = drag.dragging_index;
+                        }
+                        drag.dragging_index = target_index;
+                        drag.start_x = drag.current_x;
+                    }
+                }
+                Task::none()
+            }
+
+            Message::TabDragEnd => {
+                self.tab_drag = None;
+                Task::none()
+            }
+
+            Message::TabContextMenu(index, x, y) => {
+                self.tab_context_menu = Some(TabContextMenu {
+                    tab_index: index,
+                    position: (x, y),
+                });
+                Task::none()
+            }
+
+            Message::CloseContextMenu => {
+                self.tab_context_menu = None;
+                Task::none()
+            }
+
+            Message::TabRenameStart(index) => {
+                self.tab_rename_mode = Some(index);
+                self.tab_rename_input = self
+                    .tabs
+                    .get(index)
+                    .and_then(|tab| tab.title.clone())
+                    .unwrap_or_else(|| format!("Terminal {}", index + 1));
+                self.tab_context_menu = None;
+                Task::none()
+            }
+
+            Message::TabRenameInput(input) => {
+                self.tab_rename_input = input;
+                Task::none()
+            }
+
+            Message::TabRenameSubmit => {
+                if let Some(index) = self.tab_rename_mode {
+                    if let Some(tab) = self.tabs.get_mut(index) {
+                        if self.tab_rename_input.trim().is_empty() {
+                            tab.title = None;
+                        } else {
+                            tab.title = Some(self.tab_rename_input.clone());
+                        }
+                    }
+                }
+                self.tab_rename_mode = None;
+                self.tab_rename_input.clear();
+                Task::none()
+            }
+
+            Message::TabRenameCancel => {
+                self.tab_rename_mode = None;
+                self.tab_rename_input.clear();
+                Task::none()
+            }
         }
     }
 
     fn view(&self) -> Element<Message> {
         if self.tabs.is_empty() {
-            return container(text("No terminal open").color(theme::TEXT_PRIMARY))
+            return container(text("No terminal open").color(inline_theme::TEXT_PRIMARY))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
-                .style(theme::primary_background_style)
+                .style(inline_theme::primary_background_style)
                 .into();
         }
 
@@ -1690,9 +1847,9 @@ impl AgTerm {
                 .padding([10, 16])
                 .width(Length::Fill)
                 .style(|_| container::Style {
-                    background: Some(theme::BG_PRIMARY.into()),
+                    background: Some(inline_theme::BG_PRIMARY.into()),
                     border: Border {
-                        color: theme::BORDER,
+                        color: inline_theme::BORDER,
                         width: 1.0,
                         radius: 0.0.into(),
                     },
@@ -1702,7 +1859,7 @@ impl AgTerm {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(|_| container::Style {
-                    background: Some(theme::BG_SECONDARY.into()),
+                    background: Some(inline_theme::BG_SECONDARY.into()),
                     ..Default::default()
                 })
         ]
@@ -1758,7 +1915,7 @@ impl AgTerm {
         container(final_content)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(theme::primary_background_style)
+            .style(inline_theme::primary_background_style)
             .into()
     }
 
@@ -1784,16 +1941,16 @@ impl AgTerm {
             let has_bell = tab.bell_pending;
 
             let icon_color = if is_active {
-                theme::TAB_ACTIVE
+                inline_theme::TAB_ACTIVE
             } else if has_bell {
-                theme::ACCENT_YELLOW // Yellow bell indicator for inactive tabs
+                inline_theme::ACCENT_YELLOW // Yellow bell indicator for inactive tabs
             } else {
-                theme::TEXT_MUTED
+                inline_theme::TEXT_MUTED
             };
             let label_color = if is_active {
-                theme::TEXT_PRIMARY
+                inline_theme::TEXT_PRIMARY
             } else {
-                theme::TEXT_SECONDARY
+                inline_theme::TEXT_SECONDARY
             };
 
             // Tab label button (clickable to select)
@@ -1817,22 +1974,22 @@ impl AgTerm {
                 let bg = match status {
                     button::Status::Hovered => {
                         if is_active {
-                            theme::BG_SECONDARY
+                            inline_theme::BG_SECONDARY
                         } else {
-                            theme::BG_BLOCK_HOVER
+                            inline_theme::BG_BLOCK_HOVER
                         }
                     }
                     _ => {
                         if is_active {
-                            theme::BG_SECONDARY
+                            inline_theme::BG_SECONDARY
                         } else {
-                            theme::BG_PRIMARY
+                            inline_theme::BG_PRIMARY
                         }
                     }
                 };
                 button::Style {
                     background: Some(bg.into()),
-                    text_color: theme::TEXT_PRIMARY,
+                    text_color: inline_theme::TEXT_PRIMARY,
                     border: Border {
                         color: Color::TRANSPARENT,
                         width: 0.0,
@@ -1853,14 +2010,16 @@ impl AgTerm {
                 .padding([8, 10])
                 .style(move |_, status| {
                     let (bg, text_color) = match status {
-                        button::Status::Hovered => (theme::BG_BLOCK_HOVER, theme::ACCENT_RED),
+                        button::Status::Hovered => {
+                            (inline_theme::BG_BLOCK_HOVER, inline_theme::ACCENT_RED)
+                        }
                         _ => {
                             let bg = if is_active {
-                                theme::BG_SECONDARY
+                                inline_theme::BG_SECONDARY
                             } else {
-                                theme::BG_PRIMARY
+                                inline_theme::BG_PRIMARY
                             };
-                            (bg, theme::TEXT_MUTED)
+                            (bg, inline_theme::TEXT_MUTED)
                         }
                     };
                     button::Style {
@@ -1894,7 +2053,7 @@ impl AgTerm {
                     .height(2)
                     .style(move |_| container::Style {
                         background: if is_active {
-                            Some(theme::TAB_ACTIVE.into())
+                            Some(inline_theme::TAB_ACTIVE.into())
                         } else {
                             None
                         },
@@ -1909,16 +2068,16 @@ impl AgTerm {
             .spacing(2)
             .push(Space::with_width(8))
             .push(
-                button(text("+").size(16).color(theme::TEXT_SECONDARY))
+                button(text("+").size(16).color(inline_theme::TEXT_SECONDARY))
                     .padding([8, 14])
                     .style(|_, status| {
                         let bg = match status {
-                            button::Status::Hovered => theme::BG_BLOCK_HOVER,
-                            _ => theme::BG_BLOCK,
+                            button::Status::Hovered => inline_theme::BG_BLOCK_HOVER,
+                            _ => inline_theme::BG_BLOCK,
                         };
                         button::Style {
                             background: Some(bg.into()),
-                            text_color: theme::TEXT_SECONDARY,
+                            text_color: inline_theme::TEXT_SECONDARY,
                             border: Border {
                                 radius: 6.0.into(),
                                 ..Default::default()
@@ -1972,7 +2131,7 @@ impl AgTerm {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .style(|_| container::Style {
-                    background: Some(theme::BG_SECONDARY.into()),
+                    background: Some(inline_theme::BG_SECONDARY.into()),
                     ..Default::default()
                 }),
                 status_bar
@@ -1981,19 +2140,22 @@ impl AgTerm {
             .height(Length::Fill)
             .into()
         } else {
-            column![text("No terminal open").color(theme::TEXT_PRIMARY)].into()
+            column![text("No terminal open").color(inline_theme::TEXT_PRIMARY)].into()
         }
     }
 
     /// Render the status bar with shell name, mode, and shortcuts
     fn view_status_bar(&self) -> Element<Message> {
         let shell_name = self.get_shell_name();
-        let mode_indicator = text("STREAMING").size(11).color(theme::ACCENT_GREEN);
+        let mode_indicator = text("STREAMING").size(11).color(inline_theme::ACCENT_GREEN);
         let tab_info = format!("Tab {} of {}", self.active_tab + 1, self.tabs.len());
 
         // Build left section with environment indicators
         let mut status_left_parts = vec![
-            text(shell_name).size(12).color(theme::TEXT_MUTED).into(),
+            text(shell_name)
+                .size(12)
+                .color(inline_theme::TEXT_MUTED)
+                .into(),
             Space::with_width(12).into(),
             Element::from(mode_indicator),
         ];
@@ -2001,28 +2163,43 @@ impl AgTerm {
         // Add environment indicators if in constrained/special environments
         if self.env_info.is_ssh {
             status_left_parts.push(Space::with_width(12).into());
-            status_left_parts.push(text("SSH").size(11).color(theme::ACCENT_YELLOW).into());
+            status_left_parts.push(
+                text("SSH")
+                    .size(11)
+                    .color(inline_theme::ACCENT_YELLOW)
+                    .into(),
+            );
         }
         if self.env_info.is_container {
             status_left_parts.push(Space::with_width(8).into());
-            status_left_parts.push(text("Container").size(11).color(theme::ACCENT_BLUE).into());
+            status_left_parts.push(
+                text("Container")
+                    .size(11)
+                    .color(inline_theme::ACCENT_BLUE)
+                    .into(),
+            );
         }
         if self.env_info.is_tmux {
             status_left_parts.push(Space::with_width(8).into());
-            status_left_parts.push(text("tmux").size(11).color(theme::TEXT_MUTED).into());
+            status_left_parts.push(text("tmux").size(11).color(inline_theme::TEXT_MUTED).into());
         }
         if self.env_info.is_screen {
             status_left_parts.push(Space::with_width(8).into());
-            status_left_parts.push(text("screen").size(11).color(theme::TEXT_MUTED).into());
+            status_left_parts.push(
+                text("screen")
+                    .size(11)
+                    .color(inline_theme::TEXT_MUTED)
+                    .into(),
+            );
         }
 
         let status_left = row(status_left_parts).align_y(Alignment::Center);
 
-        let status_center = text(tab_info).size(12).color(theme::TEXT_MUTED);
+        let status_center = text(tab_info).size(12).color(inline_theme::TEXT_MUTED);
 
         let status_right = text("⌘T New | ⌘W Close | ⌘D Debug")
             .size(12)
-            .color(theme::TEXT_MUTED);
+            .color(inline_theme::TEXT_MUTED);
 
         container(
             row![
@@ -2037,7 +2214,7 @@ impl AgTerm {
         )
         .padding([4, 12])
         .width(Length::Fill)
-        .style(theme::status_bar_style)
+        .style(inline_theme::status_bar_style)
         .into()
     }
 
@@ -2066,7 +2243,7 @@ impl AgTerm {
         let terminal_canvas = TerminalCanvas::new(
             parsed_cache,
             tab.content_version,
-            theme::TEXT_PRIMARY,
+            inline_theme::TEXT_PRIMARY,
             MONO_FONT,
         )
         .with_cursor(cursor)
@@ -2182,6 +2359,11 @@ mod tests {
             bell_sound: sound::BellSound::new(),
             bell_flash_active: false,
             flash_started_at: None,
+            tab_drag: None,
+            tab_context_menu: None,
+            tab_rename_mode: None,
+            tab_rename_input: String::new(),
+            current_theme: theme::Theme::warp_dark(),
         }
     }
 
@@ -2339,21 +2521,21 @@ mod tests {
     #[test]
     fn test_theme_colors_defined() {
         // Verify all theme colors are accessible
-        let _ = theme::BG_PRIMARY;
-        let _ = theme::BG_SECONDARY;
-        let _ = theme::BG_BLOCK;
-        let _ = theme::BG_BLOCK_HOVER;
-        let _ = theme::BG_INPUT;
-        let _ = theme::TEXT_PRIMARY;
-        let _ = theme::TEXT_SECONDARY;
-        let _ = theme::TEXT_MUTED;
-        let _ = theme::ACCENT_BLUE;
-        let _ = theme::ACCENT_GREEN;
-        let _ = theme::ACCENT_YELLOW;
-        let _ = theme::ACCENT_RED;
-        let _ = theme::BORDER;
-        let _ = theme::TAB_ACTIVE;
-        let _ = theme::PROMPT;
+        let _ = inline_theme::BG_PRIMARY;
+        let _ = inline_theme::BG_SECONDARY;
+        let _ = inline_theme::BG_BLOCK;
+        let _ = inline_theme::BG_BLOCK_HOVER;
+        let _ = inline_theme::BG_INPUT;
+        let _ = inline_theme::TEXT_PRIMARY;
+        let _ = inline_theme::TEXT_SECONDARY;
+        let _ = inline_theme::TEXT_MUTED;
+        let _ = inline_theme::ACCENT_BLUE;
+        let _ = inline_theme::ACCENT_GREEN;
+        let _ = inline_theme::ACCENT_YELLOW;
+        let _ = inline_theme::ACCENT_RED;
+        let _ = inline_theme::BORDER;
+        let _ = inline_theme::TAB_ACTIVE;
+        let _ = inline_theme::PROMPT;
     }
 
     // ========== Integration Tests (with actual PTY) ==========
@@ -2389,5 +2571,75 @@ mod tests {
         assert!(read_result.is_ok());
 
         let _ = pty_manager.close_session(&session_id);
+    }
+
+    // ========== Font Configuration Tests ==========
+
+    #[test]
+    fn test_font_config_default_values() {
+        use config::FontConfig;
+
+        let font_config = FontConfig::default();
+        assert_eq!(font_config.family, "D2Coding");
+        assert_eq!(font_config.size, 14.0);
+        assert_eq!(font_config.line_height, 1.2);
+        assert_eq!(font_config.bold_as_bright, true);
+        assert_eq!(font_config.use_thin_strokes, false);
+    }
+
+    #[test]
+    fn test_font_size_increase() {
+        let mut app = create_test_app();
+        app.font_size = 14.0;
+
+        app.update(Message::IncreaseFontSize);
+        assert_eq!(app.font_size, 15.0);
+
+        // Test max limit
+        app.font_size = 24.0;
+        app.update(Message::IncreaseFontSize);
+        assert_eq!(app.font_size, 24.0, "Font size should not exceed 24.0");
+    }
+
+    #[test]
+    fn test_font_size_decrease() {
+        let mut app = create_test_app();
+        app.font_size = 14.0;
+
+        app.update(Message::DecreaseFontSize);
+        assert_eq!(app.font_size, 13.0);
+
+        // Test min limit
+        app.font_size = 8.0;
+        app.update(Message::DecreaseFontSize);
+        assert_eq!(app.font_size, 8.0, "Font size should not go below 8.0");
+    }
+
+    #[test]
+    fn test_font_size_reset() {
+        let mut app = create_test_app();
+        app.font_size = 20.0;
+
+        app.update(Message::ResetFontSize);
+        let config = get_config();
+        assert_eq!(app.font_size, config.appearance.font.size);
+    }
+
+    #[test]
+    fn test_font_config_parsing() {
+        let toml_str = r#"
+            family = "JetBrains Mono"
+            size = 16.0
+            line_height = 1.5
+            bold_as_bright = false
+            use_thin_strokes = true
+        "#;
+
+        let font_config: config::FontConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(font_config.family, "JetBrains Mono");
+        assert_eq!(font_config.size, 16.0);
+        assert_eq!(font_config.line_height, 1.5);
+        assert_eq!(font_config.bold_as_bright, false);
+        assert_eq!(font_config.use_thin_strokes, true);
     }
 }

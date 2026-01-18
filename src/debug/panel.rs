@@ -819,7 +819,7 @@ mod tests {
         let data = vec![1.0, 2.0, 3.0, 2.0, 1.0];
         let graph = render_ascii_graph(&data, 5, 5);
         assert_eq!(graph.len(), 5); // Height of 5 lines
-        // Use chars().count() for Unicode character count
+                                    // Use chars().count() for Unicode character count
         assert!(graph.iter().all(|line| line.chars().count() == 5)); // Width of 5 chars
     }
 

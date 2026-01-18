@@ -169,9 +169,9 @@ impl SearchState {
 
     /// Check if a position is within any match
     pub fn is_match_at(&self, line: usize, col: usize) -> bool {
-        self.matches.iter().any(|m| {
-            m.line == line && col >= m.start_col && col < m.end_col
-        })
+        self.matches
+            .iter()
+            .any(|m| m.line == line && col >= m.start_col && col < m.end_col)
     }
 
     /// Check if a position is within the current match

@@ -30,7 +30,12 @@ pub fn parse_hex_color(hex: &str) -> Option<(f32, f32, f32, f32)> {
         let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
         let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
         let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
-        Some((r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0))
+        Some((
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            a as f32 / 255.0,
+        ))
     } else {
         None
     }
@@ -106,6 +111,33 @@ impl Default for SessionConfig {
     }
 }
 
+/// Font configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FontConfig {
+    #[serde(default = "default_font_family")]
+    pub family: String,
+    #[serde(default = "default_font_size")]
+    pub size: f32,
+    #[serde(default = "default_line_height")]
+    pub line_height: f32,
+    #[serde(default = "default_true")]
+    pub bold_as_bright: bool,
+    #[serde(default = "default_false")]
+    pub use_thin_strokes: bool,
+}
+
+impl Default for FontConfig {
+    fn default() -> Self {
+        Self {
+            family: default_font_family(),
+            size: default_font_size(),
+            line_height: default_line_height(),
+            bold_as_bright: true,
+            use_thin_strokes: false,
+        }
+    }
+}
+
 /// Appearance settings (fonts, colors, theme)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppearanceConfig {
@@ -121,6 +153,8 @@ pub struct AppearanceConfig {
     pub use_ligatures: bool,
     #[serde(default)]
     pub color_scheme: Option<ColorScheme>,
+    #[serde(default)]
+    pub font: FontConfig,
 }
 
 impl Default for AppearanceConfig {
@@ -132,6 +166,7 @@ impl Default for AppearanceConfig {
             background_opacity: default_background_opacity(),
             use_ligatures: true,
             color_scheme: None,
+            font: FontConfig::default(),
         }
     }
 }
@@ -180,11 +215,37 @@ pub struct ColorScheme {
     pub bright_white: Option<String>,
 }
 
+/// Scrollback buffer configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScrollbackConfig {
+    /// Maximum number of lines to keep in scrollback (0 = unlimited)
+    #[serde(default = "default_scrollback_lines")]
+    pub max_lines: usize,
+    /// Enable RLE compression for scrollback lines
+    #[serde(default = "default_true")]
+    pub compression: bool,
+    /// Save scrollback to file on exit (future feature)
+    #[serde(default = "default_false")]
+    pub save_to_file: bool,
+}
+
+impl Default for ScrollbackConfig {
+    fn default() -> Self {
+        Self {
+            max_lines: default_scrollback_lines(),
+            compression: true,
+            save_to_file: false,
+        }
+    }
+}
+
 /// Terminal behavior settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalConfig {
     #[serde(default = "default_scrollback_lines")]
     pub scrollback_lines: usize,
+    #[serde(default)]
+    pub scrollback: ScrollbackConfig,
     #[serde(default = "default_cursor_style")]
     pub cursor_style: CursorStyle,
     #[serde(default = "default_true")]
@@ -218,6 +279,7 @@ impl Default for TerminalConfig {
     fn default() -> Self {
         Self {
             scrollback_lines: default_scrollback_lines(),
+            scrollback: ScrollbackConfig::default(),
             cursor_style: default_cursor_style(),
             cursor_blink: true,
             cursor_blink_interval_ms: default_cursor_blink_interval(),
@@ -928,6 +990,10 @@ fn default_font_family() -> String {
 
 fn default_font_size() -> f32 {
     14.0
+}
+
+fn default_line_height() -> f32 {
+    1.2
 }
 
 fn default_theme() -> String {
