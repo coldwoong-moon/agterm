@@ -408,7 +408,7 @@ impl<'a> TerminalCanvas<'a> {
         for span in line {
             let span_len = span.text.chars().count();
             if col >= current_col && col < current_col + span_len {
-                return span.hyperlink.clone();
+                return span.hyperlink.as_ref().map(|arc| arc.as_ref().clone());
             }
             current_col += span_len;
         }

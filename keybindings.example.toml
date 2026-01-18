@@ -1,0 +1,262 @@
+# AgTerm Custom Keybindings
+#
+# This is an example keybindings file. Copy this to:
+# ~/.config/agterm/keybindings.toml
+#
+# Custom keybindings will override default keybindings.
+# Any key combination not defined here will use the default binding.
+
+# ==============================================================================
+# Tab Management
+# ==============================================================================
+
+[[bindings]]
+key = "t"
+modifiers = { cmd = true }
+action = "new_tab"
+description = "Open a new tab"
+
+[[bindings]]
+key = "w"
+modifiers = { cmd = true }
+action = "close_tab"
+description = "Close current tab"
+
+[[bindings]]
+key = "]"
+modifiers = { cmd = true }
+action = "next_tab"
+description = "Switch to next tab"
+
+[[bindings]]
+key = "["
+modifiers = { cmd = true }
+action = "prev_tab"
+description = "Switch to previous tab"
+
+[[bindings]]
+key = "d"
+modifiers = { cmd = true, shift = true }
+action = "duplicate_tab"
+description = "Duplicate current tab"
+
+# ==============================================================================
+# Direct Tab Selection (Cmd+1 through Cmd+9)
+# ==============================================================================
+
+[[bindings]]
+key = "1"
+modifiers = { cmd = true }
+action = "select_tab_1"
+
+[[bindings]]
+key = "2"
+modifiers = { cmd = true }
+action = "select_tab_2"
+
+[[bindings]]
+key = "3"
+modifiers = { cmd = true }
+action = "select_tab_3"
+
+[[bindings]]
+key = "4"
+modifiers = { cmd = true }
+action = "select_tab_4"
+
+[[bindings]]
+key = "5"
+modifiers = { cmd = true }
+action = "select_tab_5"
+
+[[bindings]]
+key = "6"
+modifiers = { cmd = true }
+action = "select_tab_6"
+
+[[bindings]]
+key = "7"
+modifiers = { cmd = true }
+action = "select_tab_7"
+
+[[bindings]]
+key = "8"
+modifiers = { cmd = true }
+action = "select_tab_8"
+
+[[bindings]]
+key = "9"
+modifiers = { cmd = true }
+action = "select_tab_9"
+
+# ==============================================================================
+# Clipboard Operations
+# ==============================================================================
+
+[[bindings]]
+key = "c"
+modifiers = { cmd = true, shift = true }
+action = "force_copy"
+description = "Force copy selection to clipboard"
+
+[[bindings]]
+key = "v"
+modifiers = { cmd = true }
+action = "paste"
+description = "Paste from clipboard"
+
+[[bindings]]
+key = "v"
+modifiers = { cmd = true, shift = true }
+action = "force_paste"
+description = "Force paste without bracketed paste mode"
+
+# ==============================================================================
+# Terminal Control
+# ==============================================================================
+
+[[bindings]]
+key = "k"
+modifiers = { cmd = true }
+action = "clear_screen"
+description = "Clear terminal screen"
+
+[[bindings]]
+key = "Home"
+modifiers = { cmd = true }
+action = "scroll_to_top"
+description = "Scroll to top of output"
+
+[[bindings]]
+key = "End"
+modifiers = { cmd = true }
+action = "scroll_to_bottom"
+description = "Scroll to bottom of output"
+
+# ==============================================================================
+# Font Size Adjustment
+# ==============================================================================
+
+[[bindings]]
+key = "+"
+modifiers = { cmd = true }
+action = "increase_font_size"
+description = "Increase font size"
+
+[[bindings]]
+key = "="
+modifiers = { cmd = true }
+action = "increase_font_size"
+description = "Increase font size (alternative)"
+
+[[bindings]]
+key = "-"
+modifiers = { cmd = true }
+action = "decrease_font_size"
+description = "Decrease font size"
+
+[[bindings]]
+key = "0"
+modifiers = { cmd = true }
+action = "reset_font_size"
+description = "Reset font size to default"
+
+# ==============================================================================
+# Debug Panel
+# ==============================================================================
+
+[[bindings]]
+key = "d"
+modifiers = { cmd = true }
+action = "toggle_debug_panel"
+description = "Toggle debug panel"
+
+[[bindings]]
+key = "F12"
+modifiers = {}
+action = "toggle_debug_panel"
+description = "Toggle debug panel (F12)"
+
+# ==============================================================================
+# Pane Management
+# ==============================================================================
+
+[[bindings]]
+key = "h"
+modifiers = { cmd = true, shift = true }
+action = "split_horizontal"
+description = "Split pane horizontally"
+
+[[bindings]]
+key = "|"
+modifiers = { cmd = true, shift = true }
+action = "split_vertical"
+description = "Split pane vertically"
+
+# ==============================================================================
+# Custom Keybindings Examples
+# ==============================================================================
+
+# Example: Remap Cmd+T to Ctrl+T (Linux/Windows style)
+# [[bindings]]
+# key = "t"
+# modifiers = { ctrl = true }
+# action = "new_tab"
+# description = "Open new tab (Ctrl+T)"
+
+# Example: Use Alt instead of Cmd (for Linux users)
+# [[bindings]]
+# key = "t"
+# modifiers = { alt = true }
+# action = "new_tab"
+# description = "Open new tab (Alt+T)"
+
+# Example: Vim-style tab navigation
+# [[bindings]]
+# key = "h"
+# modifiers = { ctrl = true }
+# action = "prev_tab"
+# description = "Previous tab (Vim style)"
+#
+# [[bindings]]
+# key = "l"
+# modifiers = { ctrl = true }
+# action = "next_tab"
+# description = "Next tab (Vim style)"
+
+# ==============================================================================
+# Notes
+# ==============================================================================
+#
+# Available Actions:
+# - new_tab              Create a new terminal tab
+# - close_tab            Close current tab
+# - next_tab             Switch to next tab
+# - prev_tab             Switch to previous tab
+# - duplicate_tab        Duplicate current tab
+# - select_tab_1..9      Jump to tab 1-9
+# - force_copy           Copy selection (always)
+# - paste                Paste from clipboard
+# - force_paste          Paste without bracketed mode
+# - clear_screen         Clear terminal
+# - scroll_to_top        Scroll to top
+# - scroll_to_bottom     Scroll to bottom
+# - increase_font_size   Make font bigger
+# - decrease_font_size   Make font smaller
+# - reset_font_size      Reset to default size
+# - toggle_debug_panel   Show/hide debug panel
+# - split_horizontal     Split pane horizontally
+# - split_vertical       Split pane vertically
+#
+# Available Modifiers:
+# - ctrl     Ctrl/Control key
+# - shift    Shift key
+# - alt      Alt/Option key
+# - cmd      Command/Super/Windows key
+#
+# Key Names:
+# - Regular characters: "a", "b", "1", "+", etc.
+# - Special keys: "Escape", "Tab", "Enter", "Backspace", "Delete"
+# - Arrow keys: "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"
+# - Function keys: "F1", "F2", ..., "F12"
+# - Home/End: "Home", "End", "PageUp", "PageDown"

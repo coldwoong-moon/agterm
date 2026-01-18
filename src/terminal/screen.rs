@@ -3,8 +3,12 @@
 use iced::Color;
 use std::cmp::{max, min};
 use std::collections::VecDeque;
+use std::sync::Arc;
 use unicode_width::UnicodeWidthChar;
 use vte::{Params, Parser, Perform};
+
+mod memory;
+pub use memory::{MemoryStats, StringInterner};
 
 /// Maximum scrollback buffer lines
 const MAX_SCROLLBACK: usize = 10000;
@@ -106,6 +110,11 @@ pub enum MouseEncoding {
 }
 
 /// Terminal cell with character and styling
+///
+/// Memory optimizations:
+/// - Uses Arc<String> for hyperlinks to enable string interning
+/// - Compact flag representation using bitfields would save ~8 bytes per cell
+/// - Size: ~56 bytes (char=4, AnsiColor=~8, flags=7, Arc<String>=8)
 #[derive(Clone, Debug)]
 pub struct Cell {
     pub c: char,
@@ -125,8 +134,11 @@ pub struct Cell {
     pub wide: bool,
     /// This cell is a placeholder for the second cell of a wide character
     pub placeholder: bool,
-    /// Hyperlink URL (for OSC 8 or auto-detected URLs)
-    pub hyperlink: Option<String>,
+    /// Hyperlink URL (for OSC 8 or auto-detected URLs) - uses Arc for string interning
+    pub hyperlink: Option<Arc<String>>,
+    /// Image data for this cell (for future image rendering support)
+    #[allow(dead_code)]
+    pub image: Option<ImageData>,
 }
 
 impl Default for Cell {
@@ -144,7 +156,74 @@ impl Default for Cell {
             wide: false,
             placeholder: false,
             hyperlink: None,
+            image: None,
         }
+    }
+}
+
+/// Image protocol types supported by terminal emulators
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageProtocol {
+    /// Sixel graphics (DEC VT340+)
+    Sixel,
+    /// Kitty graphics protocol
+    Kitty,
+    /// iTerm2 inline images protocol
+    ITerm2,
+}
+
+/// Image data structure for terminal image display
+#[derive(Clone, Debug)]
+pub struct ImageData {
+    /// Image width in pixels
+    pub width: u32,
+    /// Image height in pixels
+    pub height: u32,
+    /// Raw image data (protocol-specific format)
+    pub data: Vec<u8>,
+    /// Protocol used for this image
+    pub protocol: ImageProtocol,
+    /// Image ID for tracking (protocol-specific)
+    pub id: Option<u32>,
+}
+
+impl ImageData {
+    /// Create a new image data instance
+    pub fn new(width: u32, height: u32, data: Vec<u8>, protocol: ImageProtocol) -> Self {
+        Self {
+            width,
+            height,
+            data,
+            protocol,
+            id: None,
+        }
+    }
+
+    /// Create with explicit ID
+    pub fn with_id(
+        width: u32,
+        height: u32,
+        data: Vec<u8>,
+        protocol: ImageProtocol,
+        id: u32,
+    ) -> Self {
+        Self {
+            width,
+            height,
+            data,
+            protocol,
+            id: Some(id),
+        }
+    }
+
+    /// Check if image data exceeds a given size limit
+    pub fn exceeds_size_limit(&self, max_size_bytes: usize) -> bool {
+        self.data.len() > max_size_bytes
+    }
+
+    /// Get the approximate memory size in bytes
+    pub fn memory_size(&self) -> usize {
+        std::mem::size_of::<Self>() + self.data.len()
     }
 }
 
@@ -244,6 +323,10 @@ pub struct TerminalScreen {
     default_fg_color: Option<(u8, u8, u8)>,
     /// Default background color (OSC 11)
     default_bg_color: Option<(u8, u8, u8)>,
+    /// String interner for memory optimization (hyperlinks, URLs)
+    string_interner: StringInterner,
+    /// Cleanup counter - periodically clean up unused interned strings
+    interner_cleanup_counter: usize,
 }
 
 impl TerminalScreen {
@@ -291,6 +374,8 @@ impl TerminalScreen {
             color_palette: Self::initialize_default_palette(),
             default_fg_color: None,
             default_bg_color: None,
+            string_interner: StringInterner::new(),
+            interner_cleanup_counter: 0,
         }
     }
 
@@ -495,6 +580,9 @@ impl TerminalScreen {
                 let start_col = mat.start();
                 let end_col = mat.end();
 
+                // Intern the URL string to share memory across cells
+                let interned_url = self.string_interner.intern(url);
+
                 // Update cells with hyperlink
                 let mut char_index = 0;
                 for cell in row.iter_mut() {
@@ -502,7 +590,7 @@ impl TerminalScreen {
                         continue;
                     }
                     if char_index >= start_col && char_index < end_col {
-                        cell.hyperlink = Some(url.clone());
+                        cell.hyperlink = Some(Arc::clone(&interned_url));
                     }
                     char_index += 1;
                 }
@@ -522,17 +610,27 @@ impl TerminalScreen {
                 let start_col = mat.start();
                 let end_col = mat.end();
 
+                // Intern the URL string
+                let interned_url = self.string_interner.intern(url);
+
                 let mut char_index = 0;
                 for cell in row.iter_mut() {
                     if cell.placeholder {
                         continue;
                     }
                     if char_index >= start_col && char_index < end_col {
-                        cell.hyperlink = Some(url.clone());
+                        cell.hyperlink = Some(Arc::clone(&interned_url));
                     }
                     char_index += 1;
                 }
             }
+        }
+
+        // Periodically clean up unused interned strings (every 100 calls)
+        self.interner_cleanup_counter += 1;
+        if self.interner_cleanup_counter >= 100 {
+            self.string_interner.cleanup();
+            self.interner_cleanup_counter = 0;
         }
     }
 
@@ -695,6 +793,48 @@ impl TerminalScreen {
     /// This drains the pending_responses vec and returns it
     pub fn take_pending_responses(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending_responses)
+    }
+
+    /// Get memory usage statistics for the terminal screen
+    pub fn memory_stats(&self) -> MemoryStats {
+        let buffer_bytes = self
+            .buffer
+            .iter()
+            .map(|line| memory::line_memory_size(line))
+            .sum();
+
+        let scrollback_bytes = self
+            .scrollback
+            .iter()
+            .map(|line| memory::line_memory_size(line))
+            .sum();
+
+        let interner_bytes = self.string_interner.memory_usage();
+        let (interned_strings, interner_hits, interner_misses) = self.string_interner.stats();
+
+        let total_bytes = buffer_bytes + scrollback_bytes + interner_bytes;
+
+        MemoryStats {
+            buffer_lines: self.buffer.len(),
+            scrollback_lines: self.scrollback.len(),
+            buffer_bytes,
+            scrollback_bytes,
+            interner_bytes,
+            interned_strings,
+            interner_hits,
+            interner_misses,
+            total_bytes,
+        }
+    }
+
+    /// Get a human-readable string of memory usage
+    pub fn memory_usage_string(&self) -> String {
+        self.memory_stats().to_string()
+    }
+
+    /// Manually trigger string interner cleanup
+    pub fn cleanup_interner(&mut self) {
+        self.string_interner.cleanup();
     }
 
     /// Scroll screen up by n lines
@@ -1162,6 +1302,7 @@ impl Perform for TerminalScreen {
                     wide: true,
                     placeholder: false,
                     hyperlink: None,
+                    image: None,
                 };
 
                 // Write placeholder to next cell if there's space
@@ -1179,6 +1320,7 @@ impl Perform for TerminalScreen {
                         wide: false,
                         placeholder: true,
                         hyperlink: None,
+                        image: None,
                     };
                 }
 
@@ -1198,6 +1340,7 @@ impl Perform for TerminalScreen {
                     wide: false,
                     placeholder: false,
                     hyperlink: None,
+                    image: None,
                 };
                 self.cursor_col += 1;
             }

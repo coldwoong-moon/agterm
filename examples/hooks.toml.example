@@ -1,0 +1,247 @@
+# AgTerm Hooks Configuration Example
+# Place this file at: ~/.config/agterm/hooks.toml
+#
+# Hooks allow you to define custom actions triggered by terminal events.
+
+[[hooks]]
+name = "Long Command Complete"
+enabled = true
+
+[hooks.event_type]
+type = "CommandComplete"
+
+[hooks.action]
+type = "Notify"
+data = { title = "Command Complete", message = "Your long-running command has finished" }
+
+# ============================================================================
+# Bell Sound Hook
+# ============================================================================
+
+[[hooks]]
+name = "Error Bell"
+enabled = false  # Disabled by default
+
+[hooks.event_type]
+type = "Bell"
+
+[hooks.action]
+type = "PlaySound"
+data = { path = "/System/Library/Sounds/Basso.aiff", volume = 0.3 }
+
+# ============================================================================
+# Git Command Success Hook
+# ============================================================================
+
+[[hooks]]
+name = "Git Success"
+enabled = true
+
+[hooks.event_type]
+type = "CommandComplete"
+data = { command_pattern = "git.*", exit_code = 0 }
+
+[hooks.action]
+type = "Notify"
+data = { title = "Git Success", message = "Git command completed successfully" }
+
+# ============================================================================
+# Git Command Failure Hook
+# ============================================================================
+
+[[hooks]]
+name = "Git Failure"
+enabled = true
+
+[hooks.event_type]
+type = "CommandComplete"
+data = { command_pattern = "git.*", exit_code = 1 }
+
+[hooks.action]
+type = "Notify"
+data = { title = "Git Failed", message = "Git command failed" }
+
+# ============================================================================
+# Directory Change Hook
+# ============================================================================
+
+[[hooks]]
+name = "Home Directory"
+enabled = false  # Disabled by default
+
+[hooks.event_type]
+type = "DirectoryChange"
+data = { directory_pattern = "~" }
+
+[hooks.action]
+type = "Notify"
+data = { title = "Directory Changed", message = "Entered home directory" }
+
+# ============================================================================
+# Important Directory Hook
+# ============================================================================
+
+[[hooks]]
+name = "Production Directory Warning"
+enabled = true
+
+[hooks.event_type]
+type = "DirectoryChange"
+data = { directory_pattern = "/var/www/production" }
+
+[hooks.action]
+type = "Notify"
+data = { title = "⚠️  Production Environment", message = "You are now in the production directory!" }
+
+# ============================================================================
+# Error Pattern Detection
+# ============================================================================
+
+[[hooks]]
+name = "Error Pattern"
+enabled = false  # Disabled by default
+
+[hooks.event_type]
+type = "OutputMatch"
+data = { pattern = "(?i)(error|fail|fatal)" }
+
+[hooks.action]
+type = "Notify"
+data = { title = "Error Detected", message = "Error pattern detected in output" }
+
+# ============================================================================
+# Success Pattern Detection
+# ============================================================================
+
+[[hooks]]
+name = "Success Pattern"
+enabled = true
+
+[hooks.event_type]
+type = "OutputMatch"
+data = { pattern = "(?i)test.*passed|success|✓" }
+
+[hooks.action]
+type = "Notify"
+data = { title = "Success!", message = "Tests passed or operation successful" }
+
+# ============================================================================
+# Build Complete Hook
+# ============================================================================
+
+[[hooks]]
+name = "Build Complete"
+enabled = true
+
+[hooks.event_type]
+type = "CommandComplete"
+data = { command_pattern = "cargo build|npm run build|make", exit_code = 0 }
+
+[hooks.action]
+type = "PlaySound"
+data = { path = "/System/Library/Sounds/Glass.aiff", volume = 0.5 }
+
+# ============================================================================
+# Test Complete Hook
+# ============================================================================
+
+[[hooks]]
+name = "Test Complete"
+enabled = true
+
+[hooks.event_type]
+type = "CommandComplete"
+data = { command_pattern = "cargo test|npm test|pytest" }
+
+[hooks.action]
+type = "Notify"
+data = { title = "Tests Complete", message = "Test run finished" }
+
+# ============================================================================
+# Long Running Command Hook
+# ============================================================================
+
+[[hooks]]
+name = "Long Command Notifier"
+enabled = true
+
+[hooks.event_type]
+type = "CommandComplete"
+data = { command_pattern = "docker|cargo build --release|npm install" }
+
+[hooks.action]
+type = "Notify"
+data = { title = "Long Command Complete", message = "Your long-running command has finished" }
+
+# ============================================================================
+# Custom Action Hook
+# ============================================================================
+
+[[hooks]]
+name = "Custom Deployment"
+enabled = false
+
+[hooks.event_type]
+type = "CommandComplete"
+data = { command_pattern = "git push origin main", exit_code = 0 }
+
+[hooks.action]
+type = "Custom"
+data = { id = "trigger_deployment", params = { environment = "production", notify_slack = "true" } }
+
+# ============================================================================
+# Run Command Hook
+# ============================================================================
+
+[[hooks]]
+name = "Auto Backup"
+enabled = false  # Disabled by default
+
+[hooks.event_type]
+type = "DirectoryChange"
+data = { directory_pattern = "/important/project" }
+
+[hooks.action]
+type = "RunCommand"
+data = { command = "/usr/local/bin/backup-script.sh", args = ["/important/project"] }
+
+# ============================================================================
+# Multiple Sound Alert
+# ============================================================================
+
+[[hooks]]
+name = "Critical Error Sound"
+enabled = true
+
+[hooks.event_type]
+type = "OutputMatch"
+data = { pattern = "(?i)critical|fatal|panic" }
+
+[hooks.action]
+type = "PlaySound"
+data = { path = "/System/Library/Sounds/Sosumi.aiff", volume = 0.8 }
+
+# ============================================================================
+# Notes:
+# ============================================================================
+#
+# Event Types:
+#   - CommandComplete: Triggered when a command finishes
+#   - DirectoryChange: Triggered when the working directory changes
+#   - OutputMatch: Triggered when terminal output matches a pattern
+#   - Bell: Triggered when the terminal bell is activated
+#
+# Action Types:
+#   - Notify: Send a desktop notification
+#   - RunCommand: Execute a shell command
+#   - PlaySound: Play a sound file
+#   - Custom: Execute a custom registered action
+#
+# Pattern Matching:
+#   - command_pattern and pattern fields support regular expressions
+#   - Use (?i) prefix for case-insensitive matching
+#   - directory_pattern supports simple glob-style matching
+#
+# Volume:
+#   - Range: 0.0 (silent) to 1.0 (full volume)
+#   - Default: 0.5

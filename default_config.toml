@@ -84,6 +84,33 @@ mode = "default"                 # default, vim, emacs
 repeat_delay_ms = 500            # Initial delay before repeat starts (ms)
 repeat_rate_ms = 30              # Interval between repeats (ms) - 30ms ≈ 33 keys/sec
 
+# Key bindings are loaded from ~/.config/agterm/keybindings.toml
+# To customize keybindings, create that file with the following format:
+#
+# Example keybindings.toml:
+# [[bindings]]
+# key = "t"
+# modifiers = { cmd = true }
+# action = "new_tab"
+# description = "Open a new tab"
+#
+# [[bindings]]
+# key = "w"
+# modifiers = { cmd = true, shift = true }
+# action = "close_tab"
+# description = "Close current tab"
+#
+# Available actions:
+# - new_tab, close_tab, next_tab, prev_tab, duplicate_tab
+# - select_tab_1 through select_tab_9
+# - force_copy, paste, force_paste
+# - clear_screen, scroll_to_top, scroll_to_bottom
+# - increase_font_size, decrease_font_size, reset_font_size
+# - toggle_debug_panel
+# - split_horizontal, split_vertical
+#
+# Available modifiers: ctrl, shift, alt, cmd
+
 # ============================================================================
 # Shell Configuration
 # ============================================================================

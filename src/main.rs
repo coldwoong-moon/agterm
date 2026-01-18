@@ -206,7 +206,7 @@ pub struct StyledSpan {
     pub dim: bool,
     pub italic: bool,
     pub strikethrough: bool,
-    pub hyperlink: Option<String>,
+    pub hyperlink: Option<std::sync::Arc<String>>,
 }
 
 /// Convert terminal cells to styled spans
@@ -219,7 +219,7 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
     let mut current_dim = false;
     let mut current_italic = false;
     let mut current_strikethrough = false;
-    let mut current_hyperlink: Option<String> = None;
+    let mut current_hyperlink: Option<std::sync::Arc<String>> = None;
 
     for cell in cells {
         // Skip placeholder cells (second cell of wide characters)
@@ -333,10 +333,7 @@ fn raw_input_id() -> TextInputId {
 
 /// Get global configuration
 fn get_config() -> AppConfig {
-    APP_CONFIG
-        .get()
-        .cloned()
-        .unwrap_or_else(AppConfig::default)
+    APP_CONFIG.get().cloned().unwrap_or_else(AppConfig::default)
 }
 
 /// Main application state
@@ -404,8 +401,8 @@ impl Default for AgTerm {
         // Try to restore session first
         let (tabs, active_tab, font_size, next_tab_id) =
             if let Some((restored_tabs, restored_active, restored_font)) =
-                Self::restore_session(&config, &pty_manager) {
-
+                Self::restore_session(&config, &pty_manager)
+            {
                 // Calculate next_tab_id from restored tabs
                 let max_id = restored_tabs.iter().map(|t| t.id).max().unwrap_or(0);
                 tracing::info!("Session restored with {} tabs", restored_tabs.len());
@@ -413,17 +410,19 @@ impl Default for AgTerm {
                 (restored_tabs, restored_active, restored_font, max_id + 1)
             } else {
                 // No session to restore, create a fresh tab
-                let session_result = pty_manager.create_session(
-                    config.pty.default_rows,
-                    config.pty.default_cols,
-                );
+                let session_result =
+                    pty_manager.create_session(config.pty.default_rows, config.pty.default_cols);
                 let cwd = config
                     .general
                     .default_working_dir
                     .as_ref()
                     .and_then(|p| p.to_str())
                     .map(|s| s.to_string())
-                    .or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string()))
+                    .or_else(|| {
+                        std::env::current_dir()
+                            .ok()
+                            .map(|p| p.display().to_string())
+                    })
                     .unwrap_or_else(|| "~".to_string());
 
                 let (session_id, error_message) = match session_result {
@@ -565,7 +564,6 @@ impl std::fmt::Debug for Pane {
             .finish_non_exhaustive()
     }
 }
-
 
 /// A single terminal tab with block-based output
 struct TerminalTab {
@@ -749,13 +747,15 @@ impl AgTerm {
         let session_path = config.session_file_path();
 
         // Collect tab states
-        let tab_states: Vec<TabState> = self.tabs.iter().map(|tab| {
-            TabState {
+        let tab_states: Vec<TabState> = self
+            .tabs
+            .iter()
+            .map(|tab| TabState {
                 cwd: tab.cwd.clone(),
                 title: tab.title.clone(),
                 id: tab.id,
-            }
-        }).collect();
+            })
+            .collect();
 
         let session = SessionState {
             tabs: tab_states,
@@ -770,14 +770,20 @@ impl AgTerm {
     }
 
     /// Restore session from file and create tabs
-    fn restore_session(config: &AppConfig, pty_manager: &Arc<PtyManager>) -> Option<(Vec<TerminalTab>, usize, f32)> {
+    fn restore_session(
+        config: &AppConfig,
+        pty_manager: &Arc<PtyManager>,
+    ) -> Option<(Vec<TerminalTab>, usize, f32)> {
         if !config.general.session.restore_on_startup {
             return None;
         }
 
         let session_path = config.session_file_path();
         if !session_path.exists() {
-            tracing::info!("No session file found at {:?}, starting fresh", session_path);
+            tracing::info!(
+                "No session file found at {:?}, starting fresh",
+                session_path
+            );
             return None;
         }
 
@@ -792,10 +798,8 @@ impl AgTerm {
 
                 let mut tabs = Vec::new();
                 for tab_state in session.tabs {
-                    let session_result = pty_manager.create_session(
-                        config.pty.default_rows,
-                        config.pty.default_cols,
-                    );
+                    let session_result = pty_manager
+                        .create_session(config.pty.default_rows, config.pty.default_cols);
 
                     let (session_id, error_message) = match session_result {
                         Ok(id) => {
@@ -830,9 +834,9 @@ impl AgTerm {
                         bell_pending: false,
                         title: tab_state.title,
                         last_copied_selection: None,
-                    pane_layout: PaneLayout::Single,
-                    panes: Vec::new(),
-                    focused_pane: 0,
+                        pane_layout: PaneLayout::Single,
+                        panes: Vec::new(),
+                        focused_pane: 0,
                     };
 
                     tabs.push(tab);
@@ -933,9 +937,9 @@ impl AgTerm {
                         bell_pending: false,
                         title: None, // New tab starts with no custom title
                         last_copied_selection: None,
-                    pane_layout: PaneLayout::Single,
-                    panes: Vec::new(),
-                    focused_pane: 0,
+                        pane_layout: PaneLayout::Single,
+                        panes: Vec::new(),
+                        focused_pane: 0,
                     };
                     self.tabs.push(tab);
                     self.active_tab = self.tabs.len() - 1;
@@ -1058,27 +1062,42 @@ impl AgTerm {
 
             Message::KeyPressed(key, modifiers) => {
                 // Handle Cmd+Shift+C: Force clipboard copy
-                if modifiers.command() && modifiers.shift() && matches!(key.as_ref(), Key::Character("c")) {
+                if modifiers.command()
+                    && modifiers.shift()
+                    && matches!(key.as_ref(), Key::Character("c"))
+                {
                     return self.update(Message::ForceClipboardCopy);
                 }
 
                 // Handle Cmd+Shift+V: Force clipboard paste (without bracketed paste)
-                if modifiers.command() && modifiers.shift() && matches!(key.as_ref(), Key::Character("v")) {
+                if modifiers.command()
+                    && modifiers.shift()
+                    && matches!(key.as_ref(), Key::Character("v"))
+                {
                     return self.update(Message::ForceClipboardPaste);
                 }
 
                 // Handle Cmd+Shift+D: Duplicate tab
-                if modifiers.command() && modifiers.shift() && matches!(key.as_ref(), Key::Character("d")) {
+                if modifiers.command()
+                    && modifiers.shift()
+                    && matches!(key.as_ref(), Key::Character("d"))
+                {
                     return self.update(Message::DuplicateTab);
                 }
 
                 // Handle Cmd+Shift+H: Split horizontal
-                if modifiers.command() && modifiers.shift() && matches!(key.as_ref(), Key::Character("h")) {
+                if modifiers.command()
+                    && modifiers.shift()
+                    && matches!(key.as_ref(), Key::Character("h"))
+                {
                     return self.update(Message::SplitHorizontal);
                 }
 
-                // Handle Cmd+Shift+| (pipe): Split vertical  
-                if modifiers.command() && modifiers.shift() && matches!(key.as_ref(), Key::Character("|")) {
+                // Handle Cmd+Shift+| (pipe): Split vertical
+                if modifiers.command()
+                    && modifiers.shift()
+                    && matches!(key.as_ref(), Key::Character("|"))
+                {
                     return self.update(Message::SplitVertical);
                 }
 
@@ -1147,8 +1166,12 @@ impl AgTerm {
                         }
                         Key::Character("-") => return self.update(Message::DecreaseFontSize),
                         Key::Character("0") => return self.update(Message::ResetFontSize),
-                        Key::Named(keyboard::key::Named::Home) => return self.update(Message::ScrollToTop),
-                        Key::Named(keyboard::key::Named::End) => return self.update(Message::ScrollToBottom),
+                        Key::Named(keyboard::key::Named::Home) => {
+                            return self.update(Message::ScrollToTop)
+                        }
+                        Key::Named(keyboard::key::Named::End) => {
+                            return self.update(Message::ScrollToBottom)
+                        }
                         _ => {}
                     }
                 }
@@ -1221,7 +1244,8 @@ impl AgTerm {
                         // Send clipboard content to PTY with bracketed paste if enabled
                         if let Some(session_id) = &tab.session_id {
                             let config = get_config();
-                            let bracketed_paste = config.terminal.bracketed_paste && tab.screen.bracketed_paste_mode();
+                            let bracketed_paste = config.terminal.bracketed_paste
+                                && tab.screen.bracketed_paste_mode();
 
                             if bracketed_paste {
                                 // Wrap paste with bracketed paste escape codes
@@ -1272,7 +1296,8 @@ impl AgTerm {
                 if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                     if let Some(selection) = &tab.canvas_state.selection {
                         if selection.active && selection.start != selection.end {
-                            let selected_text = get_selected_text(&tab.parsed_line_cache, selection);
+                            let selected_text =
+                                get_selected_text(&tab.parsed_line_cache, selection);
                             if !selected_text.is_empty() {
                                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                                     let _ = clipboard.set_text(selected_text);
@@ -1324,7 +1349,8 @@ impl AgTerm {
             Message::ScrollToBottom => {
                 // Scroll to bottom of terminal output (Cmd+End)
                 if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-                    tab.canvas_state.scroll_to_bottom(tab.parsed_line_cache.len(), self.font_size);
+                    tab.canvas_state
+                        .scroll_to_bottom(tab.parsed_line_cache.len(), self.font_size);
                 }
                 Task::none()
             }
@@ -1491,7 +1517,6 @@ impl AgTerm {
                                 tab.canvas_state
                                     .scroll_to_bottom(tab.parsed_line_cache.len(), self.font_size);
                             }
-
                         }
                     }
                 }
@@ -1540,12 +1565,14 @@ impl AgTerm {
                             if selection.active && selection.start != selection.end {
                                 // Check if this selection is different from the last copied one
                                 let current_selection = (selection.start, selection.end);
-                                let should_copy = tab.last_copied_selection.as_ref() != Some(&current_selection);
+                                let should_copy =
+                                    tab.last_copied_selection.as_ref() != Some(&current_selection);
 
                                 if should_copy && !tab.canvas_state.is_dragging {
                                     // Copy selection to clipboard
                                     use terminal_canvas::get_selected_text;
-                                    let selected_text = get_selected_text(&tab.parsed_line_cache, selection);
+                                    let selected_text =
+                                        get_selected_text(&tab.parsed_line_cache, selection);
                                     if !selected_text.is_empty() {
                                         if let Ok(mut clipboard) = arboard::Clipboard::new() {
                                             let _ = clipboard.set_text(selected_text);
@@ -2186,7 +2213,8 @@ mod tests {
         let mut app = create_test_app();
 
         // Set a very long title
-        let long_title = "This is a very long tab title that should be truncated for display purposes";
+        let long_title =
+            "This is a very long tab title that should be truncated for display purposes";
         app.tabs[0].title = Some(long_title.to_string());
 
         // The view_tab_bar function should truncate to 30 chars (27 + "...")

@@ -5,6 +5,7 @@
 //! 2. User config at ~/.config/agterm/config.toml (or platform-specific location)
 //! 3. Project-local config at ./.agterm/config.toml
 
+use regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -177,6 +178,8 @@ pub struct TerminalConfig {
     pub bracketed_paste: bool,
     #[serde(default = "default_true")]
     pub auto_scroll_on_output: bool,
+    #[serde(default)]
+    pub images: ImageConfig,
 }
 
 impl Default for TerminalConfig {
@@ -191,6 +194,7 @@ impl Default for TerminalConfig {
             bell_volume: default_bell_volume(),
             bracketed_paste: true,
             auto_scroll_on_output: true,
+            images: ImageConfig::default(),
         }
     }
 }
@@ -226,6 +230,26 @@ impl Default for BellStyle {
     }
 }
 
+/// Image display configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageConfig {
+    /// Enable image display support
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    /// Maximum image size in bytes (default: 10MB)
+    #[serde(default = "default_image_max_size")]
+    pub max_size_bytes: usize,
+}
+
+impl Default for ImageConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_size_bytes: default_image_max_size(),
+        }
+    }
+}
+
 /// Keybinding configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeybindingsConfig {
@@ -235,6 +259,8 @@ pub struct KeybindingsConfig {
     pub custom: HashMap<String, String>,
     #[serde(default)]
     pub keyboard: KeyboardConfig,
+    #[serde(default)]
+    pub bindings: Vec<KeyBinding>,
 }
 
 /// Keyboard repeat configuration
@@ -246,12 +272,136 @@ pub struct KeyboardConfig {
     pub repeat_rate_ms: u64,
 }
 
+/// A single key binding mapping key combination to action
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct KeyBinding {
+    /// Key name (e.g., "t", "c", "Escape", "ArrowUp", "F12")
+    pub key: String,
+    /// Modifier keys (Ctrl, Shift, Alt, Cmd)
+    #[serde(default)]
+    pub modifiers: KeyModifiers,
+    /// Action to execute (e.g., "new_tab", "copy", "paste")
+    pub action: String,
+    /// Optional description for documentation
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// Modifier keys for key bindings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+pub struct KeyModifiers {
+    #[serde(default)]
+    pub ctrl: bool,
+    #[serde(default)]
+    pub shift: bool,
+    #[serde(default)]
+    pub alt: bool,
+    #[serde(default)]
+    pub cmd: bool,
+}
+
+impl KeyBinding {
+    /// Create a new key binding
+    pub fn new(key: String, modifiers: KeyModifiers, action: String) -> Self {
+        Self {
+            key,
+            modifiers,
+            action,
+            description: None,
+        }
+    }
+
+    /// Create a new key binding with description
+    pub fn with_description(
+        key: String,
+        modifiers: KeyModifiers,
+        action: String,
+        description: String,
+    ) -> Self {
+        Self {
+            key,
+            modifiers,
+            action,
+            description: Some(description),
+        }
+    }
+
+    /// Get a human-readable representation of the key combination
+    pub fn key_combination(&self) -> String {
+        let mut parts = Vec::new();
+        if self.modifiers.ctrl {
+            parts.push("Ctrl");
+        }
+        if self.modifiers.shift {
+            parts.push("Shift");
+        }
+        if self.modifiers.alt {
+            parts.push("Alt");
+        }
+        if self.modifiers.cmd {
+            parts.push("Cmd");
+        }
+        parts.push(&self.key);
+        parts.join("+")
+    }
+}
+
+impl KeyModifiers {
+    /// Create modifiers with no keys pressed
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Create modifiers with Ctrl
+    pub fn ctrl() -> Self {
+        Self {
+            ctrl: true,
+            ..Default::default()
+        }
+    }
+
+    /// Create modifiers with Cmd (Command/Super)
+    pub fn cmd() -> Self {
+        Self {
+            cmd: true,
+            ..Default::default()
+        }
+    }
+
+    /// Create modifiers with Shift
+    pub fn shift() -> Self {
+        Self {
+            shift: true,
+            ..Default::default()
+        }
+    }
+
+    /// Create modifiers with Ctrl+Shift
+    pub fn ctrl_shift() -> Self {
+        Self {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        }
+    }
+
+    /// Create modifiers with Cmd+Shift
+    pub fn cmd_shift() -> Self {
+        Self {
+            cmd: true,
+            shift: true,
+            ..Default::default()
+        }
+    }
+}
+
 impl Default for KeybindingsConfig {
     fn default() -> Self {
         Self {
             mode: default_keybinding_mode(),
             custom: HashMap::new(),
             keyboard: KeyboardConfig::default(),
+            bindings: Self::default_bindings(),
         }
     }
 }
@@ -262,6 +412,299 @@ impl Default for KeyboardConfig {
             repeat_delay_ms: default_repeat_delay(),
             repeat_rate_ms: default_repeat_rate(),
         }
+    }
+}
+
+impl KeybindingsConfig {
+    /// Get default key bindings
+    pub fn default_bindings() -> Vec<KeyBinding> {
+        vec![
+            // Tab management
+            KeyBinding::with_description(
+                "t".to_string(),
+                KeyModifiers::cmd(),
+                "new_tab".to_string(),
+                "Open a new tab".to_string(),
+            ),
+            KeyBinding::with_description(
+                "w".to_string(),
+                KeyModifiers::cmd(),
+                "close_tab".to_string(),
+                "Close current tab".to_string(),
+            ),
+            KeyBinding::with_description(
+                "]".to_string(),
+                KeyModifiers::cmd(),
+                "next_tab".to_string(),
+                "Switch to next tab".to_string(),
+            ),
+            KeyBinding::with_description(
+                "[".to_string(),
+                KeyModifiers::cmd(),
+                "prev_tab".to_string(),
+                "Switch to previous tab".to_string(),
+            ),
+            KeyBinding::with_description(
+                "d".to_string(),
+                KeyModifiers::cmd_shift(),
+                "duplicate_tab".to_string(),
+                "Duplicate current tab".to_string(),
+            ),
+            // Tab selection (Cmd+1 through Cmd+9)
+            KeyBinding::new(
+                "1".to_string(),
+                KeyModifiers::cmd(),
+                "select_tab_1".to_string(),
+            ),
+            KeyBinding::new(
+                "2".to_string(),
+                KeyModifiers::cmd(),
+                "select_tab_2".to_string(),
+            ),
+            KeyBinding::new(
+                "3".to_string(),
+                KeyModifiers::cmd(),
+                "select_tab_3".to_string(),
+            ),
+            KeyBinding::new(
+                "4".to_string(),
+                KeyModifiers::cmd(),
+                "select_tab_4".to_string(),
+            ),
+            KeyBinding::new(
+                "5".to_string(),
+                KeyModifiers::cmd(),
+                "select_tab_5".to_string(),
+            ),
+            KeyBinding::new(
+                "6".to_string(),
+                KeyModifiers::cmd(),
+                "select_tab_6".to_string(),
+            ),
+            KeyBinding::new(
+                "7".to_string(),
+                KeyModifiers::cmd(),
+                "select_tab_7".to_string(),
+            ),
+            KeyBinding::new(
+                "8".to_string(),
+                KeyModifiers::cmd(),
+                "select_tab_8".to_string(),
+            ),
+            KeyBinding::new(
+                "9".to_string(),
+                KeyModifiers::cmd(),
+                "select_tab_9".to_string(),
+            ),
+            // Clipboard
+            KeyBinding::with_description(
+                "c".to_string(),
+                KeyModifiers::cmd_shift(),
+                "force_copy".to_string(),
+                "Force copy selection".to_string(),
+            ),
+            KeyBinding::with_description(
+                "v".to_string(),
+                KeyModifiers::cmd(),
+                "paste".to_string(),
+                "Paste from clipboard".to_string(),
+            ),
+            KeyBinding::with_description(
+                "v".to_string(),
+                KeyModifiers::cmd_shift(),
+                "force_paste".to_string(),
+                "Force paste without bracketed paste".to_string(),
+            ),
+            // Terminal control
+            KeyBinding::with_description(
+                "k".to_string(),
+                KeyModifiers::cmd(),
+                "clear_screen".to_string(),
+                "Clear terminal screen".to_string(),
+            ),
+            KeyBinding::with_description(
+                "Home".to_string(),
+                KeyModifiers::cmd(),
+                "scroll_to_top".to_string(),
+                "Scroll to top".to_string(),
+            ),
+            KeyBinding::with_description(
+                "End".to_string(),
+                KeyModifiers::cmd(),
+                "scroll_to_bottom".to_string(),
+                "Scroll to bottom".to_string(),
+            ),
+            // Font size
+            KeyBinding::with_description(
+                "+".to_string(),
+                KeyModifiers::cmd(),
+                "increase_font_size".to_string(),
+                "Increase font size".to_string(),
+            ),
+            KeyBinding::with_description(
+                "=".to_string(),
+                KeyModifiers::cmd(),
+                "increase_font_size".to_string(),
+                "Increase font size".to_string(),
+            ),
+            KeyBinding::with_description(
+                "-".to_string(),
+                KeyModifiers::cmd(),
+                "decrease_font_size".to_string(),
+                "Decrease font size".to_string(),
+            ),
+            KeyBinding::with_description(
+                "0".to_string(),
+                KeyModifiers::cmd(),
+                "reset_font_size".to_string(),
+                "Reset font size".to_string(),
+            ),
+            // Debug panel
+            KeyBinding::with_description(
+                "d".to_string(),
+                KeyModifiers::cmd(),
+                "toggle_debug_panel".to_string(),
+                "Toggle debug panel".to_string(),
+            ),
+            KeyBinding::with_description(
+                "F12".to_string(),
+                KeyModifiers::none(),
+                "toggle_debug_panel".to_string(),
+                "Toggle debug panel".to_string(),
+            ),
+            // Pane management
+            KeyBinding::with_description(
+                "h".to_string(),
+                KeyModifiers::cmd_shift(),
+                "split_horizontal".to_string(),
+                "Split pane horizontally".to_string(),
+            ),
+            KeyBinding::with_description(
+                "|".to_string(),
+                KeyModifiers::cmd_shift(),
+                "split_vertical".to_string(),
+                "Split pane vertically".to_string(),
+            ),
+        ]
+    }
+
+    /// Get keybindings file path (~/.config/agterm/keybindings.toml)
+    pub fn keybindings_file_path() -> Option<PathBuf> {
+        dirs::config_dir().map(|config_dir| config_dir.join("agterm").join("keybindings.toml"))
+    }
+
+    /// Load keybindings from file and merge with defaults
+    pub fn load_keybindings() -> Vec<KeyBinding> {
+        let mut bindings = Self::default_bindings();
+
+        if let Some(path) = Self::keybindings_file_path() {
+            if path.exists() {
+                match std::fs::read_to_string(&path) {
+                    Ok(contents) => {
+                        #[derive(Deserialize)]
+                        struct KeybindingsFile {
+                            #[serde(default)]
+                            bindings: Vec<KeyBinding>,
+                        }
+
+                        match toml::from_str::<KeybindingsFile>(&contents) {
+                            Ok(file) => {
+                                // Merge custom bindings (override defaults)
+                                for custom_binding in file.bindings {
+                                    // Remove any existing binding with same key+modifiers
+                                    bindings.retain(|b| {
+                                        b.key != custom_binding.key
+                                            || b.modifiers != custom_binding.modifiers
+                                    });
+                                    bindings.push(custom_binding);
+                                }
+                                tracing::info!("Loaded custom keybindings from {:?}", path);
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to parse keybindings.toml: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to read keybindings.toml: {}", e);
+                    }
+                }
+            }
+        }
+
+        bindings
+    }
+
+    /// Save keybindings to file
+    pub fn save_keybindings(bindings: &[KeyBinding]) -> Result<(), ConfigError> {
+        let path = Self::keybindings_file_path().ok_or_else(|| {
+            ConfigError::IoError("Could not determine keybindings directory".to_string())
+        })?;
+
+        // Create config directory if it doesn't exist
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| ConfigError::IoError(e.to_string()))?;
+        }
+
+        #[derive(Serialize)]
+        struct KeybindingsFile<'a> {
+            bindings: &'a [KeyBinding],
+        }
+
+        let file = KeybindingsFile { bindings };
+        let toml_string = toml::to_string_pretty(&file)
+            .map_err(|e| ConfigError::SerializeError(e.to_string()))?;
+
+        std::fs::write(&path, toml_string).map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+        tracing::info!("Saved {} keybindings to {:?}", bindings.len(), path);
+        Ok(())
+    }
+
+    /// Check for conflicting keybindings
+    pub fn detect_conflicts(bindings: &[KeyBinding]) -> Vec<(KeyBinding, KeyBinding)> {
+        let mut conflicts = Vec::new();
+        let mut seen: HashMap<(String, KeyModifiers), KeyBinding> = HashMap::new();
+
+        for binding in bindings {
+            let key = (binding.key.clone(), binding.modifiers.clone());
+            if let Some(existing) = seen.get(&key) {
+                conflicts.push((binding.clone(), existing.clone()));
+            } else {
+                seen.insert(key, binding.clone());
+            }
+        }
+
+        conflicts
+    }
+
+    /// Reset keybindings to defaults
+    pub fn reset_to_defaults() -> Result<(), ConfigError> {
+        let path = Self::keybindings_file_path().ok_or_else(|| {
+            ConfigError::IoError("Could not determine keybindings directory".to_string())
+        })?;
+
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| ConfigError::IoError(e.to_string()))?;
+            tracing::info!("Reset keybindings to defaults (removed {:?})", path);
+        }
+
+        Ok(())
+    }
+
+    /// Find binding by key combination
+    pub fn find_binding(&self, key: &str, modifiers: &KeyModifiers) -> Option<&KeyBinding> {
+        self.bindings
+            .iter()
+            .find(|b| b.key == key && &b.modifiers == modifiers)
+    }
+
+    /// Get all bindings for a specific action
+    pub fn bindings_for_action(&self, action: &str) -> Vec<&KeyBinding> {
+        self.bindings
+            .iter()
+            .filter(|b| b.action == action)
+            .collect()
     }
 }
 
@@ -478,6 +921,10 @@ fn default_bell_style() -> BellStyle {
 
 fn default_bell_volume() -> f32 {
     0.5 // 50% volume
+}
+
+fn default_image_max_size() -> usize {
+    10 * 1024 * 1024 // 10MB
 }
 
 fn default_keybinding_mode() -> String {
@@ -1189,6 +1636,427 @@ impl Snippet {
 }
 
 // ============================================================================
+// Hook System
+// ============================================================================
+
+/// Hook for custom terminal event handling
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Hook {
+    /// Hook name (for identification)
+    pub name: String,
+    /// Event type that triggers this hook
+    pub event_type: HookEvent,
+    /// Action to perform when triggered
+    pub action: HookAction,
+    /// Whether this hook is enabled
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// Terminal event types that can trigger hooks
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", content = "data")]
+pub enum HookEvent {
+    /// Command execution completed
+    CommandComplete {
+        /// Optional command pattern to match (regex)
+        #[serde(default)]
+        command_pattern: Option<String>,
+        /// Optional exit code to match (None matches any)
+        #[serde(default)]
+        exit_code: Option<i32>,
+    },
+    /// Directory changed
+    DirectoryChange {
+        /// Optional directory pattern to match (glob)
+        #[serde(default)]
+        directory_pattern: Option<String>,
+    },
+    /// Terminal output matches a pattern
+    OutputMatch {
+        /// Pattern to match in output (regex)
+        pattern: String,
+    },
+    /// Terminal bell received
+    Bell,
+}
+
+/// Actions to perform when a hook is triggered
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", content = "data")]
+pub enum HookAction {
+    /// Send a desktop notification
+    Notify {
+        /// Notification title
+        title: String,
+        /// Notification message
+        message: String,
+    },
+    /// Run a shell command
+    RunCommand {
+        /// Command to execute
+        command: String,
+        /// Arguments for the command
+        #[serde(default)]
+        args: Vec<String>,
+    },
+    /// Play a sound file
+    PlaySound {
+        /// Path to sound file
+        path: String,
+        /// Volume (0.0 to 1.0)
+        #[serde(default = "default_hook_volume")]
+        volume: f32,
+    },
+    /// Custom function (for future extension)
+    Custom {
+        /// Custom action identifier
+        id: String,
+        /// Custom action parameters
+        #[serde(default)]
+        params: HashMap<String, String>,
+    },
+}
+
+fn default_hook_volume() -> f32 {
+    0.5
+}
+
+impl Hook {
+    /// Create a new hook
+    pub fn new(name: String, event_type: HookEvent, action: HookAction) -> Self {
+        Self {
+            name,
+            event_type,
+            action,
+            enabled: true,
+        }
+    }
+
+    /// Get the hooks directory path (~/.config/agterm/)
+    pub fn hooks_dir() -> Option<PathBuf> {
+        dirs::config_dir().map(|config_dir| config_dir.join("agterm"))
+    }
+
+    /// Get the hooks file path (~/.config/agterm/hooks.toml)
+    pub fn hooks_file_path() -> Option<PathBuf> {
+        Self::hooks_dir().map(|dir| dir.join("hooks.toml"))
+    }
+
+    /// Load hooks from file
+    pub fn load_from_file() -> Result<Vec<Hook>, ConfigError> {
+        let path = Self::hooks_file_path().ok_or_else(|| {
+            ConfigError::IoError("Could not determine hooks directory".to_string())
+        })?;
+
+        if !path.exists() {
+            // Return default hooks if file doesn't exist
+            return Ok(Self::default_hooks());
+        }
+
+        let contents =
+            std::fs::read_to_string(&path).map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+        #[derive(Deserialize)]
+        struct HooksFile {
+            hooks: Vec<Hook>,
+        }
+
+        let file: HooksFile = toml::from_str(&contents)
+            .map_err(|e| ConfigError::ParseError(format!("Failed to parse hooks.toml: {}", e)))?;
+
+        Ok(file.hooks)
+    }
+
+    /// Save hooks to file
+    pub fn save_to_file(hooks: &[Hook]) -> Result<(), ConfigError> {
+        let hooks_dir = Self::hooks_dir().ok_or_else(|| {
+            ConfigError::IoError("Could not determine hooks directory".to_string())
+        })?;
+
+        // Create config directory if it doesn't exist
+        std::fs::create_dir_all(&hooks_dir).map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+        let path = hooks_dir.join("hooks.toml");
+
+        #[derive(Serialize)]
+        struct HooksFile<'a> {
+            hooks: &'a [Hook],
+        }
+
+        let file = HooksFile { hooks };
+        let toml_string = toml::to_string_pretty(&file)
+            .map_err(|e| ConfigError::SerializeError(e.to_string()))?;
+
+        std::fs::write(&path, toml_string).map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+        tracing::info!("Saved {} hooks to {:?}", hooks.len(), path);
+        Ok(())
+    }
+
+    /// Get default hooks
+    pub fn default_hooks() -> Vec<Hook> {
+        vec![
+            // Notify on long-running command completion
+            Hook::new(
+                "Long Command Complete".to_string(),
+                HookEvent::CommandComplete {
+                    command_pattern: None,
+                    exit_code: None,
+                },
+                HookAction::Notify {
+                    title: "Command Complete".to_string(),
+                    message: "Your long-running command has finished".to_string(),
+                },
+            ),
+            // Play sound on error
+            Hook {
+                name: "Error Bell".to_string(),
+                event_type: HookEvent::Bell,
+                action: HookAction::PlaySound {
+                    path: "/System/Library/Sounds/Basso.aiff".to_string(),
+                    volume: 0.3,
+                },
+                enabled: false, // Disabled by default
+            },
+            // Notify on directory change to home
+            Hook {
+                name: "Home Directory".to_string(),
+                event_type: HookEvent::DirectoryChange {
+                    directory_pattern: Some("~".to_string()),
+                },
+                action: HookAction::Notify {
+                    title: "Directory Changed".to_string(),
+                    message: "Entered home directory".to_string(),
+                },
+                enabled: false, // Disabled by default
+            },
+            // Notify on error output
+            Hook {
+                name: "Error Pattern".to_string(),
+                event_type: HookEvent::OutputMatch {
+                    pattern: "(?i)(error|fail|fatal)".to_string(),
+                },
+                action: HookAction::Notify {
+                    title: "Error Detected".to_string(),
+                    message: "Error pattern detected in output".to_string(),
+                },
+                enabled: false, // Disabled by default
+            },
+        ]
+    }
+
+    /// Initialize hooks file with defaults if it doesn't exist
+    pub fn initialize_default_file() -> Result<(), ConfigError> {
+        let path = Self::hooks_file_path().ok_or_else(|| {
+            ConfigError::IoError("Could not determine hooks directory".to_string())
+        })?;
+
+        if !path.exists() {
+            let default_hooks = Self::default_hooks();
+            Self::save_to_file(&default_hooks)?;
+            tracing::info!("Created default hooks file at {:?}", path);
+        }
+
+        Ok(())
+    }
+
+    /// Check if this hook should trigger for the given event
+    pub fn matches_event(&self, event: &HookEvent) -> bool {
+        if !self.enabled {
+            return false;
+        }
+
+        match (&self.event_type, event) {
+            (
+                HookEvent::CommandComplete {
+                    command_pattern: pattern1,
+                    exit_code: code1,
+                },
+                HookEvent::CommandComplete {
+                    command_pattern: pattern2,
+                    exit_code: code2,
+                },
+            ) => {
+                // Check exit code match
+                let code_matches = match (code1, code2) {
+                    (Some(c1), Some(c2)) => c1 == c2,
+                    (None, _) => true, // None matches any
+                    (Some(_), None) => false,
+                };
+
+                // Check command pattern match
+                let pattern_matches = match (pattern1, pattern2) {
+                    (Some(p1), Some(p2)) => {
+                        // Try regex match
+                        if let Ok(re) = regex::Regex::new(p1) {
+                            re.is_match(p2)
+                        } else {
+                            p1 == p2 // Fallback to exact match
+                        }
+                    }
+                    (None, _) => true, // None matches any
+                    (Some(_), None) => false,
+                };
+
+                code_matches && pattern_matches
+            }
+            (
+                HookEvent::DirectoryChange {
+                    directory_pattern: pattern1,
+                },
+                HookEvent::DirectoryChange {
+                    directory_pattern: pattern2,
+                },
+            ) => {
+                match (pattern1, pattern2) {
+                    (Some(p1), Some(p2)) => {
+                        // Simple glob-style matching
+                        p1 == p2 || p1 == "*" || p2.contains(p1)
+                    }
+                    (None, _) => true, // None matches any
+                    (Some(_), None) => false,
+                }
+            }
+            (
+                HookEvent::OutputMatch { pattern: pattern1 },
+                HookEvent::OutputMatch { pattern: pattern2 },
+            ) => {
+                // Try regex match
+                if let Ok(re) = regex::Regex::new(pattern1) {
+                    re.is_match(pattern2)
+                } else {
+                    pattern1 == pattern2 // Fallback to exact match
+                }
+            }
+            (HookEvent::Bell, HookEvent::Bell) => true,
+            _ => false,
+        }
+    }
+
+    /// Execute the action associated with this hook
+    pub fn execute(&self) -> Result<(), String> {
+        match &self.action {
+            HookAction::Notify { title, message } => {
+                tracing::info!(
+                    "Hook '{}' triggered notification: {} - {}",
+                    self.name,
+                    title,
+                    message
+                );
+                // TODO: Implement actual notification system
+                Ok(())
+            }
+            HookAction::RunCommand { command, args } => {
+                tracing::info!(
+                    "Hook '{}' running command: {} {:?}",
+                    self.name,
+                    command,
+                    args
+                );
+                // TODO: Implement command execution
+                Ok(())
+            }
+            HookAction::PlaySound { path, volume } => {
+                tracing::info!(
+                    "Hook '{}' playing sound: {} (volume: {})",
+                    self.name,
+                    path,
+                    volume
+                );
+                // TODO: Integrate with sound system
+                Ok(())
+            }
+            HookAction::Custom { id, params } => {
+                tracing::info!(
+                    "Hook '{}' executing custom action: {} with params: {:?}",
+                    self.name,
+                    id,
+                    params
+                );
+                // TODO: Implement custom action registry
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Hook manager for handling terminal events
+pub struct HookManager {
+    hooks: Vec<Hook>,
+}
+
+impl HookManager {
+    /// Create a new hook manager
+    pub fn new() -> Self {
+        let hooks = Hook::load_from_file().unwrap_or_else(|e| {
+            tracing::warn!("Failed to load hooks: {}, using defaults", e);
+            Hook::default_hooks()
+        });
+
+        Self { hooks }
+    }
+
+    /// Get all hooks
+    pub fn hooks(&self) -> &[Hook] {
+        &self.hooks
+    }
+
+    /// Add a new hook
+    pub fn add_hook(&mut self, hook: Hook) {
+        self.hooks.push(hook);
+    }
+
+    /// Remove a hook by name
+    pub fn remove_hook(&mut self, name: &str) -> bool {
+        if let Some(pos) = self.hooks.iter().position(|h| h.name == name) {
+            self.hooks.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Enable or disable a hook by name
+    pub fn set_hook_enabled(&mut self, name: &str, enabled: bool) -> bool {
+        if let Some(hook) = self.hooks.iter_mut().find(|h| h.name == name) {
+            hook.enabled = enabled;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Process an event and execute matching hooks
+    pub fn process_event(&self, event: &HookEvent) {
+        for hook in &self.hooks {
+            if hook.matches_event(event) {
+                if let Err(e) = hook.execute() {
+                    tracing::error!("Failed to execute hook '{}': {}", hook.name, e);
+                }
+            }
+        }
+    }
+
+    /// Save current hooks to file
+    pub fn save(&self) -> Result<(), ConfigError> {
+        Hook::save_to_file(&self.hooks)
+    }
+
+    /// Reload hooks from file
+    pub fn reload(&mut self) -> Result<(), ConfigError> {
+        self.hooks = Hook::load_from_file()?;
+        Ok(())
+    }
+}
+
+impl Default for HookManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1764,5 +2632,521 @@ mod tests {
 
         let ff = Snippet::find_by_trigger(&snippets, "/ff").unwrap();
         assert_eq!(ff.content, "find . -name ");
+    }
+
+    // ========== Hook System Tests ==========
+
+    #[test]
+    fn test_hook_creation() {
+        let hook = Hook::new(
+            "Test Hook".to_string(),
+            HookEvent::Bell,
+            HookAction::Notify {
+                title: "Test".to_string(),
+                message: "Test message".to_string(),
+            },
+        );
+
+        assert_eq!(hook.name, "Test Hook");
+        assert_eq!(hook.event_type, HookEvent::Bell);
+        assert!(hook.enabled);
+    }
+
+    #[test]
+    fn test_hook_serialization() {
+        let hook = Hook::new(
+            "Test".to_string(),
+            HookEvent::CommandComplete {
+                command_pattern: Some("git.*".to_string()),
+                exit_code: Some(0),
+            },
+            HookAction::Notify {
+                title: "Success".to_string(),
+                message: "Command completed".to_string(),
+            },
+        );
+
+        let toml_str = toml::to_string(&hook).unwrap();
+        let deserialized: Hook = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(hook, deserialized);
+    }
+
+    #[test]
+    fn test_default_hooks() {
+        let hooks = Hook::default_hooks();
+        assert!(!hooks.is_empty());
+
+        let has_notify = hooks
+            .iter()
+            .any(|h| matches!(h.action, HookAction::Notify { .. }));
+        assert!(has_notify);
+
+        let has_bell = hooks
+            .iter()
+            .any(|h| matches!(h.event_type, HookEvent::Bell));
+        assert!(has_bell);
+    }
+
+    #[test]
+    fn test_hook_event_matching_bell() {
+        let hook = Hook::new(
+            "Bell Test".to_string(),
+            HookEvent::Bell,
+            HookAction::Notify {
+                title: "Bell".to_string(),
+                message: "Bell received".to_string(),
+            },
+        );
+
+        assert!(hook.matches_event(&HookEvent::Bell));
+        assert!(!hook.matches_event(&HookEvent::CommandComplete {
+            command_pattern: None,
+            exit_code: None,
+        }));
+    }
+
+    #[test]
+    fn test_hook_event_matching_command_complete() {
+        let hook = Hook::new(
+            "Command Test".to_string(),
+            HookEvent::CommandComplete {
+                command_pattern: Some("git.*".to_string()),
+                exit_code: Some(0),
+            },
+            HookAction::Notify {
+                title: "Git Success".to_string(),
+                message: "Git command succeeded".to_string(),
+            },
+        );
+
+        assert!(hook.matches_event(&HookEvent::CommandComplete {
+            command_pattern: Some("git status".to_string()),
+            exit_code: Some(0),
+        }));
+
+        assert!(!hook.matches_event(&HookEvent::CommandComplete {
+            command_pattern: Some("ls".to_string()),
+            exit_code: Some(0),
+        }));
+
+        assert!(!hook.matches_event(&HookEvent::CommandComplete {
+            command_pattern: Some("git status".to_string()),
+            exit_code: Some(1),
+        }));
+    }
+
+    #[test]
+    fn test_hook_event_matching_wildcard() {
+        let hook = Hook::new(
+            "Any Command".to_string(),
+            HookEvent::CommandComplete {
+                command_pattern: None,
+                exit_code: None,
+            },
+            HookAction::Notify {
+                title: "Command".to_string(),
+                message: "Any command completed".to_string(),
+            },
+        );
+
+        assert!(hook.matches_event(&HookEvent::CommandComplete {
+            command_pattern: Some("anything".to_string()),
+            exit_code: Some(0),
+        }));
+
+        assert!(hook.matches_event(&HookEvent::CommandComplete {
+            command_pattern: Some("something else".to_string()),
+            exit_code: Some(1),
+        }));
+    }
+
+    #[test]
+    fn test_hook_event_matching_directory_change() {
+        let hook = Hook::new(
+            "Home Dir".to_string(),
+            HookEvent::DirectoryChange {
+                directory_pattern: Some("home".to_string()),
+            },
+            HookAction::Notify {
+                title: "Directory".to_string(),
+                message: "Changed to home".to_string(),
+            },
+        );
+
+        assert!(hook.matches_event(&HookEvent::DirectoryChange {
+            directory_pattern: Some("/home/user".to_string()),
+        }));
+
+        assert!(!hook.matches_event(&HookEvent::DirectoryChange {
+            directory_pattern: Some("/tmp".to_string()),
+        }));
+    }
+
+    #[test]
+    fn test_hook_event_matching_output_pattern() {
+        let hook = Hook::new(
+            "Error Pattern".to_string(),
+            HookEvent::OutputMatch {
+                pattern: "(?i)error".to_string(),
+            },
+            HookAction::Notify {
+                title: "Error".to_string(),
+                message: "Error detected".to_string(),
+            },
+        );
+
+        assert!(hook.matches_event(&HookEvent::OutputMatch {
+            pattern: "Error occurred".to_string(),
+        }));
+
+        assert!(hook.matches_event(&HookEvent::OutputMatch {
+            pattern: "ERROR: something failed".to_string(),
+        }));
+
+        assert!(!hook.matches_event(&HookEvent::OutputMatch {
+            pattern: "Success".to_string(),
+        }));
+    }
+
+    #[test]
+    fn test_hook_disabled() {
+        let mut hook = Hook::new(
+            "Disabled Hook".to_string(),
+            HookEvent::Bell,
+            HookAction::Notify {
+                title: "Test".to_string(),
+                message: "Test".to_string(),
+            },
+        );
+
+        hook.enabled = false;
+        assert!(!hook.matches_event(&HookEvent::Bell));
+    }
+
+    #[test]
+    fn test_hook_action_types() {
+        let notify_hook = Hook::new(
+            "Notify".to_string(),
+            HookEvent::Bell,
+            HookAction::Notify {
+                title: "Title".to_string(),
+                message: "Message".to_string(),
+            },
+        );
+        assert!(matches!(notify_hook.action, HookAction::Notify { .. }));
+
+        let command_hook = Hook::new(
+            "Command".to_string(),
+            HookEvent::Bell,
+            HookAction::RunCommand {
+                command: "echo".to_string(),
+                args: vec!["hello".to_string()],
+            },
+        );
+        assert!(matches!(command_hook.action, HookAction::RunCommand { .. }));
+
+        let sound_hook = Hook::new(
+            "Sound".to_string(),
+            HookEvent::Bell,
+            HookAction::PlaySound {
+                path: "/path/to/sound.wav".to_string(),
+                volume: 0.5,
+            },
+        );
+        assert!(matches!(sound_hook.action, HookAction::PlaySound { .. }));
+
+        let custom_hook = Hook::new(
+            "Custom".to_string(),
+            HookEvent::Bell,
+            HookAction::Custom {
+                id: "custom_action".to_string(),
+                params: HashMap::new(),
+            },
+        );
+        assert!(matches!(custom_hook.action, HookAction::Custom { .. }));
+    }
+
+    #[test]
+    fn test_hook_manager_creation() {
+        let manager = HookManager::new();
+        assert!(!manager.hooks().is_empty());
+    }
+
+    #[test]
+    fn test_hook_manager_add_remove() {
+        let mut manager = HookManager::new();
+        let initial_count = manager.hooks().len();
+
+        let hook = Hook::new(
+            "New Hook".to_string(),
+            HookEvent::Bell,
+            HookAction::Notify {
+                title: "Test".to_string(),
+                message: "Test".to_string(),
+            },
+        );
+
+        manager.add_hook(hook);
+        assert_eq!(manager.hooks().len(), initial_count + 1);
+
+        assert!(manager.remove_hook("New Hook"));
+        assert_eq!(manager.hooks().len(), initial_count);
+
+        assert!(!manager.remove_hook("Nonexistent Hook"));
+    }
+
+    #[test]
+    fn test_hook_manager_enable_disable() {
+        let mut manager = HookManager::new();
+
+        let hook = Hook::new(
+            "Toggle Hook".to_string(),
+            HookEvent::Bell,
+            HookAction::Notify {
+                title: "Test".to_string(),
+                message: "Test".to_string(),
+            },
+        );
+        manager.add_hook(hook);
+
+        assert!(manager.set_hook_enabled("Toggle Hook", false));
+        let hook = manager
+            .hooks()
+            .iter()
+            .find(|h| h.name == "Toggle Hook")
+            .unwrap();
+        assert!(!hook.enabled);
+
+        assert!(manager.set_hook_enabled("Toggle Hook", true));
+        let hook = manager
+            .hooks()
+            .iter()
+            .find(|h| h.name == "Toggle Hook")
+            .unwrap();
+        assert!(hook.enabled);
+
+        assert!(!manager.set_hook_enabled("Nonexistent", false));
+    }
+
+    #[test]
+    fn test_hook_manager_process_event() {
+        let manager = HookManager::new();
+        manager.process_event(&HookEvent::Bell);
+        manager.process_event(&HookEvent::CommandComplete {
+            command_pattern: None,
+            exit_code: None,
+        });
+    }
+
+    #[test]
+    fn test_hook_save_and_load() {
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let hooks_file = temp_dir.path().join("hooks.toml");
+
+        let hooks = vec![
+            Hook::new(
+                "Test1".to_string(),
+                HookEvent::Bell,
+                HookAction::Notify {
+                    title: "Test1".to_string(),
+                    message: "Message1".to_string(),
+                },
+            ),
+            Hook::new(
+                "Test2".to_string(),
+                HookEvent::CommandComplete {
+                    command_pattern: None,
+                    exit_code: Some(0),
+                },
+                HookAction::RunCommand {
+                    command: "echo".to_string(),
+                    args: vec!["done".to_string()],
+                },
+            ),
+        ];
+
+        #[derive(Serialize)]
+        struct HooksFile<'a> {
+            hooks: &'a [Hook],
+        }
+        let file = HooksFile { hooks: &hooks };
+        let toml_string = toml::to_string_pretty(&file).unwrap();
+        std::fs::write(&hooks_file, toml_string).unwrap();
+
+        let contents = std::fs::read_to_string(&hooks_file).unwrap();
+
+        #[derive(Deserialize)]
+        struct HooksFileLoad {
+            hooks: Vec<Hook>,
+        }
+        let loaded: HooksFileLoad = toml::from_str(&contents).unwrap();
+
+        assert_eq!(loaded.hooks.len(), 2);
+        assert_eq!(loaded.hooks[0].name, "Test1");
+        assert_eq!(loaded.hooks[1].name, "Test2");
+    }
+
+    #[test]
+    fn test_hook_paths() {
+        if let Some(hooks_dir) = Hook::hooks_dir() {
+            assert!(hooks_dir.to_string_lossy().contains("agterm"));
+        }
+
+        if let Some(hooks_file) = Hook::hooks_file_path() {
+            assert!(hooks_file.to_string_lossy().ends_with("hooks.toml"));
+        }
+    }
+
+    #[test]
+    fn test_hook_execute_methods() {
+        let hooks = Hook::default_hooks();
+
+        for hook in hooks {
+            let result = hook.execute();
+            assert!(result.is_ok());
+        }
+    }
+
+    // ========== Keybinding Tests ==========
+
+    #[test]
+    fn test_keybinding_creation() {
+        let binding = KeyBinding::new("t".to_string(), KeyModifiers::cmd(), "new_tab".to_string());
+
+        assert_eq!(binding.key, "t");
+        assert_eq!(binding.action, "new_tab");
+        assert_eq!(binding.modifiers.cmd, true);
+        assert_eq!(binding.modifiers.ctrl, false);
+    }
+
+    #[test]
+    fn test_keybinding_key_combination() {
+        let binding = KeyBinding::new(
+            "t".to_string(),
+            KeyModifiers::cmd_shift(),
+            "new_tab".to_string(),
+        );
+
+        assert_eq!(binding.key_combination(), "Shift+Cmd+t");
+    }
+
+    #[test]
+    fn test_default_bindings() {
+        let bindings = KeybindingsConfig::default_bindings();
+
+        assert!(!bindings.is_empty());
+
+        // Check that specific bindings exist
+        let has_new_tab = bindings.iter().any(|b| b.action == "new_tab");
+        let has_close_tab = bindings.iter().any(|b| b.action == "close_tab");
+        let has_copy = bindings.iter().any(|b| b.action == "force_copy");
+
+        assert!(has_new_tab);
+        assert!(has_close_tab);
+        assert!(has_copy);
+    }
+
+    #[test]
+    fn test_conflict_detection_no_conflicts() {
+        let bindings = vec![
+            KeyBinding::new("t".to_string(), KeyModifiers::cmd(), "new_tab".to_string()),
+            KeyBinding::new(
+                "w".to_string(),
+                KeyModifiers::cmd(),
+                "close_tab".to_string(),
+            ),
+            KeyBinding::new(
+                "t".to_string(),
+                KeyModifiers::ctrl(),
+                "different_action".to_string(),
+            ),
+        ];
+
+        let conflicts = KeybindingsConfig::detect_conflicts(&bindings);
+        assert_eq!(conflicts.len(), 0);
+    }
+
+    #[test]
+    fn test_conflict_detection_with_conflicts() {
+        let binding1 = KeyBinding::new("t".to_string(), KeyModifiers::cmd(), "new_tab".to_string());
+        let binding2 = KeyBinding::new(
+            "t".to_string(),
+            KeyModifiers::cmd(),
+            "other_action".to_string(),
+        );
+
+        let bindings = vec![binding1, binding2];
+
+        let conflicts = KeybindingsConfig::detect_conflicts(&bindings);
+        assert_eq!(conflicts.len(), 1);
+    }
+
+    #[test]
+    fn test_find_binding() {
+        let config = KeybindingsConfig::default();
+
+        // Find Cmd+T binding
+        let binding = config.find_binding("t", &KeyModifiers::cmd());
+        assert!(binding.is_some());
+        assert_eq!(binding.unwrap().action, "new_tab");
+
+        // Try to find non-existent binding
+        let no_binding = config.find_binding("x", &KeyModifiers::cmd());
+        assert!(no_binding.is_none());
+    }
+
+    #[test]
+    fn test_bindings_for_action() {
+        let config = KeybindingsConfig::default();
+
+        let bindings = config.bindings_for_action("toggle_debug_panel");
+        assert!(bindings.len() >= 1); // Should have at least one binding for debug panel
+    }
+
+    #[test]
+    fn test_key_modifiers() {
+        let ctrl = KeyModifiers::ctrl();
+        assert!(ctrl.ctrl);
+        assert!(!ctrl.shift);
+        assert!(!ctrl.alt);
+        assert!(!ctrl.cmd);
+
+        let cmd_shift = KeyModifiers::cmd_shift();
+        assert!(cmd_shift.cmd);
+        assert!(cmd_shift.shift);
+        assert!(!cmd_shift.ctrl);
+        assert!(!cmd_shift.alt);
+    }
+
+    #[test]
+    fn test_keybinding_serialization() {
+        let binding = KeyBinding::with_description(
+            "t".to_string(),
+            KeyModifiers::cmd(),
+            "new_tab".to_string(),
+            "Open a new tab".to_string(),
+        );
+
+        // Serialize to TOML
+        let toml_str = toml::to_string(&binding).unwrap();
+
+        // Deserialize back
+        let deserialized: KeyBinding = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(binding.key, deserialized.key);
+        assert_eq!(binding.action, deserialized.action);
+        assert_eq!(binding.modifiers, deserialized.modifiers);
+        assert_eq!(binding.description, deserialized.description);
+    }
+
+    #[test]
+    fn test_keybindings_file_path() {
+        if let Some(path) = KeybindingsConfig::keybindings_file_path() {
+            assert!(path.to_string_lossy().contains("agterm"));
+            assert!(path.to_string_lossy().ends_with("keybindings.toml"));
+        }
     }
 }
