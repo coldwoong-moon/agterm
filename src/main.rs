@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 mod config;
 mod debug;
 mod logging;
+mod notification;
+mod shell;
 mod sound;
 mod terminal;
 mod terminal_canvas;
@@ -23,6 +25,8 @@ use config::AppConfig;
 use debug::panel::TerminalState;
 use debug::{DebugPanel, DebugPanelMessage};
 use logging::{LogBuffer, LoggingConfig};
+use notification::NotificationManager;
+use shell::ShellInfo;
 use terminal_canvas::{CursorState, CursorStyle, TerminalCanvas, TerminalCanvasState};
 use theme::Theme;
 
@@ -322,6 +326,40 @@ fn main() -> iced::Result {
     tracing::info!("AgTerm starting");
     tracing::info!("Configuration loaded from default + user overrides");
 
+    // Log shell information
+    if config.shell.program.is_none() {
+        if let Some(default_shell) = ShellInfo::default_shell() {
+            tracing::info!(
+                shell = %default_shell.path.display(),
+                shell_type = ?default_shell.shell_type,
+                "Using default shell"
+            );
+        }
+
+        // Show shell recommendation if different from default
+        if let Some(recommended) = shell::recommend_shell() {
+            let default = ShellInfo::default_shell();
+            if default.is_none()
+                || default
+                    .as_ref()
+                    .map(|d| d.shell_type != recommended.shell_type)
+                    .unwrap_or(false)
+            {
+                tracing::info!(
+                    recommended_shell = %recommended.path.display(),
+                    shell_type = ?recommended.shell_type,
+                    description = recommended.shell_type.description(),
+                    "Recommended shell available - configure in [shell] section"
+                );
+            }
+        }
+    } else {
+        tracing::info!(
+            configured_shell = %config.shell.program.as_ref().unwrap(),
+            "Using configured shell"
+        );
+    }
+
     iced::application("AgTerm - AI Agent Terminal", AgTerm::update, AgTerm::view)
         .subscription(AgTerm::subscription)
         .font(D2CODING_FONT)
@@ -387,6 +425,10 @@ struct AgTerm {
     tab_rename_input: String,
     /// Current theme
     current_theme: Theme,
+    /// Current keyboard modifiers (for Ctrl+Click URL opening)
+    current_modifiers: Modifiers,
+    /// Desktop notification manager
+    notification_manager: NotificationManager,
 }
 
 impl Default for AgTerm {
@@ -507,6 +549,9 @@ impl Default for AgTerm {
         let current_theme = theme::Theme::by_name(&config.appearance.theme)
             .unwrap_or_else(|| theme::Theme::warp_dark());
 
+        // Initialize notification manager
+        let notification_manager = NotificationManager::new(config.notification.clone());
+
         tracing::info!("AgTerm application initialized");
         Self {
             tabs,
@@ -531,6 +576,8 @@ impl Default for AgTerm {
             tab_rename_mode: None,
             tab_rename_input: String::new(),
             current_theme,
+            current_modifiers: Modifiers::default(),
+            notification_manager,
         }
     }
 }
@@ -1677,6 +1724,7 @@ impl AgTerm {
 
                 // Check background tabs for bell notifications
                 let mut background_bell_triggered = false;
+                let mut background_bell_tab_titles = Vec::new();
                 for (i, tab) in self.tabs.iter_mut().enumerate() {
                     if i == self.active_tab {
                         continue; // Skip active tab (already processed above)
@@ -1686,12 +1734,23 @@ impl AgTerm {
                     if tab.screen.take_bell_triggered() {
                         tab.bell_pending = true;
                         background_bell_triggered = true;
+                        // Collect tab title for notification
+                        let tab_title = tab
+                            .title
+                            .as_ref()
+                            .cloned()
+                            .unwrap_or_else(|| format!("Terminal {}", i + 1));
+                        background_bell_tab_titles.push(tab_title);
                     }
                 }
 
-                // Play bell sound for background tabs (after releasing tabs borrow)
+                // Play bell sound and send notifications for background tabs
                 if background_bell_triggered {
                     self.play_bell_sound();
+                    // Send desktop notification for each background tab with bell
+                    for tab_title in background_bell_tab_titles {
+                        self.notification_manager.notify_bell(&tab_title);
+                    }
                 }
 
                 // Check for URL clicks
@@ -2397,6 +2456,8 @@ mod tests {
             tab_rename_mode: None,
             tab_rename_input: String::new(),
             current_theme: theme::Theme::warp_dark(),
+            current_modifiers: Modifiers::default(),
+            notification_manager: NotificationManager::new(config::NotificationConfig::default()),
         }
     }
 

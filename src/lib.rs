@@ -8,5 +8,7 @@
 //! - Configuration management
 
 pub mod config;
+pub mod notification;
+pub mod shell;
 pub mod terminal;
 pub mod theme;

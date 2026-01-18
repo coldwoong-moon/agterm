@@ -133,14 +133,39 @@ repeat_rate_ms = 30              # Interval between repeats (ms) - 30ms ≈ 33 k
 # ============================================================================
 
 [shell]
+# Shell program path - if not specified, will auto-detect from $SHELL
 # program = "/bin/zsh"
+# Shell arguments
 # args = ["--login"]
+# Launch as login shell
 login_shell = true
+# Working directory - if not specified, uses current directory
+# working_directory = "~"
 
 # Environment variables to set for shell
 # [shell.env]
 # TERM = "xterm-256color"
 # COLORTERM = "truecolor"
+
+# ============================================================================
+# Environment Variables Configuration
+# ============================================================================
+
+[environment]
+inherit = true                   # Inherit parent process environment
+term = "xterm-256color"         # TERM environment variable
+
+# Additional environment variables
+[environment.variables]
+AGTERM = "1"
+COLORTERM = "truecolor"
+
+# Optional: Set LANG
+# lang = "en_US.UTF-8"
+
+# Optional: Modify PATH
+# path_prepend = ["/usr/local/bin"]
+# path_append = ["$HOME/.local/bin"]
 
 # ============================================================================
 # Mouse Configuration
@@ -235,3 +260,13 @@ enabled = false                  # Enable debug panel on startup (or set AGTERM_
 show_fps = true                  # Show FPS in debug panel
 show_pty_stats = true            # Show PTY statistics
 log_buffer_size = 50             # Number of log entries to keep in debug panel
+
+# ============================================================================
+# Notifications
+# ============================================================================
+
+[notification]
+enabled = true                   # Enable desktop notifications
+on_bell = true                   # Show notification when bell is triggered (background tabs only)
+on_command_complete = false      # Show notification when command completes (future feature)
+timeout_seconds = 5              # Notification timeout in seconds

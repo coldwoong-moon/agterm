@@ -55,6 +55,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub shell: ShellConfig,
     #[serde(default)]
+    pub environment: EnvironmentConfig,
+    #[serde(default)]
     pub mouse: MouseConfig,
     #[serde(default)]
     pub pty: PtyConfig,
@@ -64,6 +66,8 @@ pub struct AppConfig {
     pub logging: LoggingConfig,
     #[serde(default)]
     pub debug: DebugConfig,
+    #[serde(default)]
+    pub notification: NotificationConfig,
 }
 
 /// General application settings
@@ -275,6 +279,8 @@ pub struct TerminalConfig {
     pub images: ImageConfig,
     #[serde(default)]
     pub bracket: BracketConfig,
+    #[serde(default)]
+    pub link: LinkConfig,
 }
 
 impl Default for TerminalConfig {
@@ -295,6 +301,7 @@ impl Default for TerminalConfig {
             auto_scroll_on_output: true,
             images: ImageConfig::default(),
             bracket: BracketConfig::default(),
+            link: LinkConfig::default(),
         }
     }
 }
@@ -366,6 +373,30 @@ impl Default for BracketConfig {
         Self {
             enabled: true,
             highlight_color: default_bracket_color(),
+        }
+    }
+}
+
+/// Link detection and opening configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LinkConfig {
+    /// Enable link detection and Ctrl+Click to open
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Modifier key for opening links ("ctrl", "cmd", "alt")
+    #[serde(default = "default_link_modifier")]
+    pub modifier: String,
+    /// Show underline for detected links
+    #[serde(default = "default_true")]
+    pub underline: bool,
+}
+
+impl Default for LinkConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            modifier: default_link_modifier(),
+            underline: true,
         }
     }
 }
@@ -831,14 +862,21 @@ impl KeybindingsConfig {
 /// Shell configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellConfig {
+    /// Shell program path (None = auto-detect)
     #[serde(default)]
     pub program: Option<String>,
+    /// Shell arguments
     #[serde(default)]
     pub args: Vec<String>,
+    /// Environment variables for the shell
     #[serde(default)]
     pub env: HashMap<String, String>,
+    /// Launch as login shell
     #[serde(default = "default_true")]
     pub login_shell: bool,
+    /// Working directory (None = current directory)
+    #[serde(default)]
+    pub working_directory: Option<PathBuf>,
 }
 
 impl Default for ShellConfig {
@@ -848,6 +886,96 @@ impl Default for ShellConfig {
             args: Vec::new(),
             env: HashMap::new(),
             login_shell: true,
+            working_directory: None,
+        }
+    }
+}
+
+/// Environment variable configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvironmentConfig {
+    /// Inherit environment variables from parent process
+    #[serde(default = "default_true")]
+    pub inherit: bool,
+    /// Additional/override environment variables
+    #[serde(default)]
+    pub variables: HashMap<String, String>,
+    /// TERM environment variable (default: xterm-256color)
+    #[serde(default = "default_term")]
+    pub term: String,
+    /// LANG environment variable
+    #[serde(default)]
+    pub lang: Option<String>,
+    /// Directories to prepend to PATH
+    #[serde(default)]
+    pub path_prepend: Vec<String>,
+    /// Directories to append to PATH
+    #[serde(default)]
+    pub path_append: Vec<String>,
+}
+
+impl Default for EnvironmentConfig {
+    fn default() -> Self {
+        Self {
+            inherit: true,
+            variables: HashMap::new(),
+            term: default_term(),
+            lang: None,
+            path_prepend: Vec::new(),
+            path_append: Vec::new(),
+        }
+    }
+}
+
+impl EnvironmentConfig {
+    /// Convert to PtyEnvironment for PTY session creation
+    pub fn to_pty_environment(&self) -> crate::terminal::pty::PtyEnvironment {
+        use crate::terminal::pty::PtyEnvironment;
+
+        let mut variables = HashMap::new();
+
+        // Set TERM
+        variables.insert("TERM".to_string(), self.term.clone());
+
+        // Set LANG if specified
+        if let Some(lang) = &self.lang {
+            variables.insert("LANG".to_string(), lang.clone());
+        }
+
+        // Handle PATH modifications
+        if !self.path_prepend.is_empty() || !self.path_append.is_empty() {
+            let current_path = std::env::var("PATH").unwrap_or_default();
+            let mut path_parts = Vec::new();
+
+            // Add prepend paths
+            path_parts.extend(self.path_prepend.iter().cloned());
+
+            // Add current PATH
+            if !current_path.is_empty() {
+                path_parts.push(current_path);
+            }
+
+            // Add append paths
+            path_parts.extend(self.path_append.iter().cloned());
+
+            let new_path = path_parts.join(":");
+            variables.insert("PATH".to_string(), new_path);
+        }
+
+        // Add default AgTerm variables
+        variables.insert("COLORTERM".to_string(), "truecolor".to_string());
+        variables.insert("TERM_PROGRAM".to_string(), "agterm".to_string());
+        variables.insert("AGTERM_VERSION".to_string(), env!("CARGO_PKG_VERSION").to_string());
+
+        // Apply user-specified variables (these override defaults)
+        for (key, value) in &self.variables {
+            variables.insert(key.clone(), value.clone());
+        }
+
+        PtyEnvironment {
+            inherit_env: self.inherit,
+            variables,
+            unset: Vec::new(),
         }
     }
 }
@@ -999,6 +1127,30 @@ impl Default for DebugConfig {
     }
 }
 
+/// Notification configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub on_bell: bool,
+    #[serde(default = "default_false")]
+    pub on_command_complete: bool,
+    #[serde(default = "default_notification_timeout")]
+    pub timeout_seconds: u64,
+}
+
+impl Default for NotificationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            on_bell: true,
+            on_command_complete: false,
+            timeout_seconds: default_notification_timeout(),
+        }
+    }
+}
+
 // ============================================================================
 // Default value functions
 // ============================================================================
@@ -1063,6 +1215,13 @@ fn default_bracket_color() -> String {
     "#5c8afa".to_string() // Accent blue for bracket highlights
 }
 
+fn default_link_modifier() -> String {
+    #[cfg(target_os = "macos")]
+    return "cmd".to_string();
+    #[cfg(not(target_os = "macos"))]
+    return "ctrl".to_string();
+}
+
 fn default_keybinding_mode() -> String {
     "default".to_string()
 }
@@ -1081,6 +1240,10 @@ fn default_selection_mode() -> SelectionMode {
 
 fn default_max_sessions() -> usize {
     32
+}
+
+fn default_timeout() -> u64 {
+    5
 }
 
 fn default_cols() -> u16 {
@@ -1107,6 +1270,7 @@ fn default_log_buffer_size() -> usize {
     50
 }
 
+
 fn default_true() -> bool {
     true
 }
@@ -1114,6 +1278,16 @@ fn default_true() -> bool {
 fn default_false() -> bool {
     false
 }
+
+fn default_term() -> String {
+    "xterm-256color".to_string()
+}
+
+fn default_notification_timeout() -> u64 {
+    5
+}
+
+
 
 // ============================================================================
 // Configuration loading
@@ -1207,11 +1381,13 @@ impl AppConfig {
             terminal: overlay.terminal,
             keybindings: overlay.keybindings,
             shell: overlay.shell,
+            environment: overlay.environment,
             mouse: overlay.mouse,
             pty: overlay.pty,
             tui: overlay.tui,
             logging: overlay.logging,
             debug: overlay.debug,
+            notification: overlay.notification,
         }
     }
 
@@ -1245,11 +1421,13 @@ impl Default for AppConfig {
             terminal: TerminalConfig::default(),
             keybindings: KeybindingsConfig::default(),
             shell: ShellConfig::default(),
+            environment: EnvironmentConfig::default(),
             mouse: MouseConfig::default(),
             pty: PtyConfig::default(),
             tui: TuiConfig::default(),
             logging: LoggingConfig::default(),
             debug: DebugConfig::default(),
+            notification: NotificationConfig::default(),
         })
     }
 }

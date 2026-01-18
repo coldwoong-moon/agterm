@@ -1,6 +1,7 @@
 //! PTY (Pseudo-Terminal) management
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use crate::shell::ShellInfo;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -10,6 +11,17 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
 pub type PtyId = Uuid;
+
+/// Environment variable configuration for PTY sessions
+#[derive(Debug, Clone)]
+pub struct PtyEnvironment {
+    /// Inherit environment variables from parent process
+    pub inherit_env: bool,
+    /// Additional/override environment variables
+    pub variables: HashMap<String, String>,
+    /// Variables to unset/remove
+    pub unset: Vec<String>,
+}
 
 /// Maximum output buffer size per session (1MB)
 const MAX_OUTPUT_BUFFER_SIZE: usize = 1024 * 1024;
@@ -36,6 +48,7 @@ enum PtyCommand {
         id: PtyId,
         rows: u16,
         cols: u16,
+        environment: Option<PtyEnvironment>,
         response: Sender<Result<(), PtyError>>,
     },
     Write {
@@ -74,19 +87,36 @@ struct InternalPtySession {
     output_receiver: Receiver<Vec<u8>>,
 }
 
+/// Get the default shell path, using auto-detection if available
 fn default_shell() -> String {
+    // Try to use the shell detection system
+    if let Some(shell_info) = ShellInfo::default_shell() {
+        debug!(
+            shell_type = ?shell_info.shell_type,
+            path = %shell_info.path.display(),
+            "Auto-detected shell"
+        );
+        return shell_info.path.to_string_lossy().to_string();
+    }
+
+    // Fallback to environment variables
     #[cfg(windows)]
     {
         std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
     }
     #[cfg(not(windows))]
     {
+        warn!("Could not auto-detect shell, falling back to /bin/zsh");
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
     }
 }
 
 #[instrument(skip_all, fields(rows = rows, cols = cols))]
-fn create_pty_session(rows: u16, cols: u16) -> Result<InternalPtySession, PtyError> {
+fn create_pty_session(
+    rows: u16,
+    cols: u16,
+    environment: Option<PtyEnvironment>,
+) -> Result<InternalPtySession, PtyError> {
     debug!("Creating PTY session");
     let pty_system = native_pty_system();
     let size = PtySize {
@@ -108,11 +138,36 @@ fn create_pty_session(rows: u16, cols: u16) -> Result<InternalPtySession, PtyErr
     let mut cmd = CommandBuilder::new(&shell);
     cmd.cwd(&working_dir);
 
-    // Enhanced shell integration environment variables
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env("TERM_PROGRAM", "agterm");
-    cmd.env("AGTERM_VERSION", env!("CARGO_PKG_VERSION"));
+    // Apply environment configuration
+    if let Some(env_config) = environment {
+        // If not inheriting, clear all environment variables
+        if !env_config.inherit_env {
+            // Note: portable-pty doesn't have a direct way to clear env,
+            // so we'll just set the ones we want
+            debug!("Not inheriting parent environment");
+        }
+
+        // Apply custom environment variables
+        for (key, value) in env_config.variables {
+            let expanded = shellexpand::full(&value)
+                .map(|s| s.to_string())
+                .unwrap_or(value);
+            debug!(key = %key, value = %expanded, "Setting environment variable");
+            cmd.env(&key, &expanded);
+        }
+
+        // Note: Unsetting variables isn't directly supported by portable-pty's CommandBuilder
+        // The unset functionality would require a different approach
+        if !env_config.unset.is_empty() {
+            warn!("Unsetting environment variables is not supported by portable-pty");
+        }
+    } else {
+        // Default enhanced shell integration environment variables
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+        cmd.env("TERM_PROGRAM", "agterm");
+        cmd.env("AGTERM_VERSION", env!("CARGO_PKG_VERSION"));
+    }
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| {
         error!(error = %e, "Failed to spawn shell command");
@@ -175,9 +230,10 @@ fn run_pty_thread(rx: Receiver<PtyCommand>) {
                 id,
                 rows,
                 cols,
+                environment,
                 response,
             }) => {
-                let result = create_pty_session(rows, cols).map(|session| {
+                let result = create_pty_session(rows, cols, environment).map(|session| {
                     sessions.insert(id, session);
                 });
                 let _ = response.send(result);
@@ -318,6 +374,16 @@ impl PtyManager {
 
     #[instrument(skip(self), fields(rows = rows, cols = cols))]
     pub fn create_session(&self, rows: u16, cols: u16) -> Result<PtyId, PtyError> {
+        self.create_session_with_env(rows, cols, None)
+    }
+
+    #[instrument(skip(self, environment), fields(rows = rows, cols = cols))]
+    pub fn create_session_with_env(
+        &self,
+        rows: u16,
+        cols: u16,
+        environment: Option<PtyEnvironment>,
+    ) -> Result<PtyId, PtyError> {
         let id = Uuid::new_v4();
         debug!(session_id = %id, "Creating new PTY session");
         let (response_tx, response_rx) = mpsc::channel();
@@ -327,6 +393,7 @@ impl PtyManager {
                 id,
                 rows,
                 cols,
+                environment,
                 response: response_tx,
             })
             .map_err(|e| {
