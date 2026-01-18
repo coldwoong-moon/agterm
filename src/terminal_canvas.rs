@@ -15,58 +15,10 @@ use iced::widget::canvas::{self, Cache, Frame, Geometry, Text};
 use iced::{Color, Font, Point, Rectangle, Renderer, Size, Theme};
 
 use crate::StyledSpan;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-/// Text selection state
-#[derive(Clone, Debug)]
-pub struct Selection {
-    pub start: (usize, usize), // (row, col)
-    pub end: (usize, usize),
-    pub active: bool,
-}
-
-impl Selection {
-    pub fn new(row: usize, col: usize) -> Self {
-        Self {
-            start: (row, col),
-            end: (row, col),
-            active: true,
-        }
-    }
-
-    /// Get normalized range (start always before end)
-    pub fn normalized(&self) -> ((usize, usize), (usize, usize)) {
-        if self.start.0 < self.end.0 || (self.start.0 == self.end.0 && self.start.1 <= self.end.1) {
-            (self.start, self.end)
-        } else {
-            (self.end, self.start)
-        }
-    }
-
-    /// Check if a cell is within the selection (reserved for future hit-testing)
-    #[allow(dead_code)]
-    pub fn contains(&self, row: usize, col: usize) -> bool {
-        if !self.active {
-            return false;
-        }
-
-        let (start, end) = self.normalized();
-
-        if row < start.0 || row > end.0 {
-            return false;
-        }
-
-        if row == start.0 && row == end.0 {
-            col >= start.1 && col <= end.1
-        } else if row == start.0 {
-            col >= start.1
-        } else if row == end.0 {
-            col <= end.1
-        } else {
-            true
-        }
-    }
-}
+// Re-export Selection types from terminal::selection module
+pub use crate::terminal::selection::{Selection, SelectionMode, SelectionPoint};
 
 /// Extract selected text from terminal lines
 pub fn get_selected_text(lines: &[Vec<StyledSpan>], selection: &Selection) -> String {
@@ -83,25 +35,25 @@ pub fn get_selected_text(lines: &[Vec<StyledSpan>], selection: &Selection) -> St
 
     let mut result = String::new();
 
-    for row in start.0..=end.0 {
+    for row in start.line..=end.line {
         if row >= lines.len() {
             break;
         }
 
         // Calculate column range for this row
-        let (start_col, end_col) = if row == start.0 && row == end.0 {
+        let (start_col, end_col) = if row == start.line && row == end.line {
             // Single line selection
-            (start.1, end.1)
-        } else if row == start.0 {
+            (start.col, end.col)
+        } else if row == start.line {
             // First line of multi-line selection
             let max_col = lines[row]
                 .iter()
                 .map(|span| span.text.chars().count())
                 .sum::<usize>();
-            (start.1, max_col)
-        } else if row == end.0 {
+            (start.col, max_col)
+        } else if row == end.line {
             // Last line of multi-line selection
-            (0, end.1)
+            (0, end.col)
         } else {
             // Middle line - select entire line
             let max_col = lines[row]
@@ -147,7 +99,7 @@ pub fn get_selected_text(lines: &[Vec<StyledSpan>], selection: &Selection) -> St
         }
 
         // Add newline for multi-line selections (except for the last line)
-        if row < end.0 {
+        if row < end.line {
             result.push('\n');
         }
     }
@@ -229,6 +181,11 @@ pub struct TerminalCanvasState {
     pub is_dragging: bool,
     /// Last clicked URL (for Cmd+Click handling)
     pub clicked_url: Option<String>,
+    /// Performance tracking (debug mode)
+    #[cfg(debug_assertions)]
+    last_frame_time: Option<Duration>,
+    #[cfg(debug_assertions)]
+    last_lines_rendered: usize,
 }
 
 impl Default for TerminalCanvasState {
@@ -244,6 +201,10 @@ impl Default for TerminalCanvasState {
             selection: None,
             is_dragging: false,
             clicked_url: None,
+            #[cfg(debug_assertions)]
+            last_frame_time: None,
+            #[cfg(debug_assertions)]
+            last_lines_rendered: 0,
         }
     }
 }
@@ -316,6 +277,7 @@ pub struct TerminalCanvas<'a> {
     pub font_size: f32,
     pub search_matches: &'a [(usize, usize, usize)], // (line, start_col, end_col)
     pub current_match_index: Option<usize>,
+    pub bracket_match: Option<crate::terminal::bracket::BracketMatch>,
 }
 
 impl<'a> TerminalCanvas<'a> {
@@ -334,6 +296,7 @@ impl<'a> TerminalCanvas<'a> {
             font_size: config::BASE_FONT_SIZE,
             search_matches: &[],
             current_match_index: None,
+            bracket_match: None,
         }
     }
 
@@ -357,6 +320,15 @@ impl<'a> TerminalCanvas<'a> {
     ) -> Self {
         self.search_matches = matches;
         self.current_match_index = current_index;
+        self
+    }
+
+    /// Set bracket match for highlighting
+    pub fn with_bracket_match(
+        mut self,
+        bracket_match: Option<crate::terminal::bracket::BracketMatch>,
+    ) -> Self {
+        self.bracket_match = bracket_match;
         self
     }
 
@@ -429,7 +401,7 @@ impl<'a> TerminalCanvas<'a> {
         // Selection color - semi-transparent blue
         let selection_color = Color::from_rgba(0.3, 0.5, 0.8, 0.3);
 
-        for row in start.0..=end.0 {
+        for row in start.line..=end.line {
             if row < first_visible || row >= last_visible {
                 continue;
             }
@@ -444,10 +416,10 @@ impl<'a> TerminalCanvas<'a> {
             }
 
             // Calculate selection start and end columns for this row
-            let (start_col, end_col) = if row == start.0 && row == end.0 {
+            let (start_col, end_col) = if row == start.line && row == end.line {
                 // Selection within single line
-                (start.1, end.1)
-            } else if row == start.0 {
+                (start.col, end.col)
+            } else if row == start.line {
                 // First line of multi-line selection
                 let max_col = if row < self.lines.len() {
                     self.lines[row]
@@ -457,10 +429,10 @@ impl<'a> TerminalCanvas<'a> {
                 } else {
                     0
                 };
-                (start.1, max_col)
-            } else if row == end.0 {
+                (start.col, max_col)
+            } else if row == end.line {
                 // Last line of multi-line selection
-                (0, end.1)
+                (0, end.col)
             } else {
                 // Middle line - select entire line
                 let max_col = if row < self.lines.len() {
@@ -486,6 +458,106 @@ impl<'a> TerminalCanvas<'a> {
                 selection_color,
             );
         }
+    }
+
+    fn draw_bracket_highlights(&self, frame: &mut Frame, state: &TerminalCanvasState, bounds: Rectangle) {
+        let bracket_match = match &self.bracket_match {
+            Some(m) => m,
+            None => return,
+        };
+
+        let config = crate::config::AppConfig::default();
+        let bracket_color = crate::config::parse_hex_color(&config.terminal.bracket.highlight_color)
+            .map(|(r, g, b, a)| Color::from_rgba(r, g, b, a))
+            .unwrap_or(Color::from_rgb(0.36, 0.54, 0.98)); // Default to accent blue
+
+        let (first_visible, last_visible) = self.visible_range(state.scroll_offset, bounds.height);
+        let y_offset = -(state.scroll_offset % config::line_height(self.font_size));
+
+        // Draw highlight for opening bracket
+        self.draw_bracket_highlight_at(
+            frame,
+            bracket_match.open_pos.0,
+            bracket_match.open_pos.1,
+            bracket_color,
+            first_visible,
+            last_visible,
+            y_offset,
+            bounds.height,
+        );
+
+        // Draw highlight for closing bracket
+        self.draw_bracket_highlight_at(
+            frame,
+            bracket_match.close_pos.0,
+            bracket_match.close_pos.1,
+            bracket_color,
+            first_visible,
+            last_visible,
+            y_offset,
+            bounds.height,
+        );
+    }
+
+    fn draw_bracket_highlight_at(
+        &self,
+        frame: &mut Frame,
+        row: usize,
+        col: usize,
+        color: Color,
+        first_visible: usize,
+        last_visible: usize,
+        y_offset: f32,
+        viewport_height: f32,
+    ) {
+        // Only draw if bracket is in visible range
+        if row < first_visible || row >= last_visible {
+            return;
+        }
+
+        let visible_row = row - first_visible;
+        let y = config::PADDING_TOP
+            + y_offset
+            + (visible_row as f32 * config::line_height(self.font_size));
+
+        if y + config::line_height(self.font_size) < 0.0 || y > viewport_height {
+            return;
+        }
+
+        let x = config::PADDING_LEFT + (col as f32 * config::char_width(self.font_size));
+
+        // Draw a border rectangle around the bracket
+        let border_width = 2.0;
+        let char_width = config::char_width(self.font_size);
+        let line_height = config::line_height(self.font_size);
+
+        // Top border
+        frame.fill_rectangle(
+            Point::new(x, y),
+            Size::new(char_width, border_width),
+            color,
+        );
+
+        // Bottom border
+        frame.fill_rectangle(
+            Point::new(x, y + line_height - border_width),
+            Size::new(char_width, border_width),
+            color,
+        );
+
+        // Left border
+        frame.fill_rectangle(
+            Point::new(x, y),
+            Size::new(border_width, line_height),
+            color,
+        );
+
+        // Right border
+        frame.fill_rectangle(
+            Point::new(x + char_width - border_width, y),
+            Size::new(border_width, line_height),
+            color,
+        );
     }
 
     fn draw_lines(&self, frame: &mut Frame, state: &TerminalCanvasState, bounds: Rectangle) {
@@ -794,7 +866,9 @@ where
                         return (canvas::event::Status::Captured, None);
                     }
 
-                    state.selection = Some(Selection::new(row, col));
+                    let mut selection = Selection::new();
+                    selection.start(row, col, SelectionMode::Character);
+                    state.selection = Some(selection);
                     state.is_dragging = true;
                     // Don't clear cache for selection start - selection overlay is separate
                     if !state.streaming_mode {
@@ -810,7 +884,7 @@ where
                         let (row, col) =
                             self.pixel_to_cell(position.x, position.y, state.scroll_offset);
                         if let Some(selection) = &mut state.selection {
-                            selection.end = (row, col);
+                            selection.extend(row, col);
                             // Only clear cache for selection updates in non-streaming mode
                             if !state.streaming_mode {
                                 state.cache.clear();
@@ -824,9 +898,10 @@ where
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 if state.is_dragging {
                     state.is_dragging = false;
-                    if let Some(selection) = &state.selection {
+                    if let Some(selection) = &mut state.selection {
+                        selection.finish();
                         // If no actual selection (start == end), clear it
-                        if selection.start == selection.end {
+                        if !selection.active {
                             state.selection = None;
                             if !state.streaming_mode {
                                 state.cache.clear();
@@ -873,6 +948,9 @@ where
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
+        #[cfg(debug_assertions)]
+        let start_time = Instant::now();
+
         // In streaming mode, bypass cache for better performance
         if state.streaming_mode {
             let mut frame = Frame::new(renderer, bounds.size());
@@ -882,6 +960,9 @@ where
 
             // Draw selection highlight
             self.draw_selection(&mut frame, state, bounds);
+
+            // Draw bracket highlights
+            self.draw_bracket_highlights(&mut frame, state, bounds);
 
             // Draw visible lines directly
             self.draw_lines(&mut frame, state, bounds);
@@ -900,6 +981,9 @@ where
             // Draw selection highlight
             self.draw_selection(frame, state, bounds);
 
+            // Draw bracket highlights
+            self.draw_bracket_highlights(frame, state, bounds);
+
             // Draw visible lines
             self.draw_lines(frame, state, bounds);
         });
@@ -908,6 +992,23 @@ where
         let mut cursor_frame = Frame::new(renderer, bounds.size());
         self.draw_cursor(&mut cursor_frame, state, bounds);
         let cursor_geometry = cursor_frame.into_geometry();
+
+        #[cfg(debug_assertions)]
+        {
+            let elapsed = start_time.elapsed();
+            let (first, last) = self.visible_range(state.scroll_offset, bounds.height);
+            let lines_rendered = last - first;
+
+            // Log performance every 60 frames (roughly once per second at 60fps)
+            if state.content_version % 60 == 0 {
+                tracing::debug!(
+                    "Render perf: {:.2}ms, {} lines, streaming={}",
+                    elapsed.as_secs_f64() * 1000.0,
+                    lines_rendered,
+                    state.streaming_mode
+                );
+            }
+        }
 
         vec![text_geometry, cursor_geometry]
     }

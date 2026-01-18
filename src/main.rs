@@ -483,6 +483,7 @@ impl Default for AgTerm {
                     bell_pending: false,
                     title: None,
                     last_copied_selection: None,
+                    bracket_match: None,
                     pane_layout: PaneLayout::Single,
                     panes: Vec::new(),
                     focused_pane: 0,
@@ -654,7 +655,9 @@ struct TerminalTab {
     /// Custom tab title (set via OSC 0/2 or manually)
     title: Option<String>,
     /// Track last copied selection coordinates to avoid duplicate copies
-    last_copied_selection: Option<((usize, usize), (usize, usize))>,
+    last_copied_selection: Option<(terminal_canvas::SelectionPoint, terminal_canvas::SelectionPoint)>,
+    /// Bracket matching state
+    bracket_match: Option<terminal::bracket::BracketMatch>,
     // Pane management
     /// Pane layout type
     pane_layout: PaneLayout,
@@ -828,6 +831,28 @@ impl AgTerm {
         }
     }
 
+    /// Update bracket matching for the active tab
+    fn update_bracket_match(&mut self) {
+        let config = get_config();
+
+        // Check if bracket matching is enabled
+        if !config.terminal.bracket.enabled {
+            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                tab.bracket_match = None;
+            }
+            return;
+        }
+
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            let (cursor_row, cursor_col) = tab.screen.cursor_position();
+            tab.bracket_match = terminal::bracket::find_matching_bracket(
+                &tab.screen,
+                cursor_row,
+                cursor_col,
+            );
+        }
+    }
+
     /// Save current session state to file
     fn save_session(&self) {
         let config = get_config();
@@ -925,6 +950,7 @@ impl AgTerm {
                         bell_pending: false,
                         title: tab_state.title,
                         last_copied_selection: None,
+                        bracket_match: None,
                         pane_layout: PaneLayout::Single,
                         panes: Vec::new(),
                         focused_pane: 0,
@@ -980,6 +1006,7 @@ impl AgTerm {
                     bell_pending: false,
                     title: None,
                     last_copied_selection: None,
+                    bracket_match: None,
                     pane_layout: PaneLayout::Single,
                     panes: Vec::new(),
                     focused_pane: 0,
@@ -1028,6 +1055,7 @@ impl AgTerm {
                         bell_pending: false,
                         title: None, // New tab starts with no custom title
                         last_copied_selection: None,
+                        bracket_match: None,
                         pane_layout: PaneLayout::Single,
                         panes: Vec::new(),
                         focused_pane: 0,
@@ -1637,6 +1665,9 @@ impl AgTerm {
                         }
                     }
                 }
+
+                // Update bracket matching after processing PTY output
+                self.update_bracket_match();
 
                 // Play bell sound and trigger flash if triggered in active tab (after releasing tab borrow)
                 if active_bell_triggered {
@@ -2248,7 +2279,8 @@ impl AgTerm {
         )
         .with_cursor(cursor)
         .with_font_size(self.font_size)
-        .with_search_matches(&self.search_matches, self.current_match_index);
+        .with_search_matches(&self.search_matches, self.current_match_index)
+        .with_bracket_match(tab.bracket_match);
 
         canvas(terminal_canvas)
             .width(Length::Fill)
@@ -2336,6 +2368,7 @@ mod tests {
             bell_pending: false,
             title: None,
             last_copied_selection: None,
+            bracket_match: None,
             pane_layout: PaneLayout::Single,
             panes: Vec::new(),
             focused_pane: 0,

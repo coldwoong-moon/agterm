@@ -12,8 +12,122 @@ mod scrollback;
 pub use memory::{MemoryStats, StringInterner};
 pub use scrollback::{ScrollbackBuffer, ScrollbackConfig};
 
+use std::collections::HashSet;
+
 /// Maximum scrollback buffer lines
 const MAX_SCROLLBACK: usize = 10000;
+
+/// Dirty flag system for incremental rendering optimization
+///
+/// Tracks which lines have changed since the last render to avoid
+/// redrawing the entire screen on every frame.
+#[derive(Debug, Clone)]
+pub struct DirtyTracker {
+    /// Set of line indices that have been modified
+    dirty_lines: HashSet<usize>,
+    /// Flag indicating that a full screen redraw is needed
+    full_redraw: bool,
+    /// Flag indicating only the cursor position changed
+    cursor_only: bool,
+}
+
+impl Default for DirtyTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DirtyTracker {
+    /// Create a new dirty tracker with full redraw initially required
+    pub fn new() -> Self {
+        Self {
+            dirty_lines: HashSet::new(),
+            full_redraw: true,
+            cursor_only: false,
+        }
+    }
+
+    /// Mark a specific line as dirty
+    pub fn mark_line(&mut self, line: usize) {
+        if !self.full_redraw {
+            self.dirty_lines.insert(line);
+        }
+        self.cursor_only = false;
+    }
+
+    /// Mark multiple lines as dirty
+    pub fn mark_lines(&mut self, lines: impl Iterator<Item = usize>) {
+        if !self.full_redraw {
+            self.dirty_lines.extend(lines);
+        }
+        self.cursor_only = false;
+    }
+
+    /// Mark a range of lines as dirty
+    pub fn mark_range(&mut self, start: usize, end: usize) {
+        if !self.full_redraw {
+            for line in start..=end {
+                self.dirty_lines.insert(line);
+            }
+        }
+        self.cursor_only = false;
+    }
+
+    /// Mark all lines as dirty (full redraw)
+    pub fn mark_all(&mut self) {
+        self.full_redraw = true;
+        self.dirty_lines.clear();
+        self.cursor_only = false;
+    }
+
+    /// Mark only cursor update needed (most efficient)
+    pub fn mark_cursor(&mut self) {
+        if !self.full_redraw && self.dirty_lines.is_empty() {
+            self.cursor_only = true;
+        }
+    }
+
+    /// Clear all dirty flags after render
+    pub fn clear(&mut self) {
+        self.dirty_lines.clear();
+        self.full_redraw = false;
+        self.cursor_only = false;
+    }
+
+    /// Check if a specific line is dirty
+    pub fn is_line_dirty(&self, line: usize) -> bool {
+        self.full_redraw || self.dirty_lines.contains(&line)
+    }
+
+    /// Check if any redraw is needed
+    pub fn needs_redraw(&self) -> bool {
+        self.full_redraw || !self.dirty_lines.is_empty() || self.cursor_only
+    }
+
+    /// Check if full redraw is required
+    pub fn needs_full_redraw(&self) -> bool {
+        self.full_redraw
+    }
+
+    /// Check if only cursor update is needed
+    pub fn is_cursor_only(&self) -> bool {
+        self.cursor_only && !self.full_redraw && self.dirty_lines.is_empty()
+    }
+
+    /// Get the set of dirty lines
+    pub fn dirty_lines(&self) -> &HashSet<usize> {
+        &self.dirty_lines
+    }
+
+    /// Get count of dirty lines
+    pub fn dirty_count(&self) -> usize {
+        if self.full_redraw {
+            usize::MAX
+        } else {
+            self.dirty_lines.len()
+        }
+    }
+}
 
 /// ANSI color (16-color palette + 256-color + RGB)
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -235,6 +349,8 @@ impl ImageData {
 /// allowing full restoration when returning to main screen.
 #[derive(Clone, Debug)]
 struct AlternateScreenState {
+    /// Saved main screen buffer
+    main_buffer: Vec<Vec<Cell>>,
     /// Cursor position (row, col)
     cursor_pos: (usize, usize),
     /// Current text attributes
@@ -252,6 +368,12 @@ struct AlternateScreenState {
     saved_cursor: Option<(usize, usize)>,
     /// Saved cursor state (DECSC)
     saved_cursor_state: Option<(usize, usize, Option<AnsiColor>, Option<AnsiColor>, bool)>,
+    /// Saved scrollback buffer (compressed)
+    saved_scrollback: VecDeque<CompressedLine>,
+    /// Alternate screen is active
+    is_active: bool,
+    /// Scrollback disabled in alternate screen (always true for alternate screen)
+    scrollback_disabled: bool,
 }
 
 /// Run-length encoded segment for compression
@@ -522,6 +644,8 @@ pub struct TerminalScreen {
     string_interner: StringInterner,
     /// Cleanup counter - periodically clean up unused interned strings
     interner_cleanup_counter: usize,
+    /// Dirty tracking for incremental rendering
+    dirty_tracker: DirtyTracker,
 }
 
 impl TerminalScreen {
@@ -572,6 +696,7 @@ impl TerminalScreen {
             default_bg_color: None,
             string_interner: StringInterner::new(),
             interner_cleanup_counter: 0,
+            dirty_tracker: DirtyTracker::new(),
         }
     }
 
@@ -748,6 +873,9 @@ impl TerminalScreen {
                 *alt_buffer = resized_alt;
             }
         }
+
+        // Mark all as dirty after resize
+        self.dirty_tracker.mark_all();
     }
 
     /// Get all lines (scrollback + visible) for rendering
@@ -851,6 +979,35 @@ impl TerminalScreen {
     pub fn cursor_position(&self) -> (usize, usize) {
         (self.cursor_row, self.cursor_col)
     }
+    /// Enter alternate screen buffer
+    ///
+    /// # Arguments
+    /// * `clear` - Whether to clear the alternate screen
+    /// * `save_cursor` - Whether to save and reset cursor position to 0,0
+    pub fn enter_alternate_screen(&mut self, clear: bool, save_cursor: bool) {
+        self.switch_to_alternate_screen(clear, save_cursor);
+    }
+
+    /// Leave alternate screen buffer and restore main screen
+    ///
+    /// # Arguments
+    /// * `restore_cursor` - Whether to restore cursor position (always true for full restore)
+    pub fn leave_alternate_screen(&mut self, restore_cursor: bool) {
+        if restore_cursor {
+            self.switch_to_normal_screen();
+        }
+    }
+
+    /// Check if alternate screen is currently active
+    pub fn is_alternate_screen(&self) -> bool {
+        self.use_alternate_screen
+    }
+
+    /// Get current screen buffer (reference)
+    pub fn current_buffer(&self) -> &Vec<Vec<Cell>> {
+        &self.buffer
+    }
+
 
     /// Get terminal dimensions (cols, rows)
     pub fn dimensions(&self) -> (usize, usize) {
@@ -865,6 +1022,21 @@ impl TerminalScreen {
     /// Get compression statistics for scrollback buffer
     pub fn compression_stats(&self) -> &CompressionStats {
         &self.compression_stats
+    }
+
+    /// Get dirty tracker (for rendering optimization)
+    pub fn dirty_tracker(&self) -> &DirtyTracker {
+        &self.dirty_tracker
+    }
+
+    /// Get mutable dirty tracker (for rendering optimization)
+    pub fn dirty_tracker_mut(&mut self) -> &mut DirtyTracker {
+        &mut self.dirty_tracker
+    }
+
+    /// Clear dirty flags after rendering
+    pub fn clear_dirty(&mut self) {
+        self.dirty_tracker.clear();
     }
 
     /// Get window title (OSC 0 or OSC 2) - reserved for future window title bar integration
@@ -1078,6 +1250,9 @@ impl TerminalScreen {
             // Clear bottom line
             self.buffer[bottom] = vec![Cell::default(); self.cols];
         }
+
+        // Mark the affected region as dirty
+        self.dirty_tracker.mark_range(top, bottom);
     }
 
     /// Scroll screen down by n lines
@@ -1093,6 +1268,9 @@ impl TerminalScreen {
             // Clear top line
             self.buffer[top] = vec![Cell::default(); self.cols];
         }
+
+        // Mark the affected region as dirty
+        self.dirty_tracker.mark_range(top, bottom);
     }
 
     /// Insert n blank lines at cursor position (IL)
@@ -1288,12 +1466,14 @@ impl TerminalScreen {
     /// - DECSC saved cursor state
     ///
     /// The `clear_screen` parameter determines if the alternate screen should be cleared.
-    fn switch_to_alternate_screen(&mut self, clear_screen: bool) {
+    /// The `save_cursor` parameter determines if cursor should be reset to 0,0 (true for ?1049h only).
+    fn switch_to_alternate_screen(&mut self, clear_screen: bool, save_cursor: bool) {
         if !self.use_alternate_screen {
             // Save complete main screen state
             self.alternate_buffer = Some(self.buffer.clone());
             self.alternate_scrollback = Some(self.scrollback.clone());
             self.alternate_saved_state = Some(AlternateScreenState {
+                main_buffer: self.buffer.clone(),
                 cursor_pos: (self.cursor_row, self.cursor_col),
                 current_fg: self.current_fg,
                 current_bg: self.current_bg,
@@ -1306,6 +1486,9 @@ impl TerminalScreen {
                 scroll_region: self.scroll_region,
                 saved_cursor: self.saved_cursor,
                 saved_cursor_state: self.saved_cursor_state.clone(),
+                saved_scrollback: self.scrollback.clone(),
+                is_active: true,
+                scrollback_disabled: true,
             });
 
             // Create alternate screen buffer
@@ -1319,8 +1502,12 @@ impl TerminalScreen {
             }
 
             self.scrollback = VecDeque::new();
-            self.cursor_row = 0;
-            self.cursor_col = 0;
+
+            // Reset cursor to 0,0 only for ?1049h mode (save_cursor=true)
+            if save_cursor {
+                self.cursor_row = 0;
+                self.cursor_col = 0;
+            }
             self.scroll_region = None;
             self.saved_cursor = None;
             self.saved_cursor_state = None;
@@ -1564,6 +1751,9 @@ impl Perform for TerminalScreen {
                 };
                 self.cursor_col += 1;
             }
+
+            // Mark the line as dirty
+            self.dirty_tracker.mark_line(self.cursor_row);
         }
     }
 
@@ -1788,18 +1978,18 @@ impl Perform for TerminalScreen {
                     47 => {
                         // CSI ?47h - Switch to alternate screen (basic mode)
                         // Used by some older applications
-                        self.switch_to_alternate_screen(false);
+                        self.switch_to_alternate_screen(false, false);
                     }
                     1047 => {
                         // CSI ?1047h - Switch to alternate screen and clear it
                         // More common in modern terminals
-                        self.switch_to_alternate_screen(true);
+                        self.switch_to_alternate_screen(true, false);
                     }
                     1049 => {
                         // CSI ?1049h - Save cursor, switch to alternate screen and clear
                         // Most complete mode - used by vim, less, htop, etc.
-                        // Note: cursor is saved in the state structure
-                        self.switch_to_alternate_screen(true);
+                        // The cursor is saved in the state and reset to 0,0 in alternate screen
+                        self.switch_to_alternate_screen(true, true);
                     }
                     2004 => {
                         // CSI ?2004h - Enable bracketed paste mode
@@ -2099,6 +2289,22 @@ impl Perform for TerminalScreen {
                 // Unknown ESC sequence - ignore
             }
         }
+    }
+}
+
+// Bracket matching support
+impl crate::terminal::bracket::GetChar for TerminalScreen {
+    fn get_char(&self, line: usize, col: usize) -> Option<char> {
+        // Get character from visible buffer only (not scrollback)
+        self.buffer.get(line)?.get(col).map(|cell| cell.c)
+    }
+
+    fn line_count(&self) -> usize {
+        self.buffer.len()
+    }
+
+    fn line_width(&self, line: usize) -> usize {
+        self.buffer.get(line).map(|row| row.len()).unwrap_or(0)
     }
 }
 
@@ -3505,8 +3711,8 @@ mod alternate_screen_tests {
         assert!(screen.use_alternate_screen);
         assert_eq!(screen.buffer[0][0].c, ' ');
 
-        // Write on alternate screen
-        screen.process(b"Alt");
+        // Write on alternate screen (cursor is preserved, so reset it first)
+        screen.process(b"[1;1HAlt");
         assert_eq!(screen.buffer[0][0].c, 'A');
 
         // Switch back
@@ -3970,6 +4176,229 @@ mod alternate_screen_tests {
         assert_eq!(col, 19);
         assert!(!screen.cursor_blink_enabled()); // Blink state preserved
     }
+
+    // New tests for improved alternate screen functionality
+
+    #[test]
+    fn test_1049h_saves_cursor_and_resets() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Position cursor on main screen
+        screen.process(b"[15;30H");
+        let (orig_row, orig_col) = screen.cursor_position();
+        assert_eq!(orig_row, 14); // 0-indexed
+        assert_eq!(orig_col, 29);
+
+        // Enter alternate screen with ?1049h (should save cursor and reset to 0,0)
+        screen.process(b"[?1049h");
+        assert!(screen.is_alternate_screen());
+
+        // Cursor should be at 0,0 in alternate screen
+        let (alt_row, alt_col) = screen.cursor_position();
+        assert_eq!(alt_row, 0);
+        assert_eq!(alt_col, 0);
+
+        // Exit alternate screen
+        screen.process(b"[?1049l");
+        assert!(!screen.is_alternate_screen());
+
+        // Cursor should be restored to original position
+        let (restored_row, restored_col) = screen.cursor_position();
+        assert_eq!(restored_row, orig_row);
+        assert_eq!(restored_col, orig_col);
+    }
+
+    #[test]
+    fn test_1047h_clears_but_no_cursor_save() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Position cursor on main screen
+        screen.process(b"[10;20H");
+        let (orig_row, orig_col) = screen.cursor_position();
+
+        // Enter alternate screen with ?1047h (clear but cursor position preserved)
+        screen.process(b"[?1047h");
+        assert!(screen.is_alternate_screen());
+
+        // Cursor position should NOT be reset to 0,0
+        let (alt_row, alt_col) = screen.cursor_position();
+        assert_eq!(alt_row, orig_row);
+        assert_eq!(alt_col, orig_col);
+
+        // Screen should be cleared
+        assert_eq!(screen.buffer[0][0].c, ' ');
+    }
+
+    #[test]
+    fn test_47h_no_clear_no_cursor_save() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Position cursor on main screen
+        screen.process(b"[5;10H");
+        let (orig_row, orig_col) = screen.cursor_position();
+
+        // Enter alternate screen with ?47h (basic mode)
+        screen.process(b"[?47h");
+        assert!(screen.is_alternate_screen());
+
+        // Cursor position should be preserved
+        let (alt_row, alt_col) = screen.cursor_position();
+        assert_eq!(alt_row, orig_row);
+        assert_eq!(alt_col, orig_col);
+    }
+
+    #[test]
+    fn test_public_enter_leave_methods() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Write on main screen
+        screen.process(b"Main screen content");
+
+        // Use public API to enter alternate screen
+        screen.enter_alternate_screen(true, true);
+        assert!(screen.is_alternate_screen());
+        
+        // Cursor should be at 0,0
+        let (row, col) = screen.cursor_position();
+        assert_eq!(row, 0);
+        assert_eq!(col, 0);
+
+        // Screen should be cleared
+        assert_eq!(screen.buffer[0][0].c, ' ');
+
+        // Write on alternate screen
+        screen.process(b"Alternate content");
+
+        // Leave alternate screen
+        screen.leave_alternate_screen(true);
+        assert!(!screen.is_alternate_screen());
+
+        // Main screen content should be restored
+        assert_eq!(screen.buffer[0][0].c, 'M'); // 'Main'
+    }
+
+    #[test]
+    fn test_current_buffer_returns_correct_buffer() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Write on main screen
+        screen.process(b"Main");
+        let main_buffer = screen.current_buffer();
+        assert_eq!(main_buffer[0][0].c, 'M');
+
+        // Enter alternate screen
+        screen.enter_alternate_screen(true, true);
+        
+        // Write on alternate screen
+        screen.process(b"Alt");
+        let alt_buffer = screen.current_buffer();
+        assert_eq!(alt_buffer[0][0].c, 'A');
+        
+        // Main buffer should not be affected
+        screen.leave_alternate_screen(true);
+        let restored_buffer = screen.current_buffer();
+        assert_eq!(restored_buffer[0][0].c, 'M');
+    }
+
+    #[test]
+    fn test_alternate_screen_state_fields() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Set various attributes
+        screen.process(b"[1;31mBold Red[0m");
+        screen.process(b"[5;15r"); // Set scroll region
+        
+        // Save cursor with DECSC
+        screen.process(b"[10;20H7");
+
+        // Enter alternate screen
+        screen.enter_alternate_screen(true, true);
+
+        // Attributes should be reset in alternate screen
+        assert!(!screen.bold);
+        assert!(screen.current_fg.is_none());
+        assert_eq!(screen.scroll_region, None);
+
+        // Set different state in alternate screen
+        screen.process(b"[34mBlue");
+        screen.process(b"[1;10r");
+
+        // Leave alternate screen
+        screen.leave_alternate_screen(true);
+
+        // Original scroll region should be restored
+        assert_eq!(screen.scroll_region, Some((4, 14))); // 0-indexed
+    }
+
+    #[test]
+    fn test_scrollback_disabled_in_alternate() {
+        let mut screen = TerminalScreen::new(80, 3);
+
+        // Generate scrollback on main screen
+        for i in 0..5 {
+            screen.process(format!("Main {}
+", i).as_bytes());
+        }
+        let main_scrollback_len = screen.scrollback_size();
+        assert!(main_scrollback_len > 0);
+
+        // Enter alternate screen
+        screen.enter_alternate_screen(true, true);
+
+        // Scrollback should be empty in alternate screen
+        assert_eq!(screen.scrollback_size(), 0);
+
+        // Generate lines that would create scrollback
+        for i in 0..5 {
+            screen.process(format!("Alt {}
+", i).as_bytes());
+        }
+
+        // Leave alternate screen
+        screen.leave_alternate_screen(true);
+
+        // Original scrollback should be restored
+        assert_eq!(screen.scrollback_size(), main_scrollback_len);
+    }
+
+    #[test]
+    fn test_vim_complete_workflow() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Shell session with scrollback
+        for i in 0..30 {
+            screen.process(format!("Command {}
+", i).as_bytes());
+        }
+        
+        let scrollback_before = screen.scrollback_size();
+        let (cursor_row, cursor_col) = screen.cursor_position();
+
+        // Vim launches with ?1049h
+        screen.process(b"[?1049h");
+        
+        // Verify alternate screen state
+        assert!(screen.is_alternate_screen());
+        assert_eq!(screen.scrollback_size(), 0);
+        assert_eq!(screen.cursor_position(), (0, 0));
+
+        // Vim draws interface
+        screen.process(b"\x1b[1;1H~\r\n~\r\n~\r\n\"file.txt\" [New File]");
+
+        // User edits
+        screen.process(b"[1;1HHello, World!");
+
+        // Vim exits with ?1049l
+        screen.process(b"[?1049l");
+
+        // Verify restoration
+        assert!(!screen.is_alternate_screen());
+        assert_eq!(screen.scrollback_size(), scrollback_before);
+        assert_eq!(screen.cursor_position(), (cursor_row, cursor_col));
+        
+        // Vim content should not be visible
+        assert_ne!(screen.buffer[0][0].c, '~');
+    }
 }
 
 #[cfg(test)]
@@ -4307,5 +4736,148 @@ mod compression_tests {
         // Stats should be updated
         let stats = screen.compression_stats();
         assert_eq!(stats.total_lines, scrollback_after);
+    }
+}
+
+#[cfg(test)]
+mod dirty_tracker_tests {
+    use super::*;
+
+    #[test]
+    fn test_dirty_tracker_new() {
+        let tracker = DirtyTracker::new();
+        assert!(tracker.needs_full_redraw());
+        assert!(tracker.needs_redraw());
+        assert!(!tracker.is_cursor_only());
+    }
+
+    #[test]
+    fn test_mark_line() {
+        let mut tracker = DirtyTracker::new();
+        tracker.clear();
+
+        assert!(!tracker.needs_redraw());
+
+        tracker.mark_line(5);
+        assert!(tracker.needs_redraw());
+        assert!(tracker.is_line_dirty(5));
+        assert!(!tracker.is_line_dirty(4));
+        assert!(!tracker.needs_full_redraw());
+        assert!(!tracker.is_cursor_only());
+    }
+
+    #[test]
+    fn test_mark_range() {
+        let mut tracker = DirtyTracker::new();
+        tracker.clear();
+
+        tracker.mark_range(10, 15);
+        assert!(tracker.needs_redraw());
+
+        for line in 10..=15 {
+            assert!(tracker.is_line_dirty(line));
+        }
+        assert!(!tracker.is_line_dirty(9));
+        assert!(!tracker.is_line_dirty(16));
+    }
+
+    #[test]
+    fn test_mark_all() {
+        let mut tracker = DirtyTracker::new();
+        tracker.clear();
+
+        tracker.mark_line(5);
+        tracker.mark_all();
+
+        assert!(tracker.needs_full_redraw());
+        assert!(tracker.needs_redraw());
+        assert_eq!(tracker.dirty_count(), usize::MAX);
+        assert!(tracker.dirty_lines().is_empty());
+    }
+
+    #[test]
+    fn test_mark_cursor() {
+        let mut tracker = DirtyTracker::new();
+        tracker.clear();
+
+        tracker.mark_cursor();
+        assert!(tracker.is_cursor_only());
+        assert!(tracker.needs_redraw());
+        assert!(!tracker.needs_full_redraw());
+    }
+
+    #[test]
+    fn test_cursor_only_cleared_by_line_mark() {
+        let mut tracker = DirtyTracker::new();
+        tracker.clear();
+
+        tracker.mark_cursor();
+        assert!(tracker.is_cursor_only());
+
+        tracker.mark_line(10);
+        assert!(!tracker.is_cursor_only());
+        assert!(tracker.needs_redraw());
+    }
+
+    #[test]
+    fn test_clear() {
+        let mut tracker = DirtyTracker::new();
+        tracker.mark_line(5);
+        tracker.mark_line(10);
+
+        tracker.clear();
+        assert!(!tracker.needs_redraw());
+        assert!(!tracker.needs_full_redraw());
+        assert!(!tracker.is_cursor_only());
+        assert_eq!(tracker.dirty_count(), 0);
+    }
+
+    #[test]
+    fn test_dirty_count() {
+        let mut tracker = DirtyTracker::new();
+        tracker.clear();
+
+        assert_eq!(tracker.dirty_count(), 0);
+
+        tracker.mark_line(1);
+        tracker.mark_line(2);
+        tracker.mark_line(3);
+        assert_eq!(tracker.dirty_count(), 3);
+    }
+
+    #[test]
+    fn test_screen_write_marks_dirty() {
+        let mut screen = TerminalScreen::new(80, 24);
+        screen.clear_dirty();
+
+        assert!(!screen.dirty_tracker().needs_redraw());
+
+        screen.process(b"Hello");
+        assert!(screen.dirty_tracker().needs_redraw());
+        assert!(screen.dirty_tracker().is_line_dirty(0));
+    }
+
+    #[test]
+    fn test_screen_scroll_marks_dirty() {
+        let mut screen = TerminalScreen::new(80, 24);
+        screen.clear_dirty();
+
+        // Fill screen to cause scroll
+        for _ in 0..25 {
+            screen.process(b"Line\n");
+        }
+
+        assert!(screen.dirty_tracker().needs_redraw());
+        let dirty_count = screen.dirty_tracker().dirty_count();
+        assert!(dirty_count > 0);
+    }
+
+    #[test]
+    fn test_screen_resize_marks_all_dirty() {
+        let mut screen = TerminalScreen::new(80, 24);
+        screen.clear_dirty();
+
+        screen.resize(100, 30);
+        assert!(screen.dirty_tracker().needs_full_redraw());
     }
 }

@@ -273,6 +273,8 @@ pub struct TerminalConfig {
     pub auto_scroll_on_output: bool,
     #[serde(default)]
     pub images: ImageConfig,
+    #[serde(default)]
+    pub bracket: BracketConfig,
 }
 
 impl Default for TerminalConfig {
@@ -292,6 +294,7 @@ impl Default for TerminalConfig {
             bracketed_paste: true,
             auto_scroll_on_output: true,
             images: ImageConfig::default(),
+            bracket: BracketConfig::default(),
         }
     }
 }
@@ -343,6 +346,26 @@ impl Default for ImageConfig {
         Self {
             enabled: false,
             max_size_bytes: default_image_max_size(),
+        }
+    }
+}
+
+/// Bracket matching configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BracketConfig {
+    /// Enable bracket matching highlighting
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Highlight color for matching brackets (hex format: #RRGGBB or #RRGGBBAA)
+    #[serde(default = "default_bracket_color")]
+    pub highlight_color: String,
+}
+
+impl Default for BracketConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            highlight_color: default_bracket_color(),
         }
     }
 }
@@ -1034,6 +1057,10 @@ fn default_flash_duration() -> u64 {
 
 fn default_image_max_size() -> usize {
     10 * 1024 * 1024 // 10MB
+}
+
+fn default_bracket_color() -> String {
+    "#5c8afa".to_string() // Accent blue for bracket highlights
 }
 
 fn default_keybinding_mode() -> String {
