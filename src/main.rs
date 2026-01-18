@@ -315,7 +315,7 @@ static APP_CONFIG: std::sync::OnceLock<AppConfig> = std::sync::OnceLock::new();
 fn main() -> iced::Result {
     // Load configuration
     let config = AppConfig::load().unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to load config ({}), using defaults", e);
+        eprintln!("Warning: Failed to load config ({e}), using defaults");
         AppConfig::default()
     });
 
@@ -530,7 +530,7 @@ impl Default for AgTerm {
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "Failed to create initial PTY session");
-                        (None, Some(format!("Failed to create PTY session: {}", e)))
+                        (None, Some(format!("Failed to create PTY session: {e}")))
                     }
                 };
 
@@ -1131,7 +1131,7 @@ impl AgTerm {
                         }
                         Err(e) => {
                             tracing::error!(error = %e, "Failed to create PTY session for restored tab");
-                            (None, Some(format!("Failed to create PTY session: {}", e)))
+                            (None, Some(format!("Failed to create PTY session: {e}")))
                         }
                     };
 
@@ -1192,7 +1192,7 @@ impl AgTerm {
 
                 let (session_id, error_message) = match session_result {
                     Ok(id) => (Some(id), None),
-                    Err(e) => (None, Some(format!("Failed to create PTY session: {}", e))),
+                    Err(e) => (None, Some(format!("Failed to create PTY session: {e}"))),
                 };
 
                 let tab = TerminalTab {
@@ -1239,15 +1239,15 @@ impl AgTerm {
                         // Send SSH command to the PTY
                         let ssh_command = profile.to_command();
                         let command_line = ssh_command.join(" ");
-                        if let Err(e) = self.pty_manager.write(&session_id, format!("{}\n", command_line).as_bytes()) {
-                            tracing::error!("Failed to write SSH command to session: {}", e);
-                            (Some(session_id), Some(format!("Failed to start SSH: {}", e)))
+                        if let Err(e) = self.pty_manager.write(&session_id, format!("{command_line}\n").as_bytes()) {
+                            tracing::error!("Failed to write SSH command to session: {e}");
+                            (Some(session_id), Some(format!("Failed to start SSH: {e}")))
                         } else {
-                            tracing::info!("SSH command sent: {}", command_line);
+                            tracing::info!("SSH command sent: {command_line}");
                             (Some(session_id), None)
                         }
                     }
-                    Err(e) => (None, Some(format!("Failed to create PTY session: {}", e))),
+                    Err(e) => (None, Some(format!("Failed to create PTY session: {e}"))),
                 };
 
                 let tab = TerminalTab {
@@ -1297,7 +1297,7 @@ impl AgTerm {
 
                     let (session_id, error_message) = match session_result {
                         Ok(id) => (Some(id), None),
-                        Err(e) => (None, Some(format!("Failed to create PTY session: {}", e))),
+                        Err(e) => (None, Some(format!("Failed to create PTY session: {e}"))),
                     };
 
                     let tab = TerminalTab {

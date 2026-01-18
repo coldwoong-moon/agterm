@@ -145,7 +145,7 @@ impl SshProfile {
         let user_part = self
             .user
             .as_ref()
-            .map(|u| format!("{}@", u))
+            .map(|u| format!("{u}@"))
             .unwrap_or_default();
         let port_part = if self.port != 22 {
             format!(":{}", self.port)

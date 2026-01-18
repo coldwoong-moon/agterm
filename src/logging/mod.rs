@@ -120,8 +120,7 @@ pub fn init_logging(config: &LoggingConfig) -> LogBuffer {
         // Ensure log directory exists
         if let Err(e) = std::fs::create_dir_all(&log_dir) {
             eprintln!(
-                "Warning: Failed to create log directory {:?}: {}",
-                log_dir, e
+                "Warning: Failed to create log directory {log_dir:?}: {e}"
             );
             None
         } else {

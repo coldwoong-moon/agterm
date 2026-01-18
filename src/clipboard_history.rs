@@ -131,8 +131,8 @@ impl ClipboardEntry {
     pub fn matches(&self, query: &str) -> bool {
         let query_lower = query.to_lowercase();
         self.content.to_lowercase().contains(&query_lower)
-            || self.label.as_ref().map_or(false, |l| l.to_lowercase().contains(&query_lower))
-            || self.source.as_ref().map_or(false, |s| s.to_lowercase().contains(&query_lower))
+            || self.label.as_ref().is_some_and(|l| l.to_lowercase().contains(&query_lower))
+            || self.source.as_ref().is_some_and(|s| s.to_lowercase().contains(&query_lower))
     }
 }
 
@@ -243,14 +243,14 @@ impl ClipboardHistory {
             // Write pinned entries first
             for entry in pinned_entries {
                 if let Ok(json) = serde_json::to_string(entry) {
-                    writeln!(file, "{}", json)?;
+                    writeln!(file, "{json}")?;
                 }
             }
 
             // Write recent unpinned entries
             for entry in &unpinned_entries[start..] {
                 if let Ok(json) = serde_json::to_string(entry) {
-                    writeln!(file, "{}", json)?;
+                    writeln!(file, "{json}")?;
                 }
             }
 

@@ -181,7 +181,7 @@ impl LinkDetector {
     /// * `Err(String)` if pattern is invalid
     pub fn add_custom_pattern(&mut self, name: String, pattern: &str) -> Result<(), String> {
         let regex = Regex::new(pattern)
-            .map_err(|e| format!("Invalid regex pattern: {}", e))?;
+            .map_err(|e| format!("Invalid regex pattern: {e}"))?;
 
         self.patterns.push(LinkPattern {
             regex,
@@ -409,10 +409,10 @@ impl LinkHandler {
         use arboard::Clipboard;
 
         let mut clipboard = Clipboard::new()
-            .map_err(|e| format!("Failed to access clipboard: {}", e))?;
+            .map_err(|e| format!("Failed to access clipboard: {e}"))?;
 
         clipboard.set_text(&link.text)
-            .map_err(|e| format!("Failed to copy to clipboard: {}", e))
+            .map_err(|e| format!("Failed to copy to clipboard: {e}"))
     }
 
     /// Execute a command with the link text as argument
@@ -423,7 +423,7 @@ impl LinkHandler {
             .arg("-c")
             .arg(&full_command)
             .spawn()
-            .map_err(|e| format!("Failed to execute command: {}", e))?;
+            .map_err(|e| format!("Failed to execute command: {e}"))?;
 
         Ok(())
     }

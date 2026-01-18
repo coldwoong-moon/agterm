@@ -91,11 +91,13 @@ impl Key {
             Key::Down => b"\x1B[B".to_vec(),
             Key::Right => b"\x1B[C".to_vec(),
             Key::Left => b"\x1B[D".to_vec(),
-            Key::F(n) if *n >= 1 && *n <= 4 => format!("\x1BO{}", (b'P' + n - 1) as char)
-                .as_bytes()
-                .to_vec(),
+            Key::F(n) if *n >= 1 && *n <= 4 => {
+                let ch = (b'P' + n - 1) as char;
+                format!("\x1BO{ch}").as_bytes().to_vec()
+            }
             Key::F(n) if *n >= 5 && *n <= 12 => {
-                format!("\x1B[{}~", 15 + n - 5).as_bytes().to_vec()
+                let num = 15 + n - 5;
+                format!("\x1B[{num}~").as_bytes().to_vec()
             }
             Key::F(_) => vec![],
             Key::Home => b"\x1B[H".to_vec(),
@@ -108,13 +110,13 @@ impl Key {
                 let byte = (*c as u8) & 0x1F;
                 vec![byte]
             }
-            Key::Alt(c) => format!("\x1B{}", c).as_bytes().to_vec(),
+            Key::Alt(c) => format!("\x1B{c}").as_bytes().to_vec(),
             Key::Char(c) => c.to_string().as_bytes().to_vec(),
         }
     }
 
     /// Parse key from string representation
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_str(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "ENTER" | "RETURN" => Some(Key::Enter),
             "TAB" => Some(Key::Tab),
@@ -272,17 +274,17 @@ impl Condition {
     pub fn evaluate(&self, context: &ExecutionContext) -> bool {
         match self {
             Condition::VarEquals(name, value) => {
-                context.variables.get(name).map_or(false, |v| v == value)
+                context.variables.get(name).is_some_and(|v| v == value)
             }
             Condition::VarContains(name, substring) => {
-                context.variables.get(name).map_or(false, |v| v.contains(substring))
+                context.variables.get(name).is_some_and(|v| v.contains(substring))
             }
             Condition::VarMatches(name, regex) => {
-                context.variables.get(name).map_or(false, |v| regex.is_match(v))
+                context.variables.get(name).is_some_and(|v| regex.is_match(v))
             }
             Condition::EnvExists(name) => std::env::var(name).is_ok(),
             Condition::PatternMatches(pattern) => {
-                context.last_capture.as_ref().map_or(false, |text| pattern.matches(text))
+                context.last_capture.as_ref().is_some_and(|text| pattern.matches(text))
             }
             Condition::And(a, b) => a.evaluate(context) && b.evaluate(context),
             Condition::Or(a, b) => a.evaluate(context) || b.evaluate(context),
@@ -417,8 +419,8 @@ impl ExecutionContext {
 
         // Expand ${VAR} format
         for (name, value) in &self.variables {
-            result = result.replace(&format!("${{{}}}", name), value);
-            result = result.replace(&format!("${}", name), value);
+            result = result.replace(&format!("${{{name}}}"), value);
+            result = result.replace(&format!("${name}"), value);
         }
 
         // Expand environment variables with ENV: prefix
@@ -695,13 +697,13 @@ impl AutomationEngine {
 
         loop {
             if start.elapsed() > timeout {
-                return Err(AutomationError::Timeout(format!("{:?}", pattern)));
+                return Err(AutomationError::Timeout(format!("{pattern:?}")));
             }
 
             // Read available output
             if let Ok(output) = self.pty_manager.read(&self.pty_id) {
                 if !output.is_empty() {
-                    let text = String::from_utf8_lossy(&output);
+                    let text = String::from_utf8_lossy(&output).to_string();
                     accumulated_output.push_str(&text);
                     self.context.append_output(&text);
 
@@ -781,10 +783,10 @@ impl AutomationEngine {
 
             "SEND_KEY" => {
                 let key_str = Self::extract_arg(&parts, line_num)?;
-                let key = Key::from_str(key_str)
+                let key = Key::parse_str(key_str)
                     .ok_or_else(|| AutomationError::ParseError {
                         line: line_num,
-                        message: format!("Invalid key: {}", key_str),
+                        message: format!("Invalid key: {key_str}"),
                     })?;
                 Ok(Some(AutomationCommand::SendKeys(vec![key])))
             }
@@ -853,7 +855,7 @@ impl AutomationEngine {
             _ => {
                 Err(AutomationError::ParseError {
                     line: line_num,
-                    message: format!("Unknown command: {}", command_name),
+                    message: format!("Unknown command: {command_name}"),
                 })
             }
         }
@@ -886,22 +888,22 @@ impl AutomationEngine {
     /// Parse duration string (e.g., "5s", "100ms", "2m")
     fn parse_duration(s: &str, line_num: usize) -> Result<Duration, AutomationError> {
         let s = s.trim();
-        let (value_str, unit) = if s.ends_with("ms") {
-            (&s[..s.len() - 2], "ms")
-        } else if s.ends_with('s') {
-            (&s[..s.len() - 1], "s")
-        } else if s.ends_with('m') {
-            (&s[..s.len() - 1], "m")
+        let (value_str, unit) = if let Some(value_str) = s.strip_suffix("ms") {
+            (value_str, "ms")
+        } else if let Some(value_str) = s.strip_suffix('s') {
+            (value_str, "s")
+        } else if let Some(value_str) = s.strip_suffix('m') {
+            (value_str, "m")
         } else {
             return Err(AutomationError::ParseError {
                 line: line_num,
-                message: format!("Invalid duration format: {}", s),
+                message: format!("Invalid duration format: {s}"),
             });
         };
 
         let value: u64 = value_str.parse().map_err(|_| AutomationError::ParseError {
             line: line_num,
-            message: format!("Invalid duration value: {}", value_str),
+            message: format!("Invalid duration value: {value_str}"),
         })?;
 
         let duration = match unit {
@@ -940,15 +942,15 @@ mod tests {
     }
 
     #[test]
-    fn test_key_from_str() {
-        assert_eq!(Key::from_str("ENTER"), Some(Key::Enter));
-        assert_eq!(Key::from_str("Tab"), Some(Key::Tab));
-        assert_eq!(Key::from_str("F1"), Some(Key::F(1)));
-        assert_eq!(Key::from_str("F12"), Some(Key::F(12)));
-        assert_eq!(Key::from_str("CTRL+C"), Some(Key::Ctrl('C')));
-        assert_eq!(Key::from_str("ALT+A"), Some(Key::Alt('A')));
-        assert_eq!(Key::from_str("a"), Some(Key::Char('a')));
-        assert_eq!(Key::from_str("INVALID"), None);
+    fn test_key_parse_str() {
+        assert_eq!(Key::parse_str("ENTER"), Some(Key::Enter));
+        assert_eq!(Key::parse_str("Tab"), Some(Key::Tab));
+        assert_eq!(Key::parse_str("F1"), Some(Key::F(1)));
+        assert_eq!(Key::parse_str("F12"), Some(Key::F(12)));
+        assert_eq!(Key::parse_str("CTRL+C"), Some(Key::Ctrl('C')));
+        assert_eq!(Key::parse_str("ALT+A"), Some(Key::Alt('A')));
+        assert_eq!(Key::parse_str("a"), Some(Key::Char('a')));
+        assert_eq!(Key::parse_str("INVALID"), None);
     }
 
     #[test]

@@ -132,13 +132,13 @@ impl SnippetManager {
         // Update trigger index
         self.trigger_index
             .entry(trigger)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id.clone());
 
         // Update category index
         self.category_index
             .entry(category)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id);
 
         Ok(())

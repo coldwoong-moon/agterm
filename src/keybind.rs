@@ -144,8 +144,8 @@ impl Action {
             Action::IncreaseFontSize => "increase_font_size".to_string(),
             Action::DecreaseFontSize => "decrease_font_size".to_string(),
             Action::ResetFontSize => "reset_font_size".to_string(),
-            Action::ScrollUp(n) => format!("scroll_up_{}", n),
-            Action::ScrollDown(n) => format!("scroll_down_{}", n),
+            Action::ScrollUp(n) => format!("scroll_up_{n}"),
+            Action::ScrollDown(n) => format!("scroll_down_{n}"),
             Action::ScrollPageUp => "scroll_page_up".to_string(),
             Action::ScrollPageDown => "scroll_page_down".to_string(),
             Action::ScrollToTop => "scroll_to_top".to_string(),
@@ -267,7 +267,7 @@ impl KeyBindings {
     pub fn from_iced_key(key: &Key, modifiers: &Modifiers) -> Option<KeyCombo> {
         let key_str = match key.as_ref() {
             Key::Character(c) => c.to_string(),
-            Key::Named(named) => format!("{:?}", named),
+            Key::Named(named) => format!("{named:?}"),
             Key::Unidentified => return None,
         };
 

@@ -10,8 +10,10 @@ use thiserror::Error;
 /// Supported character encodings
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 pub enum Encoding {
     /// UTF-8 (default)
+    #[default]
     Utf8,
     /// UTF-16 (platform endianness)
     Utf16,
@@ -33,11 +35,6 @@ pub enum Encoding {
     Big5,
 }
 
-impl Default for Encoding {
-    fn default() -> Self {
-        Encoding::Utf8
-    }
-}
 
 impl Encoding {
     /// Returns the canonical name of the encoding
@@ -166,7 +163,7 @@ impl Encoding {
             .collect();
 
         String::from_utf16(&u16_vec)
-            .map(|s| Cow::Owned(s))
+            .map(Cow::Owned)
             .map_err(|_| EncodingError::InvalidSequence("Invalid UTF-16 sequence"))
     }
 

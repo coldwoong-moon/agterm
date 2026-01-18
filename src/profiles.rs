@@ -183,7 +183,9 @@ pub struct CustomColors {
 /// Cursor style options
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum CursorStyle {
+    #[default]
     Block,
     Underline,
     Bar,
@@ -192,11 +194,6 @@ pub enum CursorStyle {
     BlinkingBar,
 }
 
-impl Default for CursorStyle {
-    fn default() -> Self {
-        CursorStyle::Block
-    }
-}
 
 /// Terminal behavior settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,21 +234,19 @@ pub struct TerminalSettings {
 /// Bell notification style
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum BellStyle {
     None,
     Audible,
+    #[default]
     Visual,
     Both,
 }
 
-impl Default for BellStyle {
-    fn default() -> Self {
-        BellStyle::Visual
-    }
-}
 
 /// Shell configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ShellSettings {
     /// Shell command (path to shell executable)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -425,7 +420,7 @@ impl ProfileManager {
                         let _ = self.add_profile_internal(profile);
                     }
                     Err(e) => {
-                        eprintln!("Failed to load profile from {:?}: {}", path, e);
+                        eprintln!("Failed to load profile from {path:?}: {e}");
                     }
                 }
             }
@@ -557,7 +552,7 @@ impl ProfileManager {
         }
 
         // Remove from disk
-        let filename = format!("{}.toml", id);
+        let filename = format!("{id}.toml");
         let path = self.storage_dir.join(filename);
         if path.exists() {
             std::fs::remove_file(path)?;
@@ -827,16 +822,6 @@ impl Default for TerminalSettings {
     }
 }
 
-impl Default for ShellSettings {
-    fn default() -> Self {
-        Self {
-            command: None,
-            args: Vec::new(),
-            shell_type: None,
-            login_shell: false,
-        }
-    }
-}
 
 // ============================================================================
 // Tests

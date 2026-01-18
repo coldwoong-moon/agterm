@@ -92,6 +92,11 @@ impl LineRange {
         self.end - self.start + 1
     }
 
+    /// Check if this range is empty
+    pub fn is_empty(&self) -> bool {
+        self.start > self.end
+    }
+
     /// Check if this is a single-line range
     pub fn is_single_line(&self) -> bool {
         self.start == self.end
@@ -248,7 +253,7 @@ impl AnnotationManager {
         for line in annotation.range.start..=annotation.range.end {
             self.line_index
                 .entry(line)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(id.clone());
         }
 
@@ -446,7 +451,7 @@ impl AnnotationManager {
                         for line_num in annotation.range.start..=annotation.range.end {
                             self.line_index
                                 .entry(line_num)
-                                .or_insert_with(Vec::new)
+                                .or_default()
                                 .push(id.clone());
                         }
                         self.annotations.insert(id, annotation);
@@ -485,7 +490,7 @@ impl AnnotationManager {
             // Write all annotations as JSON lines
             for annotation in self.annotations.values() {
                 let json = serde_json::to_string(annotation)?;
-                writeln!(file, "{}", json)?;
+                writeln!(file, "{json}")?;
             }
 
             tracing::debug!(

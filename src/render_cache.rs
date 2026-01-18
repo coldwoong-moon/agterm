@@ -953,7 +953,7 @@ impl RenderCacheStats {
     /// Format memory usage as human-readable string
     pub fn memory_usage_string(&self) -> String {
         let mb = self.total_memory_bytes as f64 / (1024.0 * 1024.0);
-        format!("{:.2} MB", mb)
+        format!("{mb:.2} MB")
     }
 }
 

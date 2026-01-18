@@ -160,7 +160,7 @@ impl SessionData {
         dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("agterm")
-            .join(format!("session.backup.{}.json", index))
+            .join(format!("session.backup.{index}.json"))
     }
 
     /// Save a backup of the current session

@@ -64,7 +64,7 @@ pub fn find_link_at(text: &str, col: usize) -> Option<LinkType> {
 pub fn open_link(link: &LinkType) -> Result<(), String> {
     match link {
         LinkType::Url(url) => {
-            open::that(url).map_err(|e| format!("Failed to open URL: {}", e))
+            open::that(url).map_err(|e| format!("Failed to open URL: {e}"))
         }
         LinkType::FilePath(path) => {
             // Expand tilde to home directory
@@ -78,7 +78,7 @@ pub fn open_link(link: &LinkType) -> Result<(), String> {
                 path.clone()
             };
 
-            open::that(&expanded).map_err(|e| format!("Failed to open file path: {}", e))
+            open::that(&expanded).map_err(|e| format!("Failed to open file path: {e}"))
         }
     }
 }

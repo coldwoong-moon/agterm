@@ -37,7 +37,7 @@ impl ClipboardManager {
             // Read request - return current clipboard content as OSC 52 sequence
             self.get_clipboard().map(|text| {
                 let encoded = BASE64.encode(text.as_bytes());
-                format!("\x1b]52;{};{}\x07", selection, encoded)
+                format!("\x1b]52;{selection};{encoded}\x07")
             })
         } else {
             // Write request - decode and set clipboard

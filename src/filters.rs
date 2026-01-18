@@ -97,7 +97,7 @@ impl Filter {
         pattern: String,
         action: FilterAction,
     ) -> Result<Self, FilterError> {
-        let pattern_with_flag = format!("(?i){}", pattern);
+        let pattern_with_flag = format!("(?i){pattern}");
         let regex = Regex::new(&pattern_with_flag)?;
         Ok(Self {
             id,
@@ -276,7 +276,7 @@ impl FilterManager {
         if let Some(group) = &filter.group {
             self.groups
                 .entry(group.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(id.clone());
         }
 

@@ -758,7 +758,7 @@ pub mod iterm2 {
 
     fn extract_iterm_color(xml: &str, key: &str) -> Option<ColorRgb> {
         // Find the key line
-        let key_line = format!("<key>{}</key>", key);
+        let key_line = format!("<key>{key}</key>");
         let lines: Vec<&str> = xml.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {

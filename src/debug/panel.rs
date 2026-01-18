@@ -272,7 +272,7 @@ impl DebugPanel {
             row![
                 text("FPS:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format!("{:.1}", fps))
+                text(format!("{fps:.1}"))
                     .size(11)
                     .font(MONO_FONT)
                     .color(fps_color),
@@ -299,8 +299,7 @@ impl DebugPanel {
                 fps_data.iter().max_by(|a, b| a.partial_cmp(b).unwrap()),
             ) {
                 content = content.push(row![text(format!(
-                    "   {:.0}-{:.0} (60s)",
-                    min_fps, max_fps
+                    "   {min_fps:.0}-{max_fps:.0} (60s)"
                 ))
                 .size(9)
                 .color(colors::TEXT_LABEL),]);
@@ -313,7 +312,7 @@ impl DebugPanel {
             .push(row![
                 text("Frame:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format!("{:.2}ms", frame_time))
+                text(format!("{frame_time:.2}ms"))
                     .size(11)
                     .font(MONO_FONT)
                     .color(colors::TEXT_VALUE),
@@ -321,7 +320,7 @@ impl DebugPanel {
             .push(row![
                 text("Render:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format!("{:.2}ms", render_time))
+                text(format!("{render_time:.2}ms"))
                     .size(11)
                     .font(MONO_FONT)
                     .color(colors::TEXT_VALUE),
@@ -329,7 +328,7 @@ impl DebugPanel {
             .push(row![
                 text("Msg:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format!("{:.1}\u{00B5}s", msg_time))
+                text(format!("{msg_time:.1}\u{00B5}s"))
                     .size(11)
                     .font(MONO_FONT)
                     .color(colors::TEXT_VALUE),
@@ -338,7 +337,7 @@ impl DebugPanel {
             .push(row![
                 text("Memory:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format!("{:.1}MB", memory_mb))
+                text(format!("{memory_mb:.1}MB"))
                     .size(11)
                     .font(MONO_FONT)
                     .color(colors::TEXT_VALUE),
@@ -421,7 +420,7 @@ impl DebugPanel {
             row![
                 text("Active:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format!("{}", sessions_count))
+                text(format!("{sessions_count}"))
                     .size(11)
                     .font(MONO_FONT)
                     .color(colors::ACCENT_GREEN),
@@ -486,7 +485,7 @@ impl DebugPanel {
                 };
                 let id_short = &session.session_id[..8.min(session.session_id.len())];
                 content = content.push(row![
-                    text(format!("  {}", id_short))
+                    text(format!("  {id_short}"))
                         .size(10)
                         .font(MONO_FONT)
                         .color(colors::TEXT_LABEL),
@@ -541,7 +540,7 @@ impl DebugPanel {
                     .font(MONO_FONT)
                     .color(colors::TEXT_VALUE),
                 Space::with_width(8),
-                text(format!("[{}]", mods_display))
+                text(format!("[{mods_display}]"))
                     .size(10)
                     .color(colors::TEXT_LABEL),
             ],
@@ -616,7 +615,7 @@ impl DebugPanel {
                             .font(MONO_FONT)
                             .color(level_color),
                         Space::with_width(4),
-                        text(format!("[{}]", target_short))
+                        text(format!("[{target_short}]"))
                             .size(9)
                             .color(colors::TEXT_LABEL),
                         Space::with_width(4),
@@ -844,11 +843,13 @@ impl DebugPanel {
 /// Format bytes for display
 fn format_bytes(bytes: usize) -> String {
     if bytes < 1024 {
-        format!("{}B", bytes)
+        format!("{bytes}B")
     } else if bytes < 1024 * 1024 {
-        format!("{:.1}KB", bytes as f64 / 1024.0)
+        let kb = bytes as f64 / 1024.0;
+        format!("{kb:.1}KB")
     } else {
-        format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
+        let mb = bytes as f64 / (1024.0 * 1024.0);
+        format!("{mb:.1}MB")
     }
 }
 
@@ -856,6 +857,7 @@ fn format_bytes(bytes: usize) -> String {
 ///
 /// Creates a simple bar graph from a data series, fitting within the specified width.
 /// Each bar represents one data point scaled to the height range.
+#[allow(dead_code)]
 fn render_ascii_graph(data: &[f64], width: usize, height: usize) -> Vec<String> {
     if data.is_empty() || width == 0 || height == 0 {
         return vec![" ".repeat(width); height];
@@ -889,7 +891,7 @@ fn render_ascii_graph(data: &[f64], width: usize, height: usize) -> Vec<String> 
     };
 
     // Draw bars
-    for (_x, &value) in samples.iter().enumerate() {
+    for &value in samples.iter() {
         // Normalize value to 0-1 range
         let normalized = if range > 0.0 {
             ((value - min_val) / range).clamp(0.0, 1.0)
@@ -903,7 +905,7 @@ fn render_ascii_graph(data: &[f64], width: usize, height: usize) -> Vec<String> 
         let partial = ((bar_height - bar_height.floor()) * 8.0) as usize;
 
         // Fill from bottom up
-        for y in 0..height {
+        for (y, line) in lines.iter_mut().enumerate() {
             let row_from_bottom = height - 1 - y;
             let ch = if row_from_bottom < full_blocks {
                 '█'
@@ -912,7 +914,7 @@ fn render_ascii_graph(data: &[f64], width: usize, height: usize) -> Vec<String> 
             } else {
                 ' '
             };
-            lines[y].push(ch);
+            line.push(ch);
         }
     }
 
@@ -998,7 +1000,7 @@ mod tests {
         // Use chars().count() for Unicode character count (not byte count)
         assert_eq!(sparkline.chars().count(), 5);
         // Should contain Unicode sparkline characters
-        assert!(sparkline.chars().all(|c| c >= '▁' && c <= '█' || c == ' '));
+        assert!(sparkline.chars().all(|c| ('▁'..='█').contains(&c) || c == ' '));
     }
 
     #[test]

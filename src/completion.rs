@@ -255,7 +255,7 @@ impl CompletionEngine {
                         }
                         full.to_string_lossy().to_string()
                     } else if kind == CompletionKind::Directory {
-                        format!("{}/", name)
+                        format!("{name}/")
                     } else {
                         name.to_string()
                     };

@@ -1443,6 +1443,7 @@ fn default_max_sessions() -> usize {
     32
 }
 
+#[allow(dead_code)]
 fn default_timeout() -> u64 {
     5
 }
@@ -1531,7 +1532,7 @@ impl AppConfig {
     pub fn load() -> Result<Self, ConfigError> {
         // Start with default config
         let mut config: AppConfig = toml::from_str(DEFAULT_CONFIG).map_err(|e| {
-            ConfigError::ParseError(format!("Failed to parse default config: {}", e))
+            ConfigError::ParseError(format!("Failed to parse default config: {e}"))
         })?;
 
         // Try to load user config
@@ -1741,7 +1742,7 @@ impl Profile {
 
     /// Get the path for a profile file
     pub fn profile_path(name: &str) -> Option<PathBuf> {
-        Self::profiles_dir().map(|dir| dir.join(format!("{}.toml", name)))
+        Self::profiles_dir().map(|dir| dir.join(format!("{name}.toml")))
     }
 
     /// Load a profile by name
@@ -1752,8 +1753,7 @@ impl Profile {
 
         if !path.exists() {
             return Err(ConfigError::IoError(format!(
-                "Profile '{}' not found",
-                name
+                "Profile '{name}' not found"
             )));
         }
 
@@ -1761,7 +1761,7 @@ impl Profile {
             std::fs::read_to_string(&path).map_err(|e| ConfigError::IoError(e.to_string()))?;
 
         toml::from_str(&contents).map_err(|e| {
-            ConfigError::ParseError(format!("Failed to parse profile '{}': {}", name, e))
+            ConfigError::ParseError(format!("Failed to parse profile '{name}': {e}"))
         })
     }
 
@@ -1792,8 +1792,7 @@ impl Profile {
 
         if !path.exists() {
             return Err(ConfigError::IoError(format!(
-                "Profile '{}' not found",
-                name
+                "Profile '{name}' not found"
             )));
         }
 
@@ -1970,7 +1969,7 @@ impl Snippet {
         }
 
         let file: SnippetsFile = toml::from_str(&contents).map_err(|e| {
-            ConfigError::ParseError(format!("Failed to parse snippets.toml: {}", e))
+            ConfigError::ParseError(format!("Failed to parse snippets.toml: {e}"))
         })?;
 
         Ok(file.snippets)
@@ -2319,7 +2318,7 @@ impl Hook {
         }
 
         let file: HooksFile = toml::from_str(&contents)
-            .map_err(|e| ConfigError::ParseError(format!("Failed to parse hooks.toml: {}", e)))?;
+            .map_err(|e| ConfigError::ParseError(format!("Failed to parse hooks.toml: {e}")))?;
 
         Ok(file.hooks)
     }

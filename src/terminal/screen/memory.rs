@@ -83,7 +83,7 @@ impl CompressedLine {
     #[allow(dead_code)] // Reserved for future use
     pub fn from_line(line: Vec<super::Cell>) -> Self {
         // Check if all cells are default
-        if line.iter().all(|cell| is_default_cell(cell)) {
+        if line.iter().all(is_default_cell) {
             CompressedLine::Empty(line.len())
         } else {
             CompressedLine::Raw(line)

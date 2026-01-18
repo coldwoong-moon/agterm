@@ -27,7 +27,7 @@ impl BellSound {
                 }
             }
             Err(e) => {
-                log::warn!("Failed to initialize bell sound: {}", e);
+                log::warn!("Failed to initialize bell sound: {e}");
                 Self {
                     _stream: None,
                     stream_handle: None,
@@ -48,7 +48,7 @@ impl BellSound {
                 if let Ok(handle) = handle_clone.lock() {
                     if let Ok(source) = rodio::Decoder::new(Cursor::new(beep_data)) {
                         if let Err(e) = handle.play_raw(source.convert_samples()) {
-                            log::warn!("Failed to play bell sound: {}", e);
+                            log::warn!("Failed to play bell sound: {e}");
                         }
                     }
                 }

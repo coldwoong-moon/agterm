@@ -87,7 +87,7 @@ impl SearchState {
         let pattern = if self.case_sensitive {
             pattern
         } else {
-            format!("(?i){}", pattern)
+            format!("(?i){pattern}")
         };
 
         self.compiled_regex = Regex::new(&pattern).ok();
@@ -176,7 +176,7 @@ impl SearchState {
 
     /// Check if a position is within the current match
     pub fn is_current_match_at(&self, line: usize, col: usize) -> bool {
-        self.current().map_or(false, |m| {
+        self.current().is_some_and(|m| {
             m.line == line && col >= m.start_col && col < m.end_col
         })
     }

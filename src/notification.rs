@@ -37,7 +37,7 @@ impl NotificationManager {
 
         let result = Notification::new()
             .summary("AgTerm")
-            .body(&format!("Bell in: {}", tab_title))
+            .body(&format!("Bell in: {tab_title}"))
             .timeout(Timeout::Milliseconds(
                 (self.config.timeout_seconds * 1000) as u32
             ))
@@ -59,7 +59,7 @@ impl NotificationManager {
         }
 
         let status = if exit_code == 0 { "✓" } else { "✗" };
-        let summary = format!("{} Command Complete", status);
+        let summary = format!("{status} Command Complete");
 
         let result = Notification::new()
             .summary(&summary)

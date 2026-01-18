@@ -149,8 +149,7 @@ impl Workspace {
         }
         if name.contains(['/', '\\', '\0']) {
             return Err(WorkspaceError::InvalidName(format!(
-                "Workspace name contains invalid characters: {}",
-                name
+                "Workspace name contains invalid characters: {name}"
             )));
         }
 
@@ -329,7 +328,7 @@ impl WorkspaceManager {
 
     /// Get the file path for a workspace
     fn workspace_path(&self, name: &str) -> PathBuf {
-        self.workspace_dir.join(format!("{}.toml", name))
+        self.workspace_dir.join(format!("{name}.toml"))
     }
 
     /// Save a workspace to disk

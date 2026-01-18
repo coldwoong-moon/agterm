@@ -158,7 +158,7 @@ impl HistoryManager {
                     // Fallback to plain text if JSON fails
                     entry.command.clone()
                 });
-                writeln!(file, "{}", json)?;
+                writeln!(file, "{json}")?;
             }
 
             tracing::debug!("Saved {} history entries to {:?}", self.entries.len(), path);

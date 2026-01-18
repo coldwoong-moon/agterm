@@ -45,33 +45,33 @@ fn test_key_conversions() {
 #[test]
 fn test_key_parsing() {
     // Basic keys
-    assert_eq!(Key::from_str("ENTER"), Some(Key::Enter));
-    assert_eq!(Key::from_str("Tab"), Some(Key::Tab));
-    assert_eq!(Key::from_str("ESCAPE"), Some(Key::Escape));
-    assert_eq!(Key::from_str("ESC"), Some(Key::Escape));
+    assert_eq!(Key::parse_str("ENTER"), Some(Key::Enter));
+    assert_eq!(Key::parse_str("Tab"), Some(Key::Tab));
+    assert_eq!(Key::parse_str("ESCAPE"), Some(Key::Escape));
+    assert_eq!(Key::parse_str("ESC"), Some(Key::Escape));
 
     // Arrow keys
-    assert_eq!(Key::from_str("UP"), Some(Key::Up));
-    assert_eq!(Key::from_str("down"), Some(Key::Down));
-    assert_eq!(Key::from_str("LEFT"), Some(Key::Left));
-    assert_eq!(Key::from_str("RIGHT"), Some(Key::Right));
+    assert_eq!(Key::parse_str("UP"), Some(Key::Up));
+    assert_eq!(Key::parse_str("down"), Some(Key::Down));
+    assert_eq!(Key::parse_str("LEFT"), Some(Key::Left));
+    assert_eq!(Key::parse_str("RIGHT"), Some(Key::Right));
 
     // Function keys
-    assert_eq!(Key::from_str("F1"), Some(Key::F(1)));
-    assert_eq!(Key::from_str("F12"), Some(Key::F(12)));
-    assert_eq!(Key::from_str("F99"), None); // Out of range
+    assert_eq!(Key::parse_str("F1"), Some(Key::F(1)));
+    assert_eq!(Key::parse_str("F12"), Some(Key::F(12)));
+    assert_eq!(Key::parse_str("F99"), None); // Out of range
 
     // Modified keys
-    assert_eq!(Key::from_str("CTRL+C"), Some(Key::Ctrl('C')));
-    assert_eq!(Key::from_str("ALT+A"), Some(Key::Alt('A')));
+    assert_eq!(Key::parse_str("CTRL+C"), Some(Key::Ctrl('C')));
+    assert_eq!(Key::parse_str("ALT+A"), Some(Key::Alt('A')));
 
     // Characters
-    assert_eq!(Key::from_str("a"), Some(Key::Char('a')));
-    assert_eq!(Key::from_str("5"), Some(Key::Char('5')));
+    assert_eq!(Key::parse_str("a"), Some(Key::Char('a')));
+    assert_eq!(Key::parse_str("5"), Some(Key::Char('5')));
 
     // Invalid
-    assert_eq!(Key::from_str("INVALID"), None);
-    assert_eq!(Key::from_str(""), None);
+    assert_eq!(Key::parse_str("INVALID"), None);
+    assert_eq!(Key::parse_str(""), None);
 }
 
 #[test]

@@ -130,7 +130,7 @@ pub fn view<'a, Message: 'a>(
     if config.show_scroll_position {
         if let Some((current, total)) = info.scroll_position {
             right_parts.push(
-                text(format!("{}/{}", current, total))
+                text(format!("{current}/{total}"))
                     .size(12)
                     .color(text_color)
                     .into(),

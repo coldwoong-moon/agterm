@@ -218,7 +218,7 @@ impl ShellInfo {
 
         // Extract filename handling both Unix (/) and Windows (\) path separators
         let file_name = path
-            .rsplit(|c| c == '/' || c == '\\')
+            .rsplit(['/', '\\'])
             .next()
             .unwrap_or(path)
             .to_lowercase();

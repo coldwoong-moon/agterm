@@ -335,8 +335,8 @@ mod tests {
 
         for i in 0..10 {
             log.log(
-                EventType::Custom(format!("{}", i)),
-                format!("Event {}", i),
+                EventType::Custom(format!("{i}")),
+                format!("Event {i}"),
             );
         }
 

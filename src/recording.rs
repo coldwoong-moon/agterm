@@ -353,7 +353,7 @@ impl Recording {
 
         // Write header (metadata) as first line
         let header_json = serde_json::to_string(&self.metadata)?;
-        writeln!(writer, "{}", header_json)?;
+        writeln!(writer, "{header_json}")?;
 
         // Write events as subsequent lines
         for event in &self.events {
@@ -369,11 +369,11 @@ impl Recording {
                     cols,
                     rows,
                 } => {
-                    let size_str = format!("{}x{}", cols, rows);
+                    let size_str = format!("{cols}x{rows}");
                     format!("[{},\"r\",{}]", timestamp, serde_json::to_string(&size_str)?)
                 }
             };
-            writeln!(writer, "{}", event_json)?;
+            writeln!(writer, "{event_json}")?;
         }
 
         writer.flush()?;

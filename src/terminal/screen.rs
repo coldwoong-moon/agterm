@@ -443,7 +443,7 @@ impl CompressedLine {
         });
 
         let original_length = line.len();
-        let uncompressed_size = original_length * std::mem::size_of::<Cell>();
+        let uncompressed_size = std::mem::size_of_val(line);
         let compressed_size =
             segments.len() * (std::mem::size_of::<Cell>() + std::mem::size_of::<usize>());
 
@@ -1096,7 +1096,7 @@ impl TerminalScreen {
                 None
             } else {
                 // file://path (no hostname) -> use as is
-                Some(format!("/{}", path_part))
+                Some(format!("/{path_part}"))
             }
         } else if uri.starts_with("file:/") {
             // file:/path (missing one slash)
@@ -1495,7 +1495,7 @@ impl TerminalScreen {
                 strikethrough: self.strikethrough,
                 scroll_region: self.scroll_region,
                 saved_cursor: self.saved_cursor,
-                saved_cursor_state: self.saved_cursor_state.clone(),
+                saved_cursor_state: self.saved_cursor_state,
                 saved_scrollback: self.scrollback.clone(),
                 is_active: true,
                 scrollback_disabled: true,
@@ -1861,8 +1861,7 @@ impl Perform for TerminalScreen {
                             // Query color palette
                             if let Some((r, g, b)) = self.color_palette.get(index as usize) {
                                 let response = format!(
-                                    "\x1b]4;{};rgb:{:02x}/{:02x}/{:02x}\x07",
-                                    index, r, g, b
+                                    "\x1b]4;{index};rgb:{r:02x}/{g:02x}/{b:02x}\x07"
                                 );
                                 self.pending_responses.push(response);
                             }
@@ -1887,7 +1886,7 @@ impl Perform for TerminalScreen {
                     if color_spec == "?" {
                         // Query default foreground
                         let (r, g, b) = self.default_fg_color.unwrap_or((204, 204, 204));
-                        let response = format!("\x1b]10;rgb:{:02x}/{:02x}/{:02x}\x07", r, g, b);
+                        let response = format!("\x1b]10;rgb:{r:02x}/{g:02x}/{b:02x}\x07");
                         self.pending_responses.push(response);
                     } else if color_spec.starts_with("rgb:") {
                         // Set default foreground
@@ -1907,7 +1906,7 @@ impl Perform for TerminalScreen {
                     if color_spec == "?" {
                         // Query default background
                         let (r, g, b) = self.default_bg_color.unwrap_or((0, 0, 0));
-                        let response = format!("\x1b]11;rgb:{:02x}/{:02x}/{:02x}\x07", r, g, b);
+                        let response = format!("\x1b]11;rgb:{r:02x}/{g:02x}/{b:02x}\x07");
                         self.pending_responses.push(response);
                     } else if color_spec.starts_with("rgb:") {
                         // Set default background
@@ -1933,7 +1932,7 @@ impl Perform for TerminalScreen {
                                 use base64::{engine::general_purpose::STANDARD, Engine as _};
                                 let encoded = STANDARD.encode(text.as_bytes());
                                 // Respond with OSC 52 ; c ; <base64> ST
-                                let response = format!("\x1b]52;{};{}\x1b\\", selection, encoded);
+                                let response = format!("\x1b]52;{selection};{encoded}\x1b\\");
                                 self.pending_responses.push(response);
                             }
                         }
@@ -2197,7 +2196,7 @@ impl Perform for TerminalScreen {
                         let row = self.cursor_row + 1;
                         let col = self.cursor_col + 1;
                         self.pending_responses
-                            .push(format!("\x1b[{};{}R", row, col));
+                            .push(format!("\x1b[{row};{col}R"));
                     }
                     _ => {
                         // Unknown DSR request - ignore

@@ -459,9 +459,9 @@ impl DiffViewer {
                     output.push_str(&format!(
                         "{} {:4} {} | {:4} {}\n",
                         prefix,
-                        line.left_line_num.map_or("    ".to_string(), |n| format!("{:4}", n)),
+                        line.left_line_num.map_or("    ".to_string(), |n| format!("{n:4}")),
                         truncated,
-                        line.right_line_num.map_or("    ".to_string(), |n| format!("{:4}", n)),
+                        line.right_line_num.map_or("    ".to_string(), |n| format!("{n:4}")),
                         truncated
                     ));
                 }
@@ -473,7 +473,7 @@ impl DiffViewer {
                         prefix,
                         "    ",
                         "",
-                        line.right_line_num.map_or("    ".to_string(), |n| format!("{:4}", n)),
+                        line.right_line_num.map_or("    ".to_string(), |n| format!("{n:4}")),
                         truncated,
                         width = half_width - 6
                     ));
@@ -484,7 +484,7 @@ impl DiffViewer {
                     output.push_str(&format!(
                         "{} \x1b[31m{:4} -{}\x1b[0m {:width$} | {:4} \n",
                         prefix,
-                        line.left_line_num.map_or("    ".to_string(), |n| format!("{:4}", n)),
+                        line.left_line_num.map_or("    ".to_string(), |n| format!("{n:4}")),
                         truncated,
                         "",
                         "    ",
@@ -499,9 +499,9 @@ impl DiffViewer {
                     output.push_str(&format!(
                         "{} \x1b[33m{:4} ~{}\x1b[0m | \x1b[33m{:4} ~{}\x1b[0m\n",
                         prefix,
-                        line.left_line_num.map_or("    ".to_string(), |n| format!("{:4}", n)),
+                        line.left_line_num.map_or("    ".to_string(), |n| format!("{n:4}")),
                         left_trunc,
-                        line.right_line_num.map_or("    ".to_string(), |n| format!("{:4}", n)),
+                        line.right_line_num.map_or("    ".to_string(), |n| format!("{n:4}")),
                         right_trunc
                     ));
                 }
@@ -541,8 +541,8 @@ impl DiffViewer {
                     output.push_str(&format!(
                         "{} {:4} {:4}   {}\n",
                         prefix,
-                        line.left_line_num.map_or("    ".to_string(), |n| format!("{:4}", n)),
-                        line.right_line_num.map_or("    ".to_string(), |n| format!("{:4}", n)),
+                        line.left_line_num.map_or("    ".to_string(), |n| format!("{n:4}")),
+                        line.right_line_num.map_or("    ".to_string(), |n| format!("{n:4}")),
                         truncated
                     ));
                 }
@@ -553,7 +553,7 @@ impl DiffViewer {
                         "{} {:4} \x1b[32m{:4} + {}\x1b[0m\n",
                         prefix,
                         "    ",
-                        line.right_line_num.map_or("    ".to_string(), |n| format!("{:4}", n)),
+                        line.right_line_num.map_or("    ".to_string(), |n| format!("{n:4}")),
                         truncated
                     ));
                 }
@@ -563,7 +563,7 @@ impl DiffViewer {
                     output.push_str(&format!(
                         "{} \x1b[31m{:4}\x1b[0m {:4} \x1b[31m- {}\x1b[0m\n",
                         prefix,
-                        line.left_line_num.map_or("    ".to_string(), |n| format!("{:4}", n)),
+                        line.left_line_num.map_or("    ".to_string(), |n| format!("{n:4}")),
                         "    ",
                         truncated
                     ));
@@ -576,7 +576,7 @@ impl DiffViewer {
                     output.push_str(&format!(
                         "{} \x1b[33m{:4}\x1b[0m {:4} \x1b[33m- {}\x1b[0m\n",
                         prefix,
-                        line.left_line_num.map_or("    ".to_string(), |n| format!("{:4}", n)),
+                        line.left_line_num.map_or("    ".to_string(), |n| format!("{n:4}")),
                         "    ",
                         left_trunc
                     ));
@@ -584,7 +584,7 @@ impl DiffViewer {
                         "{} {:4} \x1b[33m{:4} + {}\x1b[0m\n",
                         prefix,
                         "    ",
-                        line.right_line_num.map_or("    ".to_string(), |n| format!("{:4}", n)),
+                        line.right_line_num.map_or("    ".to_string(), |n| format!("{n:4}")),
                         right_trunc
                     ));
                 }
@@ -607,7 +607,7 @@ impl DiffViewer {
     /// Truncate a string to fit within the given width
     fn truncate(&self, s: &str, width: usize) -> String {
         if s.len() <= width {
-            format!("{:width$}", s, width = width)
+            format!("{s:width$}")
         } else {
             format!("{}...", &s[..min(width.saturating_sub(3), s.len())])
         }

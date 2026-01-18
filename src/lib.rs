@@ -18,27 +18,37 @@
 //! - Terminal image protocol support (iTerm2, Kitty, SIXEL)
 //! - Terminal automation API with scripting DSL
 //! - Diff viewer with Myers algorithm for text comparison
+//! - Command completion engine with file and command suggestions
+//! - Debug panel with performance metrics and event logging
+//! - Command history management with persistence
+//! - Structured logging with tracing ecosystem
+//! - Terminal bell sound system
 
 pub mod annotations;
 pub mod automation;
 pub mod broadcast;
 pub mod clipboard_history;
+pub mod completion;
 pub mod config;
+pub mod debug;
 pub mod diff_view;
 pub mod encoding;
 pub mod filters;
+pub mod history;
 pub mod image_protocol;
 pub mod keybind;
 pub mod link_handler;
-pub mod profiles;
+pub mod logging;
 pub mod macros;
 pub mod markdown;
 pub mod notification;
+pub mod profiles;
 pub mod recording;
 pub mod render_cache;
 pub mod session;
 pub mod shell;
 pub mod snippets;
+pub mod sound;
 pub mod splits;
 pub mod ssh;
 pub mod terminal;
