@@ -131,7 +131,7 @@ impl Locale {
         let language = parts[0].to_lowercase();
         if language.len() != 2 && language.len() != 3 {
             return Err(I18nError::InvalidLocale(
-                format!("Invalid language code: {}", language)
+                format!("Invalid language code: {language}")
             ));
         }
 
@@ -151,7 +151,7 @@ impl Locale {
                         locale.region = Some(part.to_uppercase());
                     } else {
                         return Err(I18nError::InvalidLocale(
-                            format!("Invalid region code: {}", part)
+                            format!("Invalid region code: {part}")
                         ));
                     }
                 }
@@ -165,10 +165,10 @@ impl Locale {
                         let mut chars = part.chars();
                         let first = chars.next().unwrap().to_uppercase().collect::<String>();
                         let rest = chars.as_str().to_lowercase();
-                        locale.script = Some(format!("{}{}", first, rest));
+                        locale.script = Some(format!("{first}{rest}"));
                     } else {
                         return Err(I18nError::InvalidLocale(
-                            format!("Invalid script code: {}", part)
+                            format!("Invalid script code: {part}")
                         ));
                     }
                 }
@@ -359,7 +359,7 @@ impl MessageCatalog {
         let mut result = template.to_string();
 
         for (name, value) in args {
-            let placeholder = format!("{{{}}}", name);
+            let placeholder = format!("{{{name}}}");
             result = result.replace(&placeholder, value);
         }
 
@@ -492,7 +492,7 @@ pub fn format_number(value: f64, locale: &Locale) -> String {
         }
         _ => {
             // Default
-            format!("{}", value)
+            format!("{value}")
         }
     }
 }
@@ -524,35 +524,35 @@ pub fn format_currency(value: f64, currency: &str, locale: &Locale) -> String {
     match locale.language.as_str() {
         "en" => {
             match currency {
-                "USD" => format!("${}", number_part),
-                "EUR" => format!("€{}", number_part),
-                "GBP" => format!("£{}", number_part),
-                _ => format!("{} {}", number_part, currency),
+                "USD" => format!("${number_part}"),
+                "EUR" => format!("€{number_part}"),
+                "GBP" => format!("£{number_part}"),
+                _ => format!("{number_part} {currency}"),
             }
         }
         "ko" => {
             match currency {
-                "KRW" => format!("₩{}", number_part),
-                "USD" => format!("${}", number_part),
-                _ => format!("{}{}", number_part, currency),
+                "KRW" => format!("₩{number_part}"),
+                "USD" => format!("${number_part}"),
+                _ => format!("{number_part}{currency}"),
             }
         }
         "ja" => {
             match currency {
-                "JPY" => format!("¥{}", number_part),
-                "USD" => format!("${}", number_part),
-                _ => format!("{}{}", number_part, currency),
+                "JPY" => format!("¥{number_part}"),
+                "USD" => format!("${number_part}"),
+                _ => format!("{number_part}{currency}"),
             }
         }
         "de" | "fr" | "es" | "it" => {
             match currency {
-                "EUR" => format!("{} €", number_part),
-                "USD" => format!("{} $", number_part),
-                _ => format!("{} {}", number_part, currency),
+                "EUR" => format!("{number_part} €"),
+                "USD" => format!("{number_part} $"),
+                _ => format!("{number_part} {currency}"),
             }
         }
         _ => {
-            format!("{} {}", number_part, currency)
+            format!("{number_part} {currency}")
         }
     }
 }
@@ -560,7 +560,7 @@ pub fn format_currency(value: f64, currency: &str, locale: &Locale) -> String {
 /// Formats a percentage according to locale conventions
 pub fn format_percent(value: f64, locale: &Locale) -> String {
     let number_part = format_number(value * 100.0, locale);
-    format!("{}%", number_part)
+    format!("{number_part}%")
 }
 
 fn format_with_separators(value: f64, thousands_sep: char, decimal_sep: char) -> String {
@@ -584,14 +584,14 @@ fn format_with_separators(value: f64, thousands_sep: char, decimal_sep: char) ->
 
     // Format decimal part
     let result = if decimal_part > 0.0 {
-        let dec_str = format!("{:.2}", decimal_part).trim_start_matches("0.").to_string();
-        format!("{}{}{}", int_str, decimal_sep, dec_str)
+        let dec_str = format!("{decimal_part:.2}").trim_start_matches("0.").to_string();
+        format!("{int_str}{decimal_sep}{dec_str}")
     } else {
         int_str
     };
 
     if negative {
-        format!("-{}", result)
+        format!("-{result}")
     } else {
         result
     }
@@ -689,7 +689,7 @@ pub fn format_datetime(dt: &DateTime<Utc>, format: DateTimeFormat, locale: &Loca
     let date_str = format_date(dt, date_fmt, locale);
     let time_str = format_time(dt, time_fmt, locale);
 
-    format!("{} {}", date_str, time_str)
+    format!("{date_str} {time_str}")
 }
 
 /// Formats a relative time (e.g., "2 hours ago", "in 3 days")
@@ -715,9 +715,9 @@ pub fn format_relative(dt: &DateTime<Utc>, locale: &Locale) -> String {
         "en" => {
             let plural = if value != 1 { "s" } else { "" };
             if is_past {
-                format!("{} {}{} ago", value, unit, plural)
+                format!("{value} {unit}{plural} ago")
             } else {
-                format!("in {} {}{}", value, unit, plural)
+                format!("in {value} {unit}{plural}")
             }
         }
         "ko" => {
@@ -731,9 +731,9 @@ pub fn format_relative(dt: &DateTime<Utc>, locale: &Locale) -> String {
                 _ => unit,
             };
             if is_past {
-                format!("{}{} 전", value, unit_kr)
+                format!("{value}{unit_kr} 전")
             } else {
-                format!("{}{} 후", value, unit_kr)
+                format!("{value}{unit_kr} 후")
             }
         }
         "ja" => {
@@ -747,16 +747,16 @@ pub fn format_relative(dt: &DateTime<Utc>, locale: &Locale) -> String {
                 _ => unit,
             };
             if is_past {
-                format!("{}{}前", value, unit_ja)
+                format!("{value}{unit_ja}前")
             } else {
-                format!("{}{}後", value, unit_ja)
+                format!("{value}{unit_ja}後")
             }
         }
         _ => {
             if is_past {
-                format!("{} {} ago", value, unit)
+                format!("{value} {unit} ago")
             } else {
-                format!("in {} {}", value, unit)
+                format!("in {value} {unit}")
             }
         }
     }
@@ -880,7 +880,7 @@ impl I18n {
         let mut result = template;
 
         for (name, value) in args {
-            let placeholder = format!("{{{}}}", name);
+            let placeholder = format!("{{{name}}}");
             result = result.replace(&placeholder, value);
         }
 
@@ -890,7 +890,7 @@ impl I18n {
     /// Translates a message with plural support
     pub fn t_plural(&self, key: &str, count: usize) -> String {
         let category = plural_form(&self.current_locale, count);
-        let plural_key = format!("{}_{:?}", key, category).to_lowercase();
+        let plural_key = format!("{key}_{category:?}").to_lowercase();
 
         // Try plural-specific key first
         let msg = self.t(&plural_key);

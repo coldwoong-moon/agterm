@@ -24,6 +24,7 @@ pub type Color = (u8, u8, u8);
 
 /// Style to apply to highlighted text
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct HighlightStyle {
     /// Foreground color (text color)
     pub foreground: Option<Color>,
@@ -37,17 +38,6 @@ pub struct HighlightStyle {
     pub underline: bool,
 }
 
-impl Default for HighlightStyle {
-    fn default() -> Self {
-        Self {
-            foreground: None,
-            background: None,
-            bold: false,
-            italic: false,
-            underline: false,
-        }
-    }
-}
 
 impl HighlightStyle {
     /// Create a new style with foreground color only

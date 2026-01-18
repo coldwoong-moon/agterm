@@ -555,7 +555,7 @@ impl PipelineManager {
     /// Add a step to a pipeline
     pub fn add_step(&mut self, pipeline_id: &Uuid, step: PipelineStep) -> Result<(), PipelineError> {
         let pipeline = self.pipelines.get_mut(pipeline_id)
-            .ok_or_else(|| PipelineError::NotFound(*pipeline_id))?;
+            .ok_or(PipelineError::NotFound(*pipeline_id))?;
         pipeline.add_step(step);
         debug!("Added step to pipeline {}", pipeline_id);
         Ok(())
@@ -568,7 +568,7 @@ impl PipelineManager {
         step_id: usize,
     ) -> Result<PipelineStep, PipelineError> {
         let pipeline = self.pipelines.get_mut(pipeline_id)
-            .ok_or_else(|| PipelineError::NotFound(*pipeline_id))?;
+            .ok_or(PipelineError::NotFound(*pipeline_id))?;
         pipeline.remove_step(step_id)
             .ok_or_else(|| PipelineError::InvalidOperation(format!("Step {step_id} not found")))
     }
@@ -580,7 +580,7 @@ impl PipelineManager {
         new_order: Vec<usize>,
     ) -> Result<(), PipelineError> {
         let pipeline = self.pipelines.get_mut(pipeline_id)
-            .ok_or_else(|| PipelineError::NotFound(*pipeline_id))?;
+            .ok_or(PipelineError::NotFound(*pipeline_id))?;
         pipeline.reorder_steps(new_order)
     }
 
@@ -602,7 +602,7 @@ impl PipelineManager {
     /// Delete a pipeline
     pub fn delete_pipeline(&mut self, id: &Uuid) -> Result<Pipeline, PipelineError> {
         self.pipelines.remove(id)
-            .ok_or_else(|| PipelineError::NotFound(*id))
+            .ok_or(PipelineError::NotFound(*id))
     }
 
     /// Clone a pipeline with a new name
@@ -612,7 +612,7 @@ impl PipelineManager {
         new_name: impl Into<String>,
     ) -> Result<Uuid, PipelineError> {
         let pipeline = self.pipelines.get(id)
-            .ok_or_else(|| PipelineError::NotFound(*id))?;
+            .ok_or(PipelineError::NotFound(*id))?;
 
         let mut new_pipeline = pipeline.clone();
         new_pipeline.id = Uuid::new_v4();
@@ -648,7 +648,7 @@ impl PipelineManager {
         path: P,
     ) -> Result<(), PipelineError> {
         let pipeline = self.pipelines.get(pipeline_id)
-            .ok_or_else(|| PipelineError::NotFound(*pipeline_id))?;
+            .ok_or(PipelineError::NotFound(*pipeline_id))?;
         pipeline.save_to_file(path)
     }
 

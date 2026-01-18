@@ -491,8 +491,8 @@ impl AliasManager {
         // Replace numbered parameters ($1, $2, etc.)
         for (i, arg) in args.iter().enumerate() {
             let param_num = i + 1;
-            result = result.replace(&format!("${{{}}}", param_num), arg);
-            result = result.replace(&format!("${}", param_num), arg);
+            result = result.replace(&format!("${{{param_num}}}"), arg);
+            result = result.replace(&format!("${param_num}"), arg);
         }
 
         // Append remaining arguments if no parameter substitution occurred
@@ -554,7 +554,7 @@ impl AliasManager {
         let path = path.into();
 
         if !path.exists() {
-            return Err(AliasError::IoError(format!("File not found: {:?}", path)));
+            return Err(AliasError::IoError(format!("File not found: {path:?}")));
         }
 
         let json = fs::read_to_string(&path)
@@ -607,14 +607,14 @@ impl AliasManager {
                     output.push('\n');
                 }
                 if let Some(ref category) = alias.category {
-                    output.push_str(&format!("# {} aliases\n", category));
+                    output.push_str(&format!("# {category} aliases\n"));
                 }
                 current_category = alias.category.as_ref();
             }
 
             // Add description if available
             if let Some(ref desc) = alias.description {
-                output.push_str(&format!("# {}\n", desc));
+                output.push_str(&format!("# {desc}\n"));
             }
 
             // Add alias definition

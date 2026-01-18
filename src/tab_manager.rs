@@ -51,10 +51,12 @@ impl std::fmt::Display for TabId {
 /// State of a tab
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum TabState {
     /// Tab is active and accepting input
     Active,
     /// Tab is inactive
+    #[default]
     Inactive,
     /// Tab is running a command
     Running(String),
@@ -88,11 +90,6 @@ impl TabState {
     }
 }
 
-impl Default for TabState {
-    fn default() -> Self {
-        TabState::Inactive
-    }
-}
 
 /// A single terminal tab
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -67,7 +67,7 @@ impl CommandStat {
     /// Record a command execution
     pub fn record(&mut self, duration: Duration, success: bool) {
         self.count += 1;
-        self.total_duration = self.total_duration + duration;
+        self.total_duration += duration;
         self.last_used = Utc::now();
         if success {
             self.success_count += 1;
@@ -307,7 +307,7 @@ impl StatisticsCollector {
             // Update daily stats
             let today = Utc::now().date_naive();
             if let Some(daily) = self.daily_stats.get_mut(&today) {
-                daily.active_time = daily.active_time + duration;
+                daily.active_time += duration;
             }
 
             tracing::debug!("Recorded session end: {}", session_id);
@@ -533,7 +533,7 @@ impl<'a> StatisticsAnalyzer<'a> {
             if let Some(daily) = self.collector.daily_stats.get(&current) {
                 total_sessions += daily.total_sessions;
                 total_commands += daily.total_commands;
-                total_active_time = total_active_time + daily.active_time;
+                total_active_time += daily.active_time;
                 daily_breakdown.push(daily.clone());
             } else {
                 daily_breakdown.push(DailyStat::new(current));
@@ -591,7 +591,7 @@ impl<'a> StatisticsAnalyzer<'a> {
             if let Some(daily) = self.collector.daily_stats.get(&current) {
                 total_sessions += daily.total_sessions;
                 total_commands += daily.total_commands;
-                total_active_time = total_active_time + daily.active_time;
+                total_active_time += daily.active_time;
                 daily_breakdown.push(daily.clone());
             } else {
                 daily_breakdown.push(DailyStat::new(current));

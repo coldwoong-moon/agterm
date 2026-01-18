@@ -638,7 +638,7 @@ impl std::fmt::Display for ActionError {
         match self {
             ActionError::NotFound => write!(f, "Action not found"),
             ActionError::Disabled => write!(f, "Action is disabled"),
-            ActionError::ExecutionFailed(msg) => write!(f, "Execution failed: {}", msg),
+            ActionError::ExecutionFailed(msg) => write!(f, "Execution failed: {msg}"),
             ActionError::InvalidCommand => write!(f, "Invalid command"),
         }
     }

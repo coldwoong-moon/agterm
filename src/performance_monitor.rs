@@ -241,10 +241,10 @@ impl PerformanceAlert {
     pub fn check(&mut self, buffer: &TimeSeriesBuffer<MetricSample>) -> bool {
         let should_trigger = match &self.condition {
             AlertCondition::Above(threshold) => {
-                buffer.recent(1).first().map_or(false, |s| s.value > *threshold)
+                buffer.recent(1).first().is_some_and(|s| s.value > *threshold)
             }
             AlertCondition::Below(threshold) => {
-                buffer.recent(1).first().map_or(false, |s| s.value < *threshold)
+                buffer.recent(1).first().is_some_and(|s| s.value < *threshold)
             }
             AlertCondition::SustainedAbove { threshold, duration } => {
                 self.check_sustained_above(buffer, *threshold, *duration)

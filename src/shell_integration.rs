@@ -451,13 +451,7 @@ impl DirectoryHistory {
         }
 
         // Then try substring match
-        for path in self.history.iter().rev() {
-            if path.to_string_lossy().to_lowercase().contains(&query_lower) {
-                return Some(path);
-            }
-        }
-
-        None
+        self.history.iter().rev().find(|&path| path.to_string_lossy().to_lowercase().contains(&query_lower))
     }
 
     /// Navigate back in history

@@ -475,7 +475,7 @@ impl PluginContext {
     /// Register a hook handler
     pub fn register_hook(&self, hook: HookType, handler: HookHandler) {
         if let Ok(mut registry) = self.hook_registry.lock() {
-            let hook_key = format!("{:?}", hook);
+            let hook_key = format!("{hook:?}");
             registry.entry(hook_key).or_insert_with(Vec::new).push(handler);
         }
     }
@@ -662,7 +662,7 @@ impl PluginManager {
             Some(PluginState::Active) => Ok(()), // Already active
             Some(state) => Err(PluginError::InvalidState {
                 expected: "Loaded or Inactive".to_string(),
-                actual: format!("{:?}", state),
+                actual: format!("{state:?}"),
             }),
             None => Err(PluginError::NotFound(id)),
         }
@@ -685,7 +685,7 @@ impl PluginManager {
             Some(PluginState::Inactive) => Ok(()), // Already inactive
             Some(state) => Err(PluginError::InvalidState {
                 expected: "Active".to_string(),
-                actual: format!("{:?}", state),
+                actual: format!("{state:?}"),
             }),
             None => Err(PluginError::NotFound(id)),
         }
@@ -744,7 +744,7 @@ impl PluginManager {
             }
             Some(state) => Err(PluginError::InvalidState {
                 expected: "Active".to_string(),
-                actual: format!("{:?}", state),
+                actual: format!("{state:?}"),
             }),
             None => Err(PluginError::NotFound(plugin_id)),
         }
@@ -927,7 +927,7 @@ impl Plugin for BuiltinPlugin {
         match command {
             "echo" => Ok(args.join(" ")),
             "status" => Ok(if self.active { "active" } else { "inactive" }.to_string()),
-            _ => Err(PluginError::ExecutionError(format!("Unknown command: {}", command))),
+            _ => Err(PluginError::ExecutionError(format!("Unknown command: {command}"))),
         }
     }
 }

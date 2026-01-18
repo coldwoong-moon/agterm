@@ -166,7 +166,7 @@ impl ScreenReader {
     /// Announce command prompt
     pub fn announce_prompt(&mut self, prompt: &str) {
         self.announce(
-            &format!("Command prompt: {}", prompt),
+            &format!("Command prompt: {prompt}"),
             AnnouncePriority::Normal,
         );
     }
@@ -678,8 +678,8 @@ impl AccessibilityManager {
             FocusableElement::SearchBar => "Search bar".to_string(),
             FocusableElement::CommandPalette => "Command palette".to_string(),
             FocusableElement::SettingsPanel => "Settings panel".to_string(),
-            FocusableElement::Button(name) => format!("{} button", name),
-            FocusableElement::Input(name) => format!("{} input", name),
+            FocusableElement::Button(name) => format!("{name} button"),
+            FocusableElement::Input(name) => format!("{name} input"),
         }
     }
 

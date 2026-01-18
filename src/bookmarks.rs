@@ -515,7 +515,7 @@ impl BookmarkManager {
         // Create parent directory if needed
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
-                .map_err(|e| BookmarkError::IoError(format!("Failed to create directory: {}", e)))?;
+                .map_err(|e| BookmarkError::IoError(format!("Failed to create directory: {e}")))?;
         }
 
         let bookmarks: Vec<&Bookmark> = self.bookmarks.values().collect();
@@ -523,7 +523,7 @@ impl BookmarkManager {
             .map_err(|e| BookmarkError::SerializationError(e.to_string()))?;
 
         fs::write(&path, json)
-            .map_err(|e| BookmarkError::IoError(format!("Failed to write file: {}", e)))?;
+            .map_err(|e| BookmarkError::IoError(format!("Failed to write file: {e}")))?;
 
         tracing::info!("Saved {} bookmarks to {:?}", bookmarks.len(), path);
         Ok(())
@@ -535,17 +535,17 @@ impl BookmarkManager {
             // Create parent directory and empty file if it doesn't exist
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(|e| {
-                    BookmarkError::IoError(format!("Failed to create directory: {}", e))
+                    BookmarkError::IoError(format!("Failed to create directory: {e}"))
                 })?;
             }
             fs::write(&path, "[]")
-                .map_err(|e| BookmarkError::IoError(format!("Failed to create file: {}", e)))?;
+                .map_err(|e| BookmarkError::IoError(format!("Failed to create file: {e}")))?;
             self.file_path = Some(path);
             return Ok(());
         }
 
         let json = fs::read_to_string(&path)
-            .map_err(|e| BookmarkError::IoError(format!("Failed to read file: {}", e)))?;
+            .map_err(|e| BookmarkError::IoError(format!("Failed to read file: {e}")))?;
 
         // Handle empty files as empty bookmark list
         let json = json.trim();
