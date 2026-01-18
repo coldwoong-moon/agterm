@@ -6,8 +6,30 @@ rust-version = "1.75"
 license = "MIT"
 description = "AI Agent Terminal - Native GPU-accelerated terminal with AI orchestration"
 repository = "https://github.com/coldwoong-moon/agterm"
+readme = "README.md"
 keywords = ["terminal", "gpu", "ai-agent", "mcp", "iced"]
 categories = ["command-line-interface", "development-tools", "gui"]
+exclude = [
+    ".github/*",
+    ".sisyphus/*",
+    ".claude/*",
+    "docs/*",
+    "assets/screenshots/*",
+    "benches/*",
+    "examples/*",
+    "*_IMPLEMENTATION*.md",
+    "*_SUMMARY.md",
+    "*_WORK_*.md",
+    "*_USAGE.md",
+    "PLAN*.md",
+    "CONFIG.md",
+    "LOGGING*.md",
+    "COMPLETION*.md",
+    "DEVICE*.md",
+    "DOCUMENTATION*.md",
+    "codecov.yml",
+    "deny.toml",
+]
 
 [[bin]]
 name = "agterm"
@@ -120,4 +142,8 @@ harness = false
 
 [[bench]]
 name = "terminal_benchmark"
+harness = false
+
+[[bench]]
+name = "memory"
 harness = false

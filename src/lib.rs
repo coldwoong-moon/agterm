@@ -10,6 +10,7 @@
 
 pub mod config;
 pub mod encoding;
+pub mod markdown;
 pub mod notification;
 pub mod session;
 pub mod shell;
