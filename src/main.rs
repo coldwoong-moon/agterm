@@ -14,15 +14,19 @@ use std::time::{Duration, Instant};
 mod completion;
 mod config;
 mod debug;
+mod encoding;
 mod history;
 mod keybind;
 mod logging;
 mod notification;
+mod session;
 mod shell;
 mod sound;
+mod ssh;
 mod terminal;
 mod terminal_canvas;
 mod theme;
+mod trigger;
 mod ui;
 
 use completion::{CompletionEngine, CompletionItem};
@@ -30,7 +34,10 @@ use config::AppConfig;
 use debug::panel::TerminalState;
 use debug::{DebugPanel, DebugPanelMessage};
 use history::HistoryManager;
-use keybind::{Action as KeyAction, KeyBindings};
+use keybind::KeyBindings;
+// KeyAction reserved for future keymap management features
+#[allow(unused_imports)]
+use keybind::Action as KeyAction;
 use logging::{LogBuffer, LoggingConfig};
 use notification::NotificationManager;
 use shell::ShellInfo;
@@ -41,6 +48,7 @@ use ui::palette::{CommandPalette, PaletteMessage};
 use terminal::env::EnvironmentInfo;
 use terminal::pty::PtyManager;
 use terminal::screen::{Cell, TerminalScreen};
+use trigger::TriggerManager;
 
 // ============================================================================
 // Font Configuration - Embedded D2Coding for Korean/CJK support
@@ -449,6 +457,8 @@ struct AgTerm {
     completion_items: Vec<CompletionItem>,
     completion_selected: usize,
     completion_visible: bool,
+    /// Output trigger manager
+    trigger_manager: TriggerManager,
 }
 
 impl Default for AgTerm {
@@ -625,6 +635,7 @@ impl Default for AgTerm {
             completion_items: Vec::new(),
             completion_selected: 0,
             completion_visible: false,
+            trigger_manager: TriggerManager::from_config(&config.triggers),
         }
     }
 }
@@ -800,6 +811,7 @@ impl SignalType {
 enum Message {
     // Tab management
     NewTab,
+    NewSshTab(ssh::SshProfile),
     CloseTab(usize),
     CloseCurrentTab,
     SelectTab(usize),
@@ -953,6 +965,74 @@ impl AgTerm {
             }
             _ => {
                 // Sound or None - don't show flash
+            }
+        }
+    }
+
+    /// Check triggers against terminal output and execute matching actions
+    fn check_triggers(&mut self, text: &str) {
+        let matches = self.trigger_manager.check(text);
+
+        if matches.is_empty() {
+            return;
+        }
+
+        for (_, trigger) in matches {
+            tracing::debug!(
+                trigger_name = %trigger.name,
+                pattern = %trigger.pattern,
+                "Trigger matched"
+            );
+
+            match &trigger.action {
+                trigger::TriggerAction::Notify { title, body } => {
+                    // Send desktop notification
+                    self.notification_manager.notify_custom(title, body);
+                    tracing::info!(
+                        trigger = %trigger.name,
+                        title = %title,
+                        "Trigger notification sent"
+                    );
+                }
+                trigger::TriggerAction::Highlight { color } => {
+                    // TODO: Implement text highlighting in terminal canvas
+                    // This would require tracking highlighted regions in the terminal screen
+                    tracing::debug!(
+                        trigger = %trigger.name,
+                        color = %color,
+                        "Trigger highlight requested (not yet implemented)"
+                    );
+                }
+                trigger::TriggerAction::PlaySound { file } => {
+                    if let Some(path) = file {
+                        // TODO: Play custom sound file
+                        tracing::debug!(
+                            trigger = %trigger.name,
+                            file = %path,
+                            "Custom sound requested (not yet implemented)"
+                        );
+                    } else {
+                        // Play default bell sound
+                        self.play_bell_sound();
+                    }
+                }
+                trigger::TriggerAction::RunCommand { command } => {
+                    // TODO: Execute shell command
+                    // Security consideration: This should be carefully implemented
+                    // to avoid command injection vulnerabilities
+                    tracing::debug!(
+                        trigger = %trigger.name,
+                        command = %command,
+                        "Command execution requested (not yet implemented)"
+                    );
+                }
+                trigger::TriggerAction::Log { message } => {
+                    tracing::info!(
+                        trigger = %trigger.name,
+                        message = %message,
+                        "Trigger log"
+                    );
+                }
             }
         }
     }
@@ -1132,6 +1212,61 @@ impl AgTerm {
                     cursor_blink_on: true,
                     bell_pending: false,
                     title: None,
+                    last_copied_selection: None,
+                    bracket_match: None,
+                    pane_layout: PaneLayout::Single,
+                    panes: Vec::new(),
+                    focused_pane: 0,
+                    title_info: terminal::title::TitleInfo::new(),
+                };
+                self.tabs.push(tab);
+                self.active_tab = self.tabs.len() - 1;
+                text_input::focus(raw_input_id())
+            }
+
+            Message::NewSshTab(profile) => {
+                let id = self.next_tab_id;
+                self.next_tab_id += 1;
+
+                let session_result = self.pty_manager.create_session(24, 80);
+                let cwd = std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| "~".to_string());
+
+                let (session_id, error_message) = match session_result {
+                    Ok(session_id) => {
+                        // Send SSH command to the PTY
+                        let ssh_command = profile.to_command();
+                        let command_line = ssh_command.join(" ");
+                        if let Err(e) = self.pty_manager.write(&session_id, format!("{}\n", command_line).as_bytes()) {
+                            tracing::error!("Failed to write SSH command to session: {}", e);
+                            (Some(session_id), Some(format!("Failed to start SSH: {}", e)))
+                        } else {
+                            tracing::info!("SSH command sent: {}", command_line);
+                            (Some(session_id), None)
+                        }
+                    }
+                    Err(e) => (None, Some(format!("Failed to create PTY session: {}", e))),
+                };
+
+                let tab = TerminalTab {
+                    id,
+                    session_id,
+                    raw_input: String::new(),
+                    input: String::new(),
+                    cwd,
+                    error_message,
+                    history: Vec::new(),
+                    history_index: None,
+                    history_temp_input: String::new(),
+                    mode: TerminalMode::Raw,
+                    parsed_line_cache: Vec::new(),
+                    canvas_state: TerminalCanvasState::new(),
+                    content_version: 0,
+                    screen: TerminalScreen::new(80, 24),
+                    cursor_blink_on: true,
+                    bell_pending: false,
+                    title: Some(format!("SSH: {}", profile.connection_string())),
                     last_copied_selection: None,
                     bracket_match: None,
                     pane_layout: PaneLayout::Single,
@@ -1892,6 +2027,7 @@ impl AgTerm {
 
                 // Poll PTY output only for active tab
                 let mut active_bell_triggered = false;
+                let mut trigger_text: Option<String> = None;
                 if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                     if let Some(session_id) = &tab.session_id {
                         if let Ok(data) = self.pty_manager.read(session_id) {
@@ -1938,6 +2074,11 @@ impl AgTerm {
                                     }
                                 }
 
+                                // Store text for trigger checking (done after releasing borrow)
+                                if let Ok(text) = String::from_utf8(data.clone()) {
+                                    trigger_text = Some(text);
+                                }
+
                                 // Detect URLs in terminal output
                                 tab.screen.detect_urls();
 
@@ -1961,6 +2102,11 @@ impl AgTerm {
 
                 // Update bracket matching after processing PTY output
                 self.update_bracket_match();
+
+                // Check triggers against new output (after releasing tab borrow)
+                if let Some(text) = trigger_text {
+                    self.check_triggers(&text);
+                }
 
                 // Play bell sound and trigger flash if triggered in active tab (after releasing tab borrow)
                 if active_bell_triggered {
@@ -2811,6 +2957,7 @@ mod tests {
             completion_items: Vec::new(),
             completion_selected: 0,
             completion_visible: false,
+            trigger_manager: TriggerManager::new(),
         }
     }
 

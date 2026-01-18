@@ -10,6 +10,8 @@ use vte::{Params, Parser, Perform};
 mod memory;
 mod scrollback;
 pub use memory::{MemoryStats, StringInterner};
+// Reserved for future scrollback buffer implementation
+#[allow(unused_imports)]
 pub use scrollback::{ScrollbackBuffer, ScrollbackConfig};
 
 use std::collections::HashSet;
@@ -228,9 +230,9 @@ pub enum MouseEncoding {
 /// Terminal cell with character and styling
 ///
 /// Memory optimizations:
-/// - Uses Arc<String> for hyperlinks to enable string interning
+/// - Uses `Arc<String>` for hyperlinks to enable string interning
 /// - Compact flag representation using bitfields would save ~8 bytes per cell
-/// - Size: ~56 bytes (char=4, AnsiColor=~8, flags=7, Arc<String>=8)
+/// - Size: ~56 bytes (char=4, AnsiColor=~8, flags=7, `Arc<String>`=8)
 #[derive(Clone, Debug)]
 pub struct Cell {
     pub c: char,
@@ -347,7 +349,12 @@ impl ImageData {
 ///
 /// Stores complete terminal state when entering alternate screen,
 /// allowing full restoration when returning to main screen.
+/// State saved when entering alternate screen mode
+///
+/// Preserves the main screen buffer and cursor state for restoration when
+/// leaving alternate screen mode (used by vim, less, htop, etc.)
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // Fields used through derived traits
 struct AlternateScreenState {
     /// Saved main screen buffer
     main_buffer: Vec<Vec<Cell>>,
@@ -469,17 +476,20 @@ impl CompressedLine {
         self.compressed_size as f64 / self.uncompressed_size as f64
     }
 
-    /// Get space saved in bytes
+    /// Get space saved in bytes (used for compression statistics)
+    #[allow(dead_code)]
     fn space_saved(&self) -> isize {
         self.uncompressed_size as isize - self.compressed_size as isize
     }
 
     /// Get uncompressed size in bytes
+    #[allow(dead_code)] // Used in debug/profiling contexts
     pub fn uncompressed_size(&self) -> usize {
         self.uncompressed_size
     }
 
     /// Get compressed size in bytes
+    #[allow(dead_code)] // Used in debug/profiling contexts
     pub fn compressed_size(&self) -> usize {
         self.compressed_size
     }

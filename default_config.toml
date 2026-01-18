@@ -303,3 +303,52 @@ timeout_seconds = 5              # Notification timeout in seconds
 enabled = true                   # Enable tab completion
 max_items = 20                   # Maximum number of completion items to show
 include_hidden = false           # Include hidden files (starting with .) in completions
+
+# ============================================================================
+# Character Encoding
+# ============================================================================
+
+[encoding]
+default = "UTF-8"                # Default character encoding (UTF-8, EUC-KR, Shift-JIS, etc.)
+auto_detect = true               # Automatically detect encoding from byte patterns
+fallback = "UTF-8"               # Fallback encoding when auto-detection fails
+
+# ============================================================================
+# Output Triggers
+# ============================================================================
+# Pattern-based actions on terminal output
+
+# Example triggers (disabled by default):
+# [[triggers]]
+# name = "error_alert"
+# pattern = "(?i)(error|fail|fatal)"
+# action = "notify"
+# enabled = false
+# [triggers.params]
+# title = "Error Detected"
+# body = "An error was found in terminal output"
+#
+# [[triggers]]
+# name = "warning_highlight"
+# pattern = "(?i)warning"
+# action = "highlight"
+# enabled = false
+# [triggers.params]
+# color = "#FFFF00"
+#
+# [[triggers]]
+# name = "build_success"
+# pattern = "(?i)build.*success|compilation.*complete"
+# action = "notify"
+# enabled = false
+# [triggers.params]
+# title = "Build Complete"
+# body = "Build finished successfully"
+#
+# [[triggers]]
+# name = "test_failed"
+# pattern = "(?i)test.*failed|tests?\\s+failed"
+# action = "sound"
+# enabled = false
+# [triggers.params]
+# # file = "/path/to/custom/sound.wav"  # Optional, uses default bell if not set

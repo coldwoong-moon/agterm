@@ -1,4 +1,26 @@
 //! PTY (Pseudo-Terminal) management
+//!
+//! This module provides cross-platform pseudo-terminal management using the
+//! `portable-pty` library. It handles process spawning, I/O operations, and
+//! session lifecycle management.
+//!
+//! # Architecture
+//!
+//! - **Thread-based I/O**: PTY operations run in a dedicated background thread
+//! - **Session management**: Multiple concurrent PTY sessions with unique IDs
+//! - **Environment control**: Configurable environment variables and inheritance
+//! - **Auto-detection**: Automatically detects the default system shell
+//!
+//! # Examples
+//!
+//! ```no_run
+//! use agterm::terminal::pty::PtyManager;
+//!
+//! let manager = PtyManager::new();
+//! let pty_id = manager.create_session(40, 120, None).unwrap();
+//! manager.write(pty_id, b"echo hello\n").unwrap();
+//! let output = manager.read(pty_id).unwrap();
+//! ```
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use crate::shell::ShellInfo;
@@ -10,16 +32,20 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
+/// Unique identifier for a PTY session
 pub type PtyId = Uuid;
 
 /// Environment variable configuration for PTY sessions
+///
+/// Controls how environment variables are set up for spawned shell processes.
+/// Supports inheritance from parent, custom variables, and unsetting specific variables.
 #[derive(Debug, Clone)]
 pub struct PtyEnvironment {
     /// Inherit environment variables from parent process
     pub inherit_env: bool,
-    /// Additional/override environment variables
+    /// Additional/override environment variables (with shell expansion support)
     pub variables: HashMap<String, String>,
-    /// Variables to unset/remove
+    /// Variables to unset/remove (Note: not fully supported by portable-pty)
     pub unset: Vec<String>,
 }
 
@@ -30,14 +56,19 @@ const MAX_OUTPUT_BUFFER_SIZE: usize = 1024 * 1024;
 #[allow(dead_code)]
 pub const MAX_OUTPUT_LINES: usize = 10000;
 
+/// Errors that can occur during PTY operations
 #[derive(Debug, thiserror::Error)]
 pub enum PtyError {
+    /// Failed to spawn a new PTY session
     #[error("Failed to spawn PTY: {0}")]
     SpawnFailed(String),
+    /// Attempted operation on non-existent session
     #[error("Session not found: {0}")]
     SessionNotFound(String),
+    /// I/O error during read/write operations
     #[error("IO error: {0}")]
     Io(String),
+    /// Internal channel communication error
     #[error("Channel error: {0}")]
     Channel(String),
 }

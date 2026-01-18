@@ -9,7 +9,10 @@
 pub mod event_log;
 pub mod panel;
 
-pub use event_log::{EventLog, EventType, LogEntry};
+pub use event_log::{EventLog, EventType};
+// LogEntry reserved for future detailed event inspection
+#[allow(unused_imports)]
+pub use event_log::LogEntry;
 pub use panel::{DebugPanel, DebugPanelMessage};
 
 use std::collections::VecDeque;

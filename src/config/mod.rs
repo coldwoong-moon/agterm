@@ -74,6 +74,12 @@ pub struct AppConfig {
     pub completion: CompletionConfig,
     #[serde(default)]
     pub history: HistoryConfig,
+    #[serde(default)]
+    pub encoding: EncodingConfig,
+    #[serde(default)]
+    pub ssh: SshConfig,
+    #[serde(default)]
+    pub triggers: Vec<TriggerConfig>,
 }
 
 /// General application settings
@@ -1290,6 +1296,54 @@ impl Default for HistoryConfig {
     }
 }
 
+/// Character encoding configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncodingConfig {
+    /// Default encoding for terminal output
+    #[serde(default = "default_encoding")]
+    pub default: String,
+    /// Enable automatic encoding detection
+    #[serde(default = "default_true")]
+    pub auto_detect: bool,
+    /// Fallback encoding when auto-detection fails
+    #[serde(default = "default_fallback_encoding")]
+    pub fallback: String,
+}
+
+impl Default for EncodingConfig {
+    fn default() -> Self {
+        Self {
+            default: default_encoding(),
+            auto_detect: true,
+            fallback: default_fallback_encoding(),
+        }
+    }
+}
+
+/// SSH configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SshConfig {
+    /// SSH profiles for quick connection
+    #[serde(default)]
+    pub profiles: Vec<crate::ssh::SshProfile>,
+    /// Automatically detect SSH connection from shell environment
+    #[serde(default = "default_true")]
+    pub detect_ssh_connection: bool,
+    /// Load SSH profiles from ~/.ssh/config on startup
+    #[serde(default = "default_true")]
+    pub load_from_ssh_config: bool,
+}
+
+impl Default for SshConfig {
+    fn default() -> Self {
+        Self {
+            profiles: Vec::new(),
+            detect_ssh_connection: true,
+            load_from_ssh_config: true,
+        }
+    }
+}
+
 // ============================================================================
 // Default value functions
 // ============================================================================
@@ -1450,6 +1504,21 @@ fn default_max_backups() -> usize {
     5 // Keep up to 5 backup files
 }
 
+fn default_encoding() -> String {
+    "UTF-8".to_string()
+}
+
+fn default_fallback_encoding() -> String {
+    "UTF-8".to_string()
+}
+
+// ============================================================================
+// Trigger Configuration
+// ============================================================================
+
+// Re-export TriggerConfig from trigger module to avoid duplication
+pub use crate::trigger::TriggerConfig;
+
 // ============================================================================
 // Configuration loading
 // ============================================================================
@@ -1552,6 +1621,9 @@ impl AppConfig {
             status_bar: overlay.status_bar,
             completion: overlay.completion,
             history: overlay.history,
+            encoding: overlay.encoding,
+            ssh: overlay.ssh,
+            triggers: overlay.triggers,
         }
     }
 
@@ -1595,6 +1667,9 @@ impl Default for AppConfig {
             status_bar: StatusBarConfig::default(),
             completion: CompletionConfig::default(),
             history: HistoryConfig::default(),
+            encoding: EncodingConfig::default(),
+            ssh: SshConfig::default(),
+            triggers: Vec::new(),
         })
     }
 }

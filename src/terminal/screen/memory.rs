@@ -60,7 +60,11 @@ impl StringInterner {
 }
 
 /// Compressed line representation using run-length encoding for empty cells
+///
+/// This enum provides memory-efficient storage for terminal lines by compressing
+/// lines that contain mostly default (empty) cells. Reserved for future use.
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // Reserved for future memory optimization features
 pub enum CompressedLine {
     /// Uncompressed line (for lines with non-default cells)
     Raw(Vec<super::Cell>),
@@ -76,6 +80,7 @@ pub enum CompressedLine {
 
 impl CompressedLine {
     /// Create a compressed line from a raw line
+    #[allow(dead_code)] // Reserved for future use
     pub fn from_line(line: Vec<super::Cell>) -> Self {
         // Check if all cells are default
         if line.iter().all(|cell| is_default_cell(cell)) {
@@ -86,6 +91,7 @@ impl CompressedLine {
     }
 
     /// Decompress the line back to a raw line
+    #[allow(dead_code)] // Reserved for future use
     pub fn to_line(&self) -> Vec<super::Cell> {
         match self {
             CompressedLine::Raw(line) => line.clone(),
@@ -100,6 +106,7 @@ impl CompressedLine {
     }
 
     /// Get the approximate memory usage of this compressed line
+    #[allow(dead_code)] // Reserved for future use
     pub fn memory_usage(&self) -> usize {
         match self {
             CompressedLine::Raw(line) => line.len() * std::mem::size_of::<super::Cell>(),
@@ -113,6 +120,7 @@ impl CompressedLine {
 }
 
 /// Check if a cell is in default state (empty)
+#[allow(dead_code)] // Used by CompressedLine (reserved for future)
 fn is_default_cell(cell: &super::Cell) -> bool {
     cell.c == ' '
         && cell.fg.is_none()
