@@ -348,7 +348,15 @@ impl PtyManager {
 
     #[instrument(skip(self, data), fields(session_id = %id, bytes = data.len()))]
     pub fn write(&self, id: &PtyId, data: &[u8]) -> Result<(), PtyError> {
-        trace!(bytes = data.len(), "PTY write");
+        // Log PTY input at trace level with preview
+        if tracing::enabled!(tracing::Level::TRACE) {
+            let preview = if data.len() <= 64 {
+                String::from_utf8_lossy(data).to_string()
+            } else {
+                format!("{}... ({} bytes)", String::from_utf8_lossy(&data[..64]), data.len())
+            };
+            trace!(bytes = data.len(), preview = %preview, "PTY input");
+        }
         let (response_tx, response_rx) = mpsc::channel();
 
         self.tx
@@ -383,8 +391,18 @@ impl PtyManager {
             .recv()
             .map_err(|e| PtyError::Channel(e.to_string()))??;
 
+        // Log PTY output at trace level with preview
         if !result.is_empty() {
-            trace!(bytes = result.len(), "PTY read");
+            if tracing::enabled!(tracing::Level::TRACE) {
+                let preview = if result.len() <= 64 {
+                    String::from_utf8_lossy(&result).to_string()
+                } else {
+                    format!("{}... ({} bytes)", String::from_utf8_lossy(&result[..64]), result.len())
+                };
+                trace!(bytes = result.len(), preview = %preview, "PTY output");
+            } else {
+                trace!(bytes = result.len(), "PTY output");
+            }
         }
         Ok(result)
     }
