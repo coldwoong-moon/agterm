@@ -23,6 +23,7 @@ use debug::{DebugPanel, DebugPanelMessage};
 use logging::{LogBuffer, LoggingConfig};
 use terminal_canvas::{CursorState, CursorStyle, TerminalCanvas, TerminalCanvasState};
 
+use terminal::env::EnvironmentInfo;
 use terminal::pty::PtyManager;
 use terminal::screen::{Cell, TerminalScreen};
 
@@ -359,12 +360,41 @@ struct AgTerm {
     search_query: String,
     search_matches: Vec<(usize, usize, usize)>, // (line, start_col, end_col)
     current_match_index: Option<usize>,
+    /// Environment information (SSH, container, terminal capabilities, etc.)
+    env_info: EnvironmentInfo,
 }
 
 impl Default for AgTerm {
     fn default() -> Self {
         tracing::debug!("Initializing AgTerm application");
         let config = get_config();
+
+        // Detect environment (SSH, container, terminal capabilities)
+        let env_info = EnvironmentInfo::detect();
+        tracing::info!("Environment detected: {}", env_info.description());
+
+        // Log environment details for debugging
+        if env_info.is_ssh {
+            tracing::info!("Running in SSH session");
+        }
+        if env_info.is_container {
+            tracing::info!("Running in container");
+        }
+        if env_info.is_tmux {
+            tracing::info!("Running in tmux");
+        }
+        if env_info.is_screen {
+            tracing::info!("Running in GNU screen");
+        }
+
+        let suggested_settings = env_info.suggested_settings();
+        tracing::info!(
+            "Suggested settings: truecolor={}, mouse={}, unicode={}, refresh={}ms",
+            suggested_settings.enable_truecolor,
+            suggested_settings.enable_mouse,
+            suggested_settings.enable_unicode,
+            suggested_settings.refresh_rate_ms
+        );
 
         let pty_manager = Arc::new(PtyManager::new());
 
@@ -426,6 +456,9 @@ impl Default for AgTerm {
                     bell_pending: false,
                     title: None,
                     last_copied_selection: None,
+                    pane_layout: PaneLayout::Single,
+                    panes: Vec::new(),
+                    focused_pane: 0,
                 };
 
                 (vec![tab], 0, config.appearance.font_size, 1)
@@ -457,6 +490,7 @@ impl Default for AgTerm {
             search_query: String::new(),
             search_matches: Vec::new(),
             current_match_index: None,
+            env_info,
         }
     }
 }
@@ -468,6 +502,66 @@ impl Drop for AgTerm {
         tracing::info!("AgTerm shutting down");
     }
 }
+
+// ============================================================================
+// Pane Management
+// ============================================================================
+
+/// Pane layout type
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PaneLayout {
+    /// Single pane (no split)
+    Single,
+    /// Horizontal split (top/bottom)
+    HorizontalSplit,
+    /// Vertical split (left/right)
+    VerticalSplit,
+}
+
+/// A single pane within a tab
+struct Pane {
+    /// Screen buffer for this pane
+    screen: TerminalScreen,
+    /// PTY session ID
+    pty_id: Option<uuid::Uuid>,
+    /// Whether this pane is focused
+    focused: bool,
+    /// Parsed line cache for rendering
+    parsed_line_cache: Vec<Vec<StyledSpan>>,
+    /// Content version for cache invalidation
+    content_version: u64,
+    /// Canvas state for virtual scrolling
+    canvas_state: TerminalCanvasState,
+    /// Cursor blink state
+    cursor_blink_on: bool,
+}
+
+impl Pane {
+    /// Create a new pane with given dimensions
+    fn new(cols: usize, rows: usize, pty_id: Option<uuid::Uuid>) -> Self {
+        Self {
+            screen: TerminalScreen::new(cols, rows),
+            pty_id,
+            focused: false,
+            parsed_line_cache: Vec::new(),
+            content_version: 0,
+            canvas_state: TerminalCanvasState::new(),
+            cursor_blink_on: true,
+        }
+    }
+}
+
+impl std::fmt::Debug for Pane {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pane")
+            .field("pty_id", &self.pty_id)
+            .field("focused", &self.focused)
+            .field("content_version", &self.content_version)
+            .field("cursor_blink_on", &self.cursor_blink_on)
+            .finish_non_exhaustive()
+    }
+}
+
 
 /// A single terminal tab with block-based output
 struct TerminalTab {
@@ -508,6 +602,13 @@ struct TerminalTab {
     title: Option<String>,
     /// Track last copied selection coordinates to avoid duplicate copies
     last_copied_selection: Option<((usize, usize), (usize, usize))>,
+    // Pane management
+    /// Pane layout type
+    pane_layout: PaneLayout,
+    /// Panes within this tab (empty if using legacy single-pane mode)
+    panes: Vec<Pane>,
+    /// Index of the focused pane
+    focused_pane: usize,
 }
 
 /// Terminal input mode
@@ -591,6 +692,13 @@ enum Message {
     IncreaseFontSize,
     DecreaseFontSize,
     ResetFontSize,
+
+    // Pane management
+    SplitHorizontal,
+    SplitVertical,
+    ClosePane,
+    NextPane,
+    PrevPane,
 }
 
 impl AgTerm {
@@ -698,6 +806,9 @@ impl AgTerm {
                         bell_pending: false,
                         title: tab_state.title,
                         last_copied_selection: None,
+                    pane_layout: PaneLayout::Single,
+                    panes: Vec::new(),
+                    focused_pane: 0,
                     };
 
                     tabs.push(tab);
@@ -750,6 +861,9 @@ impl AgTerm {
                     bell_pending: false,
                     title: None,
                     last_copied_selection: None,
+                    pane_layout: PaneLayout::Single,
+                    panes: Vec::new(),
+                    focused_pane: 0,
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
@@ -795,6 +909,9 @@ impl AgTerm {
                         bell_pending: false,
                         title: None, // New tab starts with no custom title
                         last_copied_selection: None,
+                    pane_layout: PaneLayout::Single,
+                    panes: Vec::new(),
+                    focused_pane: 0,
                     };
                     self.tabs.push(tab);
                     self.active_tab = self.tabs.len() - 1;
@@ -929,6 +1046,16 @@ impl AgTerm {
                 // Handle Cmd+Shift+D: Duplicate tab
                 if modifiers.command() && modifiers.shift() && matches!(key.as_ref(), Key::Character("d")) {
                     return self.update(Message::DuplicateTab);
+                }
+
+                // Handle Cmd+Shift+H: Split horizontal
+                if modifiers.command() && modifiers.shift() && matches!(key.as_ref(), Key::Character("h")) {
+                    return self.update(Message::SplitHorizontal);
+                }
+
+                // Handle Cmd+Shift+| (pipe): Split vertical  
+                if modifiers.command() && modifiers.shift() && matches!(key.as_ref(), Key::Character("|")) {
+                    return self.update(Message::SplitVertical);
                 }
 
                 // Handle Ctrl/Cmd+C: Copy if selection exists, otherwise send interrupt signal
@@ -1395,6 +1522,32 @@ impl AgTerm {
 
                 Task::batch([focus_task, url_task])
             }
+
+            // Pane management messages (stub implementations)
+            Message::SplitHorizontal => {
+                tracing::info!("SplitHorizontal triggered (not yet implemented)");
+                Task::none()
+            }
+
+            Message::SplitVertical => {
+                tracing::info!("SplitVertical triggered (not yet implemented)");
+                Task::none()
+            }
+
+            Message::ClosePane => {
+                tracing::info!("ClosePane triggered (not yet implemented)");
+                Task::none()
+            }
+
+            Message::NextPane => {
+                tracing::info!("NextPane triggered (not yet implemented)");
+                Task::none()
+            }
+
+            Message::PrevPane => {
+                tracing::info!("PrevPane triggered (not yet implemented)");
+                Task::none()
+            }
         }
     }
 
@@ -1683,11 +1836,32 @@ impl AgTerm {
         let mode_indicator = text("STREAMING").size(11).color(theme::ACCENT_GREEN);
         let tab_info = format!("Tab {} of {}", self.active_tab + 1, self.tabs.len());
 
-        let status_left = row![
-            text(shell_name).size(12).color(theme::TEXT_MUTED),
-            Space::with_width(12),
-            mode_indicator
+        // Build left section with environment indicators
+        let mut status_left_parts = vec![
+            text(shell_name).size(12).color(theme::TEXT_MUTED).into(),
+            Space::with_width(12).into(),
+            Element::from(mode_indicator),
         ];
+
+        // Add environment indicators if in constrained/special environments
+        if self.env_info.is_ssh {
+            status_left_parts.push(Space::with_width(12).into());
+            status_left_parts.push(text("SSH").size(11).color(theme::ACCENT_YELLOW).into());
+        }
+        if self.env_info.is_container {
+            status_left_parts.push(Space::with_width(8).into());
+            status_left_parts.push(text("Container").size(11).color(theme::ACCENT_BLUE).into());
+        }
+        if self.env_info.is_tmux {
+            status_left_parts.push(Space::with_width(8).into());
+            status_left_parts.push(text("tmux").size(11).color(theme::TEXT_MUTED).into());
+        }
+        if self.env_info.is_screen {
+            status_left_parts.push(Space::with_width(8).into());
+            status_left_parts.push(text("screen").size(11).color(theme::TEXT_MUTED).into());
+        }
+
+        let status_left = row(status_left_parts).align_y(Alignment::Center);
 
         let status_center = text(tab_info).size(12).color(theme::TEXT_MUTED);
 
@@ -1751,16 +1925,20 @@ impl AgTerm {
 
     fn subscription(&self) -> Subscription<Message> {
         // Dynamic tick interval based on PTY activity
-        // - Recent activity (< 500ms): 16ms (60fps) for smooth updates
-        // - Medium activity (< 2s): 50ms (20fps) for responsiveness
-        // - Idle: 200ms (5fps) to save CPU
+        // Adjust base refresh rate based on environment (slower in SSH/container)
+        let suggested_settings = self.env_info.suggested_settings();
+        let base_refresh_ms = suggested_settings.refresh_rate_ms;
+
+        // - Recent activity (< 500ms): base refresh rate for smooth updates
+        // - Medium activity (< 2s): 3x base rate for responsiveness
+        // - Idle: 12x base rate to save CPU
         let elapsed_since_activity = self.last_pty_activity.elapsed();
         let tick_interval = if elapsed_since_activity < Duration::from_millis(500) {
-            Duration::from_millis(16) // 60fps
+            Duration::from_millis(base_refresh_ms) // Full speed
         } else if elapsed_since_activity < Duration::from_secs(2) {
-            Duration::from_millis(50) // 20fps
+            Duration::from_millis(base_refresh_ms * 3) // Reduced speed
         } else {
-            Duration::from_millis(200) // 5fps
+            Duration::from_millis(base_refresh_ms * 12) // Idle speed
         };
 
         let timer = iced::time::every(tick_interval).map(|_| Message::Tick);
@@ -1818,6 +1996,9 @@ mod tests {
             bell_pending: false,
             title: None,
             last_copied_selection: None,
+            pane_layout: PaneLayout::Single,
+            panes: Vec::new(),
+            focused_pane: 0,
         };
 
         AgTerm {
@@ -1834,6 +2015,7 @@ mod tests {
             search_query: String::new(),
             search_matches: Vec::new(),
             current_match_index: None,
+            env_info: EnvironmentInfo::detect(),
         }
     }
 

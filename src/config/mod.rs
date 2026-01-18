@@ -864,6 +864,286 @@ impl Profile {
 }
 
 // ============================================================================
+// Snippet System
+// ============================================================================
+
+/// A snippet/macro that can be triggered to insert text
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Snippet {
+    /// Snippet name (for display/search)
+    pub name: String,
+    /// Trigger string (e.g., "/git" triggers git status)
+    pub trigger: String,
+    /// Content to insert when triggered
+    pub content: String,
+    /// Category for organization (e.g., "git", "docker", "custom")
+    pub category: String,
+}
+
+impl Snippet {
+    /// Create a new snippet
+    pub fn new(name: String, trigger: String, content: String, category: String) -> Self {
+        Self {
+            name,
+            trigger,
+            content,
+            category,
+        }
+    }
+
+    /// Get the snippets directory path (~/.config/agterm/)
+    pub fn snippets_dir() -> Option<PathBuf> {
+        dirs::config_dir().map(|config_dir| config_dir.join("agterm"))
+    }
+
+    /// Get the snippets file path (~/.config/agterm/snippets.toml)
+    pub fn snippets_file_path() -> Option<PathBuf> {
+        Self::snippets_dir().map(|dir| dir.join("snippets.toml"))
+    }
+
+    /// Load snippets from file
+    pub fn load_from_file() -> Result<Vec<Snippet>, ConfigError> {
+        let path = Self::snippets_file_path()
+            .ok_or_else(|| ConfigError::IoError("Could not determine snippets directory".to_string()))?;
+
+        if !path.exists() {
+            // Return default snippets if file doesn't exist
+            return Ok(Self::default_snippets());
+        }
+
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+        #[derive(Deserialize)]
+        struct SnippetsFile {
+            snippets: Vec<Snippet>,
+        }
+
+        let file: SnippetsFile = toml::from_str(&contents)
+            .map_err(|e| ConfigError::ParseError(format!("Failed to parse snippets.toml: {}", e)))?;
+
+        Ok(file.snippets)
+    }
+
+    /// Save snippets to file
+    pub fn save_to_file(snippets: &[Snippet]) -> Result<(), ConfigError> {
+        let snippets_dir = Self::snippets_dir()
+            .ok_or_else(|| ConfigError::IoError("Could not determine snippets directory".to_string()))?;
+
+        // Create config directory if it doesn't exist
+        std::fs::create_dir_all(&snippets_dir)
+            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+        let path = snippets_dir.join("snippets.toml");
+
+        #[derive(Serialize)]
+        struct SnippetsFile<'a> {
+            snippets: &'a [Snippet],
+        }
+
+        let file = SnippetsFile { snippets };
+        let toml_string = toml::to_string_pretty(&file)
+            .map_err(|e| ConfigError::SerializeError(e.to_string()))?;
+
+        std::fs::write(&path, toml_string)
+            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+        tracing::info!("Saved {} snippets to {:?}", snippets.len(), path);
+        Ok(())
+    }
+
+    /// Get default snippets (git, docker, etc.)
+    pub fn default_snippets() -> Vec<Snippet> {
+        vec![
+            // Git snippets
+            Snippet::new(
+                "Git Status".to_string(),
+                "/gs".to_string(),
+                "git status".to_string(),
+                "git".to_string(),
+            ),
+            Snippet::new(
+                "Git Add All".to_string(),
+                "/ga".to_string(),
+                "git add .".to_string(),
+                "git".to_string(),
+            ),
+            Snippet::new(
+                "Git Commit".to_string(),
+                "/gc".to_string(),
+                "git commit -m \"".to_string(),
+                "git".to_string(),
+            ),
+            Snippet::new(
+                "Git Push".to_string(),
+                "/gp".to_string(),
+                "git push".to_string(),
+                "git".to_string(),
+            ),
+            Snippet::new(
+                "Git Pull".to_string(),
+                "/gpl".to_string(),
+                "git pull".to_string(),
+                "git".to_string(),
+            ),
+            Snippet::new(
+                "Git Log".to_string(),
+                "/gl".to_string(),
+                "git log --oneline -10".to_string(),
+                "git".to_string(),
+            ),
+            Snippet::new(
+                "Git Diff".to_string(),
+                "/gd".to_string(),
+                "git diff".to_string(),
+                "git".to_string(),
+            ),
+            Snippet::new(
+                "Git Branch".to_string(),
+                "/gb".to_string(),
+                "git branch".to_string(),
+                "git".to_string(),
+            ),
+            Snippet::new(
+                "Git Checkout".to_string(),
+                "/gco".to_string(),
+                "git checkout ".to_string(),
+                "git".to_string(),
+            ),
+            // Docker snippets
+            Snippet::new(
+                "Docker PS".to_string(),
+                "/dps".to_string(),
+                "docker ps".to_string(),
+                "docker".to_string(),
+            ),
+            Snippet::new(
+                "Docker Images".to_string(),
+                "/di".to_string(),
+                "docker images".to_string(),
+                "docker".to_string(),
+            ),
+            Snippet::new(
+                "Docker Compose Up".to_string(),
+                "/dcu".to_string(),
+                "docker-compose up -d".to_string(),
+                "docker".to_string(),
+            ),
+            Snippet::new(
+                "Docker Compose Down".to_string(),
+                "/dcd".to_string(),
+                "docker-compose down".to_string(),
+                "docker".to_string(),
+            ),
+            Snippet::new(
+                "Docker Logs".to_string(),
+                "/dlogs".to_string(),
+                "docker logs -f ".to_string(),
+                "docker".to_string(),
+            ),
+            // Common commands
+            Snippet::new(
+                "List Files Long".to_string(),
+                "/ll".to_string(),
+                "ls -lah".to_string(),
+                "common".to_string(),
+            ),
+            Snippet::new(
+                "Find File".to_string(),
+                "/ff".to_string(),
+                "find . -name ".to_string(),
+                "common".to_string(),
+            ),
+            Snippet::new(
+                "Grep Recursive".to_string(),
+                "/gr".to_string(),
+                "grep -r \"\" .".to_string(),
+                "common".to_string(),
+            ),
+            // Kubernetes snippets
+            Snippet::new(
+                "Kubectl Get Pods".to_string(),
+                "/kgp".to_string(),
+                "kubectl get pods".to_string(),
+                "kubernetes".to_string(),
+            ),
+            Snippet::new(
+                "Kubectl Describe".to_string(),
+                "/kdesc".to_string(),
+                "kubectl describe pod ".to_string(),
+                "kubernetes".to_string(),
+            ),
+            Snippet::new(
+                "Kubectl Logs".to_string(),
+                "/klogs".to_string(),
+                "kubectl logs -f ".to_string(),
+                "kubernetes".to_string(),
+            ),
+            // Cargo (Rust) snippets
+            Snippet::new(
+                "Cargo Build".to_string(),
+                "/cb".to_string(),
+                "cargo build".to_string(),
+                "cargo".to_string(),
+            ),
+            Snippet::new(
+                "Cargo Run".to_string(),
+                "/cr".to_string(),
+                "cargo run".to_string(),
+                "cargo".to_string(),
+            ),
+            Snippet::new(
+                "Cargo Test".to_string(),
+                "/ct".to_string(),
+                "cargo test".to_string(),
+                "cargo".to_string(),
+            ),
+            Snippet::new(
+                "Cargo Check".to_string(),
+                "/cc".to_string(),
+                "cargo check".to_string(),
+                "cargo".to_string(),
+            ),
+        ]
+    }
+
+    /// Initialize snippets file with defaults if it doesn't exist
+    pub fn initialize_default_file() -> Result<(), ConfigError> {
+        let path = Self::snippets_file_path()
+            .ok_or_else(|| ConfigError::IoError("Could not determine snippets directory".to_string()))?;
+
+        if !path.exists() {
+            let default_snippets = Self::default_snippets();
+            Self::save_to_file(&default_snippets)?;
+            tracing::info!("Created default snippets file at {:?}", path);
+        }
+
+        Ok(())
+    }
+
+    /// Find snippet by trigger
+    pub fn find_by_trigger<'a>(snippets: &'a [Snippet], trigger: &str) -> Option<&'a Snippet> {
+        snippets.iter().find(|s| s.trigger == trigger)
+    }
+
+    /// Find snippets by category
+    pub fn find_by_category<'a>(snippets: &'a [Snippet], category: &str) -> Vec<&'a Snippet> {
+        snippets.iter().filter(|s| s.category == category).collect()
+    }
+
+    /// Get all unique categories
+    pub fn get_categories(snippets: &[Snippet]) -> Vec<String> {
+        let mut categories: Vec<String> = snippets
+            .iter()
+            .map(|s| s.category.clone())
+            .collect();
+        categories.sort();
+        categories.dedup();
+        categories
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1178,5 +1458,254 @@ mod tests {
         if let Some(profile_path) = Profile::profile_path("test") {
             assert!(profile_path.to_string_lossy().ends_with("test.toml"));
         }
+    }
+
+    // ========== Snippet System Tests ==========
+
+    #[test]
+    fn test_snippet_creation() {
+        let snippet = Snippet::new(
+            "Test Snippet".to_string(),
+            "/test".to_string(),
+            "echo test".to_string(),
+            "testing".to_string(),
+        );
+
+        assert_eq!(snippet.name, "Test Snippet");
+        assert_eq!(snippet.trigger, "/test");
+        assert_eq!(snippet.content, "echo test");
+        assert_eq!(snippet.category, "testing");
+    }
+
+    #[test]
+    fn test_default_snippets() {
+        let snippets = Snippet::default_snippets();
+
+        // Should have multiple categories
+        assert!(snippets.len() > 20);
+
+        // Check git snippets exist
+        let git_snippets: Vec<_> = snippets.iter().filter(|s| s.category == "git").collect();
+        assert!(!git_snippets.is_empty());
+
+        // Check docker snippets exist
+        let docker_snippets: Vec<_> = snippets.iter().filter(|s| s.category == "docker").collect();
+        assert!(!docker_snippets.is_empty());
+
+        // Check cargo snippets exist
+        let cargo_snippets: Vec<_> = snippets.iter().filter(|s| s.category == "cargo").collect();
+        assert!(!cargo_snippets.is_empty());
+    }
+
+    #[test]
+    fn test_snippet_find_by_trigger() {
+        let snippets = Snippet::default_snippets();
+
+        // Test finding git status
+        let result = Snippet::find_by_trigger(&snippets, "/gs");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().content, "git status");
+
+        // Test finding non-existent trigger
+        let result = Snippet::find_by_trigger(&snippets, "/nonexistent");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_snippet_find_by_category() {
+        let snippets = Snippet::default_snippets();
+
+        // Find all git snippets
+        let git_snippets = Snippet::find_by_category(&snippets, "git");
+        assert!(!git_snippets.is_empty());
+
+        // All returned snippets should be in git category
+        for snippet in git_snippets {
+            assert_eq!(snippet.category, "git");
+        }
+
+        // Find all docker snippets
+        let docker_snippets = Snippet::find_by_category(&snippets, "docker");
+        assert!(!docker_snippets.is_empty());
+
+        // Find non-existent category
+        let empty = Snippet::find_by_category(&snippets, "nonexistent");
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_snippet_get_categories() {
+        let snippets = Snippet::default_snippets();
+        let categories = Snippet::get_categories(&snippets);
+
+        // Should have multiple categories
+        assert!(categories.len() > 3);
+
+        // Should contain expected categories
+        assert!(categories.contains(&"git".to_string()));
+        assert!(categories.contains(&"docker".to_string()));
+        assert!(categories.contains(&"cargo".to_string()));
+        assert!(categories.contains(&"common".to_string()));
+
+        // Categories should be sorted and unique
+        let mut sorted_categories = categories.clone();
+        sorted_categories.sort();
+        assert_eq!(categories, sorted_categories);
+    }
+
+    #[test]
+    fn test_snippet_serialization() {
+        let snippet = Snippet::new(
+            "Test".to_string(),
+            "/test".to_string(),
+            "echo hello".to_string(),
+            "testing".to_string(),
+        );
+
+        // Serialize to TOML
+        let toml_str = toml::to_string(&snippet).unwrap();
+
+        // Deserialize back
+        let deserialized: Snippet = toml::from_str(&toml_str).unwrap();
+
+        // Should match original
+        assert_eq!(snippet, deserialized);
+    }
+
+    #[test]
+    fn test_snippet_save_and_load() {
+        use tempfile::tempdir;
+
+        // Create temporary directory
+        let temp_dir = tempdir().unwrap();
+        let snippets_file = temp_dir.path().join("snippets.toml");
+
+        // Create test snippets
+        let snippets = vec![
+            Snippet::new(
+                "Test 1".to_string(),
+                "/t1".to_string(),
+                "echo test1".to_string(),
+                "test".to_string(),
+            ),
+            Snippet::new(
+                "Test 2".to_string(),
+                "/t2".to_string(),
+                "echo test2".to_string(),
+                "test".to_string(),
+            ),
+        ];
+
+        // Save to file
+        #[derive(Serialize)]
+        struct SnippetsFile<'a> {
+            snippets: &'a [Snippet],
+        }
+        let file = SnippetsFile { snippets: &snippets };
+        let toml_string = toml::to_string_pretty(&file).unwrap();
+        std::fs::write(&snippets_file, toml_string).unwrap();
+
+        // Load from file
+        let contents = std::fs::read_to_string(&snippets_file).unwrap();
+
+        #[derive(Deserialize)]
+        struct SnippetsFileLoad {
+            snippets: Vec<Snippet>,
+        }
+        let loaded: SnippetsFileLoad = toml::from_str(&contents).unwrap();
+
+        // Verify loaded snippets match original
+        assert_eq!(loaded.snippets.len(), 2);
+        assert_eq!(loaded.snippets[0].name, "Test 1");
+        assert_eq!(loaded.snippets[1].name, "Test 2");
+    }
+
+    #[test]
+    fn test_snippet_paths() {
+        // Test snippets directory path
+        if let Some(snippets_dir) = Snippet::snippets_dir() {
+            assert!(snippets_dir.to_string_lossy().contains("agterm"));
+        }
+
+        // Test snippets file path
+        if let Some(snippets_file) = Snippet::snippets_file_path() {
+            assert!(snippets_file.to_string_lossy().ends_with("snippets.toml"));
+            assert!(snippets_file.to_string_lossy().contains("agterm"));
+        }
+    }
+
+    #[test]
+    fn test_snippet_triggers_unique() {
+        let snippets = Snippet::default_snippets();
+        let mut triggers = std::collections::HashSet::new();
+
+        // All triggers should be unique
+        for snippet in &snippets {
+            assert!(
+                triggers.insert(&snippet.trigger),
+                "Duplicate trigger found: {}",
+                snippet.trigger
+            );
+        }
+    }
+
+    #[test]
+    fn test_snippet_git_commands() {
+        let snippets = Snippet::default_snippets();
+
+        // Test specific git commands
+        let gs = Snippet::find_by_trigger(&snippets, "/gs").unwrap();
+        assert_eq!(gs.content, "git status");
+
+        let ga = Snippet::find_by_trigger(&snippets, "/ga").unwrap();
+        assert_eq!(ga.content, "git add .");
+
+        let gp = Snippet::find_by_trigger(&snippets, "/gp").unwrap();
+        assert_eq!(gp.content, "git push");
+
+        let gl = Snippet::find_by_trigger(&snippets, "/gl").unwrap();
+        assert_eq!(gl.content, "git log --oneline -10");
+    }
+
+    #[test]
+    fn test_snippet_docker_commands() {
+        let snippets = Snippet::default_snippets();
+
+        // Test specific docker commands
+        let dps = Snippet::find_by_trigger(&snippets, "/dps").unwrap();
+        assert_eq!(dps.content, "docker ps");
+
+        let di = Snippet::find_by_trigger(&snippets, "/di").unwrap();
+        assert_eq!(di.content, "docker images");
+
+        let dcu = Snippet::find_by_trigger(&snippets, "/dcu").unwrap();
+        assert_eq!(dcu.content, "docker-compose up -d");
+    }
+
+    #[test]
+    fn test_snippet_cargo_commands() {
+        let snippets = Snippet::default_snippets();
+
+        // Test specific cargo commands
+        let cb = Snippet::find_by_trigger(&snippets, "/cb").unwrap();
+        assert_eq!(cb.content, "cargo build");
+
+        let cr = Snippet::find_by_trigger(&snippets, "/cr").unwrap();
+        assert_eq!(cr.content, "cargo run");
+
+        let ct = Snippet::find_by_trigger(&snippets, "/ct").unwrap();
+        assert_eq!(ct.content, "cargo test");
+    }
+
+    #[test]
+    fn test_snippet_common_commands() {
+        let snippets = Snippet::default_snippets();
+
+        // Test common commands
+        let ll = Snippet::find_by_trigger(&snippets, "/ll").unwrap();
+        assert_eq!(ll.content, "ls -lah");
+
+        let ff = Snippet::find_by_trigger(&snippets, "/ff").unwrap();
+        assert_eq!(ff.content, "find . -name ");
     }
 }

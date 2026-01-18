@@ -1,0 +1,186 @@
+# AgTerm Snippets Configuration
+# Location: ~/.config/agterm/snippets.toml
+#
+# Snippets are text macros that can be triggered by typing a trigger string.
+# For example, typing "/gs" and pressing space/tab will expand to "git status".
+#
+# Structure:
+# - name: Display name for the snippet
+# - trigger: The text that triggers the snippet (e.g., "/gs")
+# - content: The text to insert when triggered
+# - category: Category for organization (git, docker, common, etc.)
+
+# ============================================================================
+# Git Snippets
+# ============================================================================
+
+[[snippets]]
+name = "Git Status"
+trigger = "/gs"
+content = "git status"
+category = "git"
+
+[[snippets]]
+name = "Git Add All"
+trigger = "/ga"
+content = "git add ."
+category = "git"
+
+[[snippets]]
+name = "Git Commit"
+trigger = "/gc"
+content = "git commit -m \""
+category = "git"
+
+[[snippets]]
+name = "Git Push"
+trigger = "/gp"
+content = "git push"
+category = "git"
+
+[[snippets]]
+name = "Git Pull"
+trigger = "/gpl"
+content = "git pull"
+category = "git"
+
+[[snippets]]
+name = "Git Log"
+trigger = "/gl"
+content = "git log --oneline -10"
+category = "git"
+
+[[snippets]]
+name = "Git Diff"
+trigger = "/gd"
+content = "git diff"
+category = "git"
+
+[[snippets]]
+name = "Git Branch"
+trigger = "/gb"
+content = "git branch"
+category = "git"
+
+[[snippets]]
+name = "Git Checkout"
+trigger = "/gco"
+content = "git checkout "
+category = "git"
+
+# ============================================================================
+# Docker Snippets
+# ============================================================================
+
+[[snippets]]
+name = "Docker PS"
+trigger = "/dps"
+content = "docker ps"
+category = "docker"
+
+[[snippets]]
+name = "Docker Images"
+trigger = "/di"
+content = "docker images"
+category = "docker"
+
+[[snippets]]
+name = "Docker Compose Up"
+trigger = "/dcu"
+content = "docker-compose up -d"
+category = "docker"
+
+[[snippets]]
+name = "Docker Compose Down"
+trigger = "/dcd"
+content = "docker-compose down"
+category = "docker"
+
+[[snippets]]
+name = "Docker Logs"
+trigger = "/dlogs"
+content = "docker logs -f "
+category = "docker"
+
+# ============================================================================
+# Common Commands
+# ============================================================================
+
+[[snippets]]
+name = "List Files Long"
+trigger = "/ll"
+content = "ls -lah"
+category = "common"
+
+[[snippets]]
+name = "Find File"
+trigger = "/ff"
+content = "find . -name "
+category = "common"
+
+[[snippets]]
+name = "Grep Recursive"
+trigger = "/gr"
+content = "grep -r \"\" ."
+category = "common"
+
+# ============================================================================
+# Kubernetes Snippets
+# ============================================================================
+
+[[snippets]]
+name = "Kubectl Get Pods"
+trigger = "/kgp"
+content = "kubectl get pods"
+category = "kubernetes"
+
+[[snippets]]
+name = "Kubectl Describe"
+trigger = "/kdesc"
+content = "kubectl describe pod "
+category = "kubernetes"
+
+[[snippets]]
+name = "Kubectl Logs"
+trigger = "/klogs"
+content = "kubectl logs -f "
+category = "kubernetes"
+
+# ============================================================================
+# Cargo (Rust) Snippets
+# ============================================================================
+
+[[snippets]]
+name = "Cargo Build"
+trigger = "/cb"
+content = "cargo build"
+category = "cargo"
+
+[[snippets]]
+name = "Cargo Run"
+trigger = "/cr"
+content = "cargo run"
+category = "cargo"
+
+[[snippets]]
+name = "Cargo Test"
+trigger = "/ct"
+content = "cargo test"
+category = "cargo"
+
+[[snippets]]
+name = "Cargo Check"
+trigger = "/cc"
+content = "cargo check"
+category = "cargo"
+
+# ============================================================================
+# Custom Snippets (Add your own below)
+# ============================================================================
+
+# Example custom snippet:
+# [[snippets]]
+# name = "SSH to Server"
+# trigger = "/ssh"
+# content = "ssh user@example.com"
+# category = "custom"
