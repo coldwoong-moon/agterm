@@ -800,7 +800,8 @@ mod tests {
     fn test_render_sparkline() {
         let data = vec![10.0, 20.0, 30.0, 40.0, 50.0];
         let sparkline = render_sparkline(&data, 5);
-        assert_eq!(sparkline.len(), 5);
+        // Use chars().count() for Unicode character count (not byte count)
+        assert_eq!(sparkline.chars().count(), 5);
         // Should contain Unicode sparkline characters
         assert!(sparkline.chars().all(|c| c >= '▁' && c <= '█' || c == ' '));
     }
@@ -809,7 +810,7 @@ mod tests {
     fn test_render_sparkline_empty() {
         let data: Vec<f64> = vec![];
         let sparkline = render_sparkline(&data, 10);
-        assert_eq!(sparkline.len(), 10);
+        assert_eq!(sparkline.chars().count(), 10);
         assert_eq!(sparkline, "          ");
     }
 
@@ -818,7 +819,8 @@ mod tests {
         let data = vec![1.0, 2.0, 3.0, 2.0, 1.0];
         let graph = render_ascii_graph(&data, 5, 5);
         assert_eq!(graph.len(), 5); // Height of 5 lines
-        assert!(graph.iter().all(|line| line.len() == 5)); // Width of 5 chars
+        // Use chars().count() for Unicode character count
+        assert!(graph.iter().all(|line| line.chars().count() == 5)); // Width of 5 chars
     }
 
     #[test]

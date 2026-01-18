@@ -336,6 +336,15 @@ fn get_config() -> AppConfig {
     APP_CONFIG.get().cloned().unwrap_or_else(AppConfig::default)
 }
 
+/// Convert config cursor style to terminal canvas cursor style
+fn convert_cursor_style(style: config::CursorStyle) -> CursorStyle {
+    match style {
+        config::CursorStyle::Block => CursorStyle::Block,
+        config::CursorStyle::Underline => CursorStyle::Underline,
+        config::CursorStyle::Beam => CursorStyle::Bar,
+    }
+}
+
 /// Main application state
 struct AgTerm {
     tabs: Vec<TerminalTab>,
@@ -2043,11 +2052,12 @@ impl AgTerm {
         let tab = &self.tabs[self.active_tab];
         let (cursor_row, cursor_col) = tab.screen.cursor_position();
 
-        // Create cursor state
+        // Create cursor state with config-defined style
+        let config = get_config();
         let cursor = CursorState {
             row: cursor_row,
             col: cursor_col,
-            style: CursorStyle::Block,
+            style: convert_cursor_style(config.terminal.cursor_style),
             visible: tab.screen.cursor_visible(),
             blink_on: tab.cursor_blink_on,
         };
