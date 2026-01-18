@@ -476,14 +476,15 @@ impl TerminalScreen {
     /// Auto-detect URLs in all lines and update cell hyperlinks
     pub fn detect_urls(&mut self) {
         // URL regex pattern: http://, https://, file://
-        let url_pattern = regex::Regex::new(
-            r"(?i)(https?://[^\s<>{}|\\\^\[\]`]+|file://[^\s<>{}|\\\^\[\]`]+)"
-        ).unwrap();
+        let url_pattern =
+            regex::Regex::new(r"(?i)(https?://[^\s<>{}|\\\^\[\]`]+|file://[^\s<>{}|\\\^\[\]`]+)")
+                .unwrap();
 
         // Process all lines in buffer
         for row in &mut self.buffer {
             // Convert row to string for regex matching
-            let line_text: String = row.iter()
+            let line_text: String = row
+                .iter()
                 .filter(|cell| !cell.placeholder)
                 .map(|cell| cell.c)
                 .collect();
@@ -510,7 +511,8 @@ impl TerminalScreen {
 
         // Process scrollback buffer
         for row in self.scrollback.iter_mut() {
-            let line_text: String = row.iter()
+            let line_text: String = row
+                .iter()
                 .filter(|cell| !cell.placeholder)
                 .map(|cell| cell.c)
                 .collect();
@@ -1221,7 +1223,8 @@ impl Perform for TerminalScreen {
                 self.tab();
             }
             0x07 => {
-                // Bell (BEL) - ignore for now
+                // Bell (BEL) - set flag for notification
+                self.bell_triggered = true;
             }
             _ => {}
         }

@@ -4,7 +4,7 @@
 //!
 //! Run with: cargo run --example profile_usage
 
-use agterm::config::{Profile, AppConfig};
+use agterm::config::{AppConfig, Profile};
 use std::collections::HashMap;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -4,8 +4,7 @@
 /// Snippets allow users to define text shortcuts that expand to longer commands.
 ///
 /// Run with: cargo run --example snippet_usage
-
-use agterm::config::{Snippet, ConfigError};
+use agterm::config::{ConfigError, Snippet};
 
 fn main() -> Result<(), ConfigError> {
     println!("=== AgTerm Snippet System Example ===\n");
@@ -69,10 +68,9 @@ fn main() -> Result<(), ConfigError> {
     let useful_triggers = vec!["/gs", "/ga", "/gc", "/gp", "/dps", "/ll", "/cb", "/cr"];
     for trigger in useful_triggers {
         if let Some(snippet) = Snippet::find_by_trigger(&snippets, trigger) {
-            println!("   {} → {} ({})",
-                snippet.trigger,
-                snippet.content,
-                snippet.category
+            println!(
+                "   {} → {} ({})",
+                snippet.trigger, snippet.content, snippet.category
             );
         }
     }

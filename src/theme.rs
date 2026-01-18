@@ -124,11 +124,9 @@ impl ColorDef {
     pub fn to_color(&self) -> Color {
         match self {
             ColorDef::Hex(hex) => Self::hex_to_color(hex),
-            ColorDef::Rgb([r, g, b]) => Color::from_rgb(
-                *r as f32 / 255.0,
-                *g as f32 / 255.0,
-                *b as f32 / 255.0,
-            ),
+            ColorDef::Rgb([r, g, b]) => {
+                Color::from_rgb(*r as f32 / 255.0, *g as f32 / 255.0, *b as f32 / 255.0)
+            }
             ColorDef::RgbFloat([r, g, b]) => Color::from_rgb(*r, *g, *b),
         }
     }
@@ -690,8 +688,7 @@ impl Theme {
 impl ColorDef {
     /// Create from RGBA bytes (0-255) with alpha (0.0-1.0)
     pub fn from_rgba(r: u8, g: u8, b: u8, a: f32) -> Self {
-        ColorDef::RgbFloat([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
-            .with_alpha(a)
+        ColorDef::RgbFloat([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]).with_alpha(a)
     }
 
     /// Apply alpha to color (returns new ColorDef)

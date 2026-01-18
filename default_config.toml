@@ -61,6 +61,7 @@ cursor_blink = true
 cursor_blink_interval_ms = 530
 bell_enabled = true
 bell_style = "visual"            # visual, sound, both, none
+bell_volume = 0.5                # 0.0 to 1.0 (50% by default)
 bracketed_paste = true
 auto_scroll_on_output = true
 
@@ -77,6 +78,11 @@ mode = "default"                 # default, vim, emacs
 # "Ctrl+Shift+V" = "paste"
 # "Ctrl+Shift+F" = "search"
 # "Ctrl+Shift+N" = "new_window"
+
+# Keyboard repeat settings
+[keybindings.keyboard]
+repeat_delay_ms = 500            # Initial delay before repeat starts (ms)
+repeat_rate_ms = 30              # Interval between repeats (ms) - 30ms ≈ 33 keys/sec
 
 # ============================================================================
 # Shell Configuration

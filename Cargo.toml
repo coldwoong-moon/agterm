@@ -48,6 +48,9 @@ arboard = "3"
 # URL handling
 open = "5"
 
+# Audio (for terminal bell sound)
+rodio = { version = "0.19", default-features = false, features = ["wav"] }
+
 # Logging
 log = "0.4"
 tracing = "0.1"

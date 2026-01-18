@@ -34,7 +34,7 @@ mod colors {
 }
 
 /// Get current memory usage in MB (platform-specific)
-fn get_memory_usage_mb() -> f64 {
+pub fn get_memory_usage_mb() -> f64 {
     // TODO: Implement memory tracking
     // Memory tracking via mach2 API is complex and needs proper testing
     0.0
@@ -255,7 +255,7 @@ impl DebugPanel {
         // Get memory usage (estimate based on Rust's allocator)
         let memory_mb = get_memory_usage_mb();
 
-        let content = column![
+        let mut content = column![
             text("Performance").size(13).color(colors::TEXT_TITLE),
             Space::with_height(4),
             row![
@@ -266,40 +266,86 @@ impl DebugPanel {
                     .font(MONO_FONT)
                     .color(fps_color),
             ],
-            row![
+        ]
+        .spacing(2);
+
+        // FPS History Graph (sparkline)
+        let fps_history = self.metrics.fps_history();
+        if !fps_history.is_empty() {
+            let fps_data: Vec<f64> = fps_history.iter().copied().collect();
+            let sparkline = render_sparkline(&fps_data, 40);
+            content = content.push(row![
+                text("   ").size(11),
+                text(sparkline)
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::ACCENT_CYAN),
+            ]);
+
+            // Show min/max range
+            if let (Some(&min_fps), Some(&max_fps)) = (
+                fps_data.iter().min_by(|a, b| a.partial_cmp(b).unwrap()),
+                fps_data.iter().max_by(|a, b| a.partial_cmp(b).unwrap()),
+            ) {
+                content = content.push(row![text(format!(
+                    "   {:.0}-{:.0} (60s)",
+                    min_fps, max_fps
+                ))
+                .size(9)
+                .color(colors::TEXT_LABEL),]);
+            }
+        }
+
+        content = content.push(Space::with_height(4));
+
+        content = content
+            .push(row![
                 text("Frame:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
                 text(format!("{:.2}ms", frame_time))
                     .size(11)
                     .font(MONO_FONT)
                     .color(colors::TEXT_VALUE),
-            ],
-            row![
+            ])
+            .push(row![
                 text("Render:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
                 text(format!("{:.2}ms", render_time))
                     .size(11)
                     .font(MONO_FONT)
                     .color(colors::TEXT_VALUE),
-            ],
-            row![
+            ])
+            .push(row![
                 text("Msg:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
                 text(format!("{:.1}\u{00B5}s", msg_time))
                     .size(11)
                     .font(MONO_FONT)
                     .color(colors::TEXT_VALUE),
-            ],
-            row![
+            ])
+            .push(Space::with_height(4))
+            .push(row![
                 text("Memory:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
                 text(format!("{:.1}MB", memory_mb))
                     .size(11)
                     .font(MONO_FONT)
                     .color(colors::TEXT_VALUE),
-            ],
-        ]
-        .spacing(2);
+            ]);
+
+        // Memory History Graph (sparkline)
+        let memory_history = self.metrics.memory_history();
+        if !memory_history.is_empty() {
+            let mem_data: Vec<f64> = memory_history.iter().copied().collect();
+            let sparkline = render_sparkline(&mem_data, 40);
+            content = content.push(row![
+                text("   ").size(11),
+                text(sparkline)
+                    .size(11)
+                    .font(MONO_FONT)
+                    .color(colors::ACCENT_YELLOW),
+            ]);
+        }
 
         self.section_container(content)
     }
@@ -311,18 +357,24 @@ impl DebugPanel {
             row![
                 text("Size:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format!("{}x{}", self.terminal_state.cols, self.terminal_state.rows))
-                    .size(11)
-                    .font(MONO_FONT)
-                    .color(colors::ACCENT_CYAN),
+                text(format!(
+                    "{}x{}",
+                    self.terminal_state.cols, self.terminal_state.rows
+                ))
+                .size(11)
+                .font(MONO_FONT)
+                .color(colors::ACCENT_CYAN),
             ],
             row![
                 text("Cursor:").size(11).color(colors::TEXT_LABEL),
                 Space::with_width(8),
-                text(format!("({}, {})", self.terminal_state.cursor_row, self.terminal_state.cursor_col))
-                    .size(11)
-                    .font(MONO_FONT)
-                    .color(colors::TEXT_VALUE),
+                text(format!(
+                    "({}, {})",
+                    self.terminal_state.cursor_row, self.terminal_state.cursor_col
+                ))
+                .size(11)
+                .font(MONO_FONT)
+                .color(colors::TEXT_VALUE),
             ],
             row![
                 text("Lines:").size(11).color(colors::TEXT_LABEL),
@@ -374,40 +426,70 @@ impl DebugPanel {
                     .size(10)
                     .color(colors::TEXT_LABEL),
             ],
-            row![
-                text("Write:").size(11).color(colors::TEXT_LABEL),
-                Space::with_width(8),
-                text(format_bytes(total_written))
-                    .size(11)
-                    .font(MONO_FONT)
-                    .color(colors::TEXT_VALUE),
-            ],
         ]
         .spacing(2);
 
-        // Show individual session info
-        for session in &self.pty_sessions {
-            let status_color = if session.active {
-                colors::ACCENT_GREEN
-            } else {
-                colors::ACCENT_RED
-            };
-            let id_short = &session.session_id[..8.min(session.session_id.len())];
+        // PTY I/O Rate Graph (sparkline)
+        let pty_io_history = self.metrics.pty_io_history();
+        if !pty_io_history.is_empty() {
+            let io_data: Vec<f64> = pty_io_history.iter().copied().collect();
+            let sparkline = render_sparkline(&io_data, 40);
             content = content.push(row![
-                text(format!("  {}", id_short))
-                    .size(10)
+                text("   ").size(11),
+                text(sparkline)
+                    .size(11)
                     .font(MONO_FONT)
-                    .color(colors::TEXT_LABEL),
-                Space::with_width(4),
-                text(if session.active { "●" } else { "○" })
-                    .size(10)
-                    .color(status_color),
-                Space::with_width(4),
-                text(format_bytes(session.buffer_size))
-                    .size(10)
-                    .font(MONO_FONT)
-                    .color(colors::TEXT_VALUE),
+                    .color(colors::ACCENT_GREEN),
             ]);
+
+            // Show max rate
+            if let Some(&max_rate) = io_data.iter().max_by(|a, b| a.partial_cmp(b).unwrap()) {
+                content = content.push(row![text(format!(
+                    "   max: {}/s (60s)",
+                    format_bytes(max_rate as usize)
+                ))
+                .size(9)
+                .color(colors::TEXT_LABEL),]);
+            }
+        }
+
+        content = content.push(Space::with_height(4));
+
+        content = content.push(row![
+            text("Write:").size(11).color(colors::TEXT_LABEL),
+            Space::with_width(8),
+            text(format_bytes(total_written))
+                .size(11)
+                .font(MONO_FONT)
+                .color(colors::TEXT_VALUE),
+        ]);
+
+        // Show individual session info
+        if !self.pty_sessions.is_empty() {
+            content = content.push(Space::with_height(4));
+            for session in &self.pty_sessions {
+                let status_color = if session.active {
+                    colors::ACCENT_GREEN
+                } else {
+                    colors::ACCENT_RED
+                };
+                let id_short = &session.session_id[..8.min(session.session_id.len())];
+                content = content.push(row![
+                    text(format!("  {}", id_short))
+                        .size(10)
+                        .font(MONO_FONT)
+                        .color(colors::TEXT_LABEL),
+                    Space::with_width(4),
+                    text(if session.active { "●" } else { "○" })
+                        .size(10)
+                        .color(status_color),
+                    Space::with_width(4),
+                    text(format_bytes(session.buffer_size))
+                        .size(10)
+                        .font(MONO_FONT)
+                        .color(colors::TEXT_VALUE),
+                ]);
+            }
         }
 
         self.section_container(content)
@@ -575,6 +657,115 @@ fn format_bytes(bytes: usize) -> String {
     }
 }
 
+/// Render a text-based ASCII bar graph
+///
+/// Creates a simple bar graph from a data series, fitting within the specified width.
+/// Each bar represents one data point scaled to the height range.
+fn render_ascii_graph(data: &[f64], width: usize, height: usize) -> Vec<String> {
+    if data.is_empty() || width == 0 || height == 0 {
+        return vec![" ".repeat(width); height];
+    }
+
+    // Find min and max for scaling
+    let max_val = data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let min_val = data.iter().copied().fold(f64::INFINITY, f64::min);
+    let range = (max_val - min_val).max(0.001); // Avoid division by zero
+
+    // Characters for vertical bars (from empty to full)
+    const BLOCKS: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+    // Build the graph from bottom to top
+    let mut lines = vec![String::new(); height];
+
+    // Sample data to fit width
+    let samples: Vec<f64> = if data.len() <= width {
+        // Pad with zeros if data is shorter than width
+        let mut padded = vec![0.0; width - data.len()];
+        padded.extend_from_slice(data);
+        padded
+    } else {
+        // Downsample if data is longer than width
+        (0..width)
+            .map(|i| {
+                let idx = (i * data.len()) / width;
+                data[idx]
+            })
+            .collect()
+    };
+
+    // Draw bars
+    for (_x, &value) in samples.iter().enumerate() {
+        // Normalize value to 0-1 range
+        let normalized = if range > 0.0 {
+            ((value - min_val) / range).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        // Calculate bar height in character units
+        let bar_height = normalized * (height as f64);
+        let full_blocks = bar_height.floor() as usize;
+        let partial = ((bar_height - bar_height.floor()) * 8.0) as usize;
+
+        // Fill from bottom up
+        for y in 0..height {
+            let row_from_bottom = height - 1 - y;
+            let ch = if row_from_bottom < full_blocks {
+                '█'
+            } else if row_from_bottom == full_blocks && partial > 0 {
+                BLOCKS[partial]
+            } else {
+                ' '
+            };
+            lines[y].push(ch);
+        }
+    }
+
+    lines
+}
+
+/// Render a sparkline graph (single line with Unicode block characters)
+fn render_sparkline(data: &[f64], width: usize) -> String {
+    if data.is_empty() || width == 0 {
+        return " ".repeat(width);
+    }
+
+    // Find min and max for scaling
+    let max_val = data.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let min_val = data.iter().copied().fold(f64::INFINITY, f64::min);
+    let range = (max_val - min_val).max(0.001);
+
+    // Sparkline characters (8 levels)
+    const SPARKS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+    // Sample data to fit width
+    let samples: Vec<f64> = if data.len() <= width {
+        let mut padded = vec![0.0; width - data.len()];
+        padded.extend_from_slice(data);
+        padded
+    } else {
+        (0..width)
+            .map(|i| {
+                let idx = (i * data.len()) / width;
+                data[idx]
+            })
+            .collect()
+    };
+
+    samples
+        .iter()
+        .map(|&value| {
+            let normalized = if range > 0.0 {
+                ((value - min_val) / range).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let level = (normalized * 7.0).round() as usize;
+            SPARKS[level.min(7)]
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,5 +794,38 @@ mod tests {
         let panel = DebugPanel::new();
         // visible state depends on AGTERM_DEBUG env var
         assert!(panel.metrics.fps() >= 0.0);
+    }
+
+    #[test]
+    fn test_render_sparkline() {
+        let data = vec![10.0, 20.0, 30.0, 40.0, 50.0];
+        let sparkline = render_sparkline(&data, 5);
+        assert_eq!(sparkline.len(), 5);
+        // Should contain Unicode sparkline characters
+        assert!(sparkline.chars().all(|c| c >= '▁' && c <= '█' || c == ' '));
+    }
+
+    #[test]
+    fn test_render_sparkline_empty() {
+        let data: Vec<f64> = vec![];
+        let sparkline = render_sparkline(&data, 10);
+        assert_eq!(sparkline.len(), 10);
+        assert_eq!(sparkline, "          ");
+    }
+
+    #[test]
+    fn test_render_ascii_graph() {
+        let data = vec![1.0, 2.0, 3.0, 2.0, 1.0];
+        let graph = render_ascii_graph(&data, 5, 5);
+        assert_eq!(graph.len(), 5); // Height of 5 lines
+        assert!(graph.iter().all(|line| line.len() == 5)); // Width of 5 chars
+    }
+
+    #[test]
+    fn test_render_ascii_graph_empty() {
+        let data: Vec<f64> = vec![];
+        let graph = render_ascii_graph(&data, 10, 5);
+        assert_eq!(graph.len(), 5);
+        assert!(graph.iter().all(|line| line == "          "));
     }
 }

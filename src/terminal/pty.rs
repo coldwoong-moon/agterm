@@ -353,7 +353,11 @@ impl PtyManager {
             let preview = if data.len() <= 64 {
                 String::from_utf8_lossy(data).to_string()
             } else {
-                format!("{}... ({} bytes)", String::from_utf8_lossy(&data[..64]), data.len())
+                format!(
+                    "{}... ({} bytes)",
+                    String::from_utf8_lossy(&data[..64]),
+                    data.len()
+                )
             };
             trace!(bytes = data.len(), preview = %preview, "PTY input");
         }
@@ -397,7 +401,11 @@ impl PtyManager {
                 let preview = if result.len() <= 64 {
                     String::from_utf8_lossy(&result).to_string()
                 } else {
-                    format!("{}... ({} bytes)", String::from_utf8_lossy(&result[..64]), result.len())
+                    format!(
+                        "{}... ({} bytes)",
+                        String::from_utf8_lossy(&result[..64]),
+                        result.len()
+                    )
                 };
                 trace!(bytes = result.len(), preview = %preview, "PTY output");
             } else {

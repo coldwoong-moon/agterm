@@ -171,6 +171,8 @@ pub struct TerminalConfig {
     pub bell_enabled: bool,
     #[serde(default = "default_bell_style")]
     pub bell_style: BellStyle,
+    #[serde(default = "default_bell_volume")]
+    pub bell_volume: f32,
     #[serde(default = "default_true")]
     pub bracketed_paste: bool,
     #[serde(default = "default_true")]
@@ -186,6 +188,7 @@ impl Default for TerminalConfig {
             cursor_blink_interval_ms: default_cursor_blink_interval(),
             bell_enabled: true,
             bell_style: default_bell_style(),
+            bell_volume: default_bell_volume(),
             bracketed_paste: true,
             auto_scroll_on_output: true,
         }
@@ -230,6 +233,17 @@ pub struct KeybindingsConfig {
     pub mode: String, // "default", "vim", "emacs"
     #[serde(default)]
     pub custom: HashMap<String, String>,
+    #[serde(default)]
+    pub keyboard: KeyboardConfig,
+}
+
+/// Keyboard repeat configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyboardConfig {
+    #[serde(default = "default_repeat_delay")]
+    pub repeat_delay_ms: u64,
+    #[serde(default = "default_repeat_rate")]
+    pub repeat_rate_ms: u64,
 }
 
 impl Default for KeybindingsConfig {
@@ -237,6 +251,16 @@ impl Default for KeybindingsConfig {
         Self {
             mode: default_keybinding_mode(),
             custom: HashMap::new(),
+            keyboard: KeyboardConfig::default(),
+        }
+    }
+}
+
+impl Default for KeyboardConfig {
+    fn default() -> Self {
+        Self {
+            repeat_delay_ms: default_repeat_delay(),
+            repeat_rate_ms: default_repeat_rate(),
         }
     }
 }
@@ -452,8 +476,20 @@ fn default_bell_style() -> BellStyle {
     BellStyle::Visual
 }
 
+fn default_bell_volume() -> f32 {
+    0.5 // 50% volume
+}
+
 fn default_keybinding_mode() -> String {
     "default".to_string()
+}
+
+fn default_repeat_delay() -> u64 {
+    500 // 500ms initial delay before repeat
+}
+
+fn default_repeat_rate() -> u64 {
+    30 // 30ms between repeats (approximately 33 keys per second)
 }
 
 fn default_selection_mode() -> SelectionMode {
@@ -507,8 +543,9 @@ impl AppConfig {
     /// 3. Embedded default_config.toml
     pub fn load() -> Result<Self, ConfigError> {
         // Start with default config
-        let mut config: AppConfig = toml::from_str(DEFAULT_CONFIG)
-            .map_err(|e| ConfigError::ParseError(format!("Failed to parse default config: {}", e)))?;
+        let mut config: AppConfig = toml::from_str(DEFAULT_CONFIG).map_err(|e| {
+            ConfigError::ParseError(format!("Failed to parse default config: {}", e))
+        })?;
 
         // Try to load user config
         if let Some(user_config_path) = Self::user_config_path() {
@@ -545,11 +582,12 @@ impl AppConfig {
 
     /// Load configuration from a specific file
     pub fn load_from_file(path: &PathBuf) -> Result<Self, ConfigError> {
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+        let contents =
+            std::fs::read_to_string(path).map_err(|e| ConfigError::IoError(e.to_string()))?;
 
-        toml::from_str(&contents)
-            .map_err(|e| ConfigError::ParseError(format!("Failed to parse {}: {}", path.display(), e)))
+        toml::from_str(&contents).map_err(|e| {
+            ConfigError::ParseError(format!("Failed to parse {}: {}", path.display(), e))
+        })
     }
 
     /// Get the user config path (~/.config/agterm/config.toml)
@@ -566,12 +604,12 @@ impl AppConfig {
 
     /// Get the session file path (defaults to ~/.config/agterm/session.json)
     pub fn session_file_path(&self) -> PathBuf {
-        self.general.session.session_file
+        self.general
+            .session
+            .session_file
             .clone()
             .or_else(|| {
-                dirs::config_dir().map(|config_dir| {
-                    config_dir.join("agterm").join("session.json")
-                })
+                dirs::config_dir().map(|config_dir| config_dir.join("agterm").join("session.json"))
             })
             .unwrap_or_else(|| PathBuf::from("session.json"))
     }
@@ -597,17 +635,17 @@ impl AppConfig {
     /// Save configuration to user config path
     #[allow(dead_code)]
     pub fn save(&self) -> Result<(), ConfigError> {
-        let config_path = Self::user_config_path()
-            .ok_or_else(|| ConfigError::IoError("Could not determine user config directory".to_string()))?;
+        let config_path = Self::user_config_path().ok_or_else(|| {
+            ConfigError::IoError("Could not determine user config directory".to_string())
+        })?;
 
         // Create config directory if it doesn't exist
         if let Some(parent) = config_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| ConfigError::IoError(e.to_string()))?;
+            std::fs::create_dir_all(parent).map_err(|e| ConfigError::IoError(e.to_string()))?;
         }
 
-        let toml_string = toml::to_string_pretty(self)
-            .map_err(|e| ConfigError::SerializeError(e.to_string()))?;
+        let toml_string =
+            toml::to_string_pretty(self).map_err(|e| ConfigError::SerializeError(e.to_string()))?;
 
         std::fs::write(&config_path, toml_string)
             .map_err(|e| ConfigError::IoError(e.to_string()))?;
@@ -705,35 +743,39 @@ impl Profile {
 
     /// Load a profile by name
     pub fn load(name: &str) -> Result<Self, ConfigError> {
-        let path = Self::profile_path(name)
-            .ok_or_else(|| ConfigError::IoError("Could not determine profile directory".to_string()))?;
+        let path = Self::profile_path(name).ok_or_else(|| {
+            ConfigError::IoError("Could not determine profile directory".to_string())
+        })?;
 
         if !path.exists() {
-            return Err(ConfigError::IoError(format!("Profile '{}' not found", name)));
+            return Err(ConfigError::IoError(format!(
+                "Profile '{}' not found",
+                name
+            )));
         }
 
-        let contents = std::fs::read_to_string(&path)
-            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+        let contents =
+            std::fs::read_to_string(&path).map_err(|e| ConfigError::IoError(e.to_string()))?;
 
-        toml::from_str(&contents)
-            .map_err(|e| ConfigError::ParseError(format!("Failed to parse profile '{}': {}", name, e)))
+        toml::from_str(&contents).map_err(|e| {
+            ConfigError::ParseError(format!("Failed to parse profile '{}': {}", name, e))
+        })
     }
 
     /// Save this profile to disk
     pub fn save(&self) -> Result<(), ConfigError> {
-        let profiles_dir = Self::profiles_dir()
-            .ok_or_else(|| ConfigError::IoError("Could not determine profile directory".to_string()))?;
+        let profiles_dir = Self::profiles_dir().ok_or_else(|| {
+            ConfigError::IoError("Could not determine profile directory".to_string())
+        })?;
 
         // Create profiles directory if it doesn't exist
-        std::fs::create_dir_all(&profiles_dir)
-            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+        std::fs::create_dir_all(&profiles_dir).map_err(|e| ConfigError::IoError(e.to_string()))?;
 
         let path = profiles_dir.join(format!("{}.toml", self.name));
-        let toml_string = toml::to_string_pretty(self)
-            .map_err(|e| ConfigError::SerializeError(e.to_string()))?;
+        let toml_string =
+            toml::to_string_pretty(self).map_err(|e| ConfigError::SerializeError(e.to_string()))?;
 
-        std::fs::write(&path, toml_string)
-            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+        std::fs::write(&path, toml_string).map_err(|e| ConfigError::IoError(e.to_string()))?;
 
         tracing::info!("Saved profile '{}' to {:?}", self.name, path);
         Ok(())
@@ -741,15 +783,18 @@ impl Profile {
 
     /// Delete a profile by name
     pub fn delete(name: &str) -> Result<(), ConfigError> {
-        let path = Self::profile_path(name)
-            .ok_or_else(|| ConfigError::IoError("Could not determine profile directory".to_string()))?;
+        let path = Self::profile_path(name).ok_or_else(|| {
+            ConfigError::IoError("Could not determine profile directory".to_string())
+        })?;
 
         if !path.exists() {
-            return Err(ConfigError::IoError(format!("Profile '{}' not found", name)));
+            return Err(ConfigError::IoError(format!(
+                "Profile '{}' not found",
+                name
+            )));
         }
 
-        std::fs::remove_file(&path)
-            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+        std::fs::remove_file(&path).map_err(|e| ConfigError::IoError(e.to_string()))?;
 
         tracing::info!("Deleted profile '{}'", name);
         Ok(())
@@ -757,15 +802,16 @@ impl Profile {
 
     /// List all available profiles
     pub fn list() -> Result<Vec<String>, ConfigError> {
-        let profiles_dir = Self::profiles_dir()
-            .ok_or_else(|| ConfigError::IoError("Could not determine profile directory".to_string()))?;
+        let profiles_dir = Self::profiles_dir().ok_or_else(|| {
+            ConfigError::IoError("Could not determine profile directory".to_string())
+        })?;
 
         if !profiles_dir.exists() {
             return Ok(Vec::new());
         }
 
-        let entries = std::fs::read_dir(&profiles_dir)
-            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+        let entries =
+            std::fs::read_dir(&profiles_dir).map_err(|e| ConfigError::IoError(e.to_string()))?;
 
         let mut profiles = Vec::new();
         for entry in entries {
@@ -903,36 +949,38 @@ impl Snippet {
 
     /// Load snippets from file
     pub fn load_from_file() -> Result<Vec<Snippet>, ConfigError> {
-        let path = Self::snippets_file_path()
-            .ok_or_else(|| ConfigError::IoError("Could not determine snippets directory".to_string()))?;
+        let path = Self::snippets_file_path().ok_or_else(|| {
+            ConfigError::IoError("Could not determine snippets directory".to_string())
+        })?;
 
         if !path.exists() {
             // Return default snippets if file doesn't exist
             return Ok(Self::default_snippets());
         }
 
-        let contents = std::fs::read_to_string(&path)
-            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+        let contents =
+            std::fs::read_to_string(&path).map_err(|e| ConfigError::IoError(e.to_string()))?;
 
         #[derive(Deserialize)]
         struct SnippetsFile {
             snippets: Vec<Snippet>,
         }
 
-        let file: SnippetsFile = toml::from_str(&contents)
-            .map_err(|e| ConfigError::ParseError(format!("Failed to parse snippets.toml: {}", e)))?;
+        let file: SnippetsFile = toml::from_str(&contents).map_err(|e| {
+            ConfigError::ParseError(format!("Failed to parse snippets.toml: {}", e))
+        })?;
 
         Ok(file.snippets)
     }
 
     /// Save snippets to file
     pub fn save_to_file(snippets: &[Snippet]) -> Result<(), ConfigError> {
-        let snippets_dir = Self::snippets_dir()
-            .ok_or_else(|| ConfigError::IoError("Could not determine snippets directory".to_string()))?;
+        let snippets_dir = Self::snippets_dir().ok_or_else(|| {
+            ConfigError::IoError("Could not determine snippets directory".to_string())
+        })?;
 
         // Create config directory if it doesn't exist
-        std::fs::create_dir_all(&snippets_dir)
-            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+        std::fs::create_dir_all(&snippets_dir).map_err(|e| ConfigError::IoError(e.to_string()))?;
 
         let path = snippets_dir.join("snippets.toml");
 
@@ -945,8 +993,7 @@ impl Snippet {
         let toml_string = toml::to_string_pretty(&file)
             .map_err(|e| ConfigError::SerializeError(e.to_string()))?;
 
-        std::fs::write(&path, toml_string)
-            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+        std::fs::write(&path, toml_string).map_err(|e| ConfigError::IoError(e.to_string()))?;
 
         tracing::info!("Saved {} snippets to {:?}", snippets.len(), path);
         Ok(())
@@ -1109,8 +1156,9 @@ impl Snippet {
 
     /// Initialize snippets file with defaults if it doesn't exist
     pub fn initialize_default_file() -> Result<(), ConfigError> {
-        let path = Self::snippets_file_path()
-            .ok_or_else(|| ConfigError::IoError("Could not determine snippets directory".to_string()))?;
+        let path = Self::snippets_file_path().ok_or_else(|| {
+            ConfigError::IoError("Could not determine snippets directory".to_string())
+        })?;
 
         if !path.exists() {
             let default_snippets = Self::default_snippets();
@@ -1133,10 +1181,7 @@ impl Snippet {
 
     /// Get all unique categories
     pub fn get_categories(snippets: &[Snippet]) -> Vec<String> {
-        let mut categories: Vec<String> = snippets
-            .iter()
-            .map(|s| s.category.clone())
-            .collect();
+        let mut categories: Vec<String> = snippets.iter().map(|s| s.category.clone()).collect();
         categories.sort();
         categories.dedup();
         categories
@@ -1181,7 +1226,9 @@ mod tests {
     #[test]
     fn test_cursor_style_serde() {
         #[derive(Deserialize)]
-        struct Wrapper { v: CursorStyle }
+        struct Wrapper {
+            v: CursorStyle,
+        }
 
         assert_eq!(
             toml::from_str::<Wrapper>("v = \"block\"").unwrap().v,
@@ -1200,7 +1247,9 @@ mod tests {
     #[test]
     fn test_bell_style_serde() {
         #[derive(Deserialize)]
-        struct Wrapper { v: BellStyle }
+        struct Wrapper {
+            v: BellStyle,
+        }
 
         assert_eq!(
             toml::from_str::<Wrapper>("v = \"visual\"").unwrap().v,
@@ -1332,11 +1381,17 @@ mod tests {
         // Verify settings were applied
         assert_eq!(config.shell.program, Some("/bin/fish".to_string()));
         assert_eq!(config.shell.args, vec!["--login".to_string()]);
-        assert_eq!(config.shell.env.get("PROFILE_VAR"), Some(&"value".to_string()));
+        assert_eq!(
+            config.shell.env.get("PROFILE_VAR"),
+            Some(&"value".to_string())
+        );
         assert_eq!(config.appearance.theme, "custom_theme");
         assert_eq!(config.appearance.font_size, 18.0);
         assert_ne!(config.appearance.font_size, original_font_size);
-        assert_eq!(config.general.default_working_dir, Some(PathBuf::from("/workspace")));
+        assert_eq!(
+            config.general.default_working_dir,
+            Some(PathBuf::from("/workspace"))
+        );
     }
 
     #[test]
@@ -1601,7 +1656,9 @@ mod tests {
         struct SnippetsFile<'a> {
             snippets: &'a [Snippet],
         }
-        let file = SnippetsFile { snippets: &snippets };
+        let file = SnippetsFile {
+            snippets: &snippets,
+        };
         let toml_string = toml::to_string_pretty(&file).unwrap();
         std::fs::write(&snippets_file, toml_string).unwrap();
 

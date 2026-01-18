@@ -31,27 +31,40 @@ pub struct Metrics {
     max_samples: usize,
     /// Last render start time (for measuring render duration)
     last_render_start: Option<Instant>,
+    /// FPS history for graphing (sampled every second)
+    fps_history: VecDeque<f64>,
+    /// Last FPS sample timestamp
+    last_fps_sample: Instant,
+    /// Memory usage history in MB (sampled every second)
+    memory_history: VecDeque<f64>,
+    /// PTY I/O rate history in bytes/sec (sampled every second)
+    pty_io_history: VecDeque<f64>,
 }
 
 impl Default for Metrics {
     fn default() -> Self {
-        Self::new(100)
+        Self::new(100, 60) // 100 samples, 60 seconds of history
     }
 }
 
 #[allow(dead_code)]
 impl Metrics {
-    /// Create a new metrics collector with the specified sample size
-    pub fn new(max_samples: usize) -> Self {
+    /// Create a new metrics collector with the specified sample size and history length
+    pub fn new(max_samples: usize, history_seconds: usize) -> Self {
+        let now = Instant::now();
         Self {
             frame_times: VecDeque::with_capacity(max_samples),
-            last_frame: Instant::now(),
+            last_frame: now,
             message_times: VecDeque::with_capacity(max_samples),
             render_times: VecDeque::with_capacity(max_samples),
             pty_bytes_read: VecDeque::with_capacity(max_samples),
             pty_bytes_written: VecDeque::with_capacity(max_samples),
             max_samples,
             last_render_start: None,
+            fps_history: VecDeque::with_capacity(history_seconds),
+            last_fps_sample: now,
+            memory_history: VecDeque::with_capacity(history_seconds),
+            pty_io_history: VecDeque::with_capacity(history_seconds),
         }
     }
 
@@ -65,6 +78,16 @@ impl Metrics {
             self.frame_times.pop_front();
         }
         self.frame_times.push_back(frame_time);
+
+        // Sample FPS history every second
+        if now.duration_since(self.last_fps_sample).as_secs() >= 1 {
+            let current_fps = self.fps();
+            if self.fps_history.len() >= self.fps_history.capacity() {
+                self.fps_history.pop_front();
+            }
+            self.fps_history.push_back(current_fps);
+            self.last_fps_sample = now;
+        }
     }
 
     /// Record message processing time
@@ -173,14 +196,50 @@ impl Metrics {
         }
     }
 
+    /// Update memory usage history (call periodically, e.g., every second)
+    pub fn sample_memory(&mut self, memory_mb: f64) {
+        if self.memory_history.len() >= self.memory_history.capacity() {
+            self.memory_history.pop_front();
+        }
+        self.memory_history.push_back(memory_mb);
+    }
+
+    /// Update PTY I/O rate history (call periodically, e.g., every second)
+    pub fn sample_pty_io(&mut self, bytes_per_sec: f64) {
+        if self.pty_io_history.len() >= self.pty_io_history.capacity() {
+            self.pty_io_history.pop_front();
+        }
+        self.pty_io_history.push_back(bytes_per_sec);
+    }
+
+    /// Get FPS history for graphing
+    pub fn fps_history(&self) -> &VecDeque<f64> {
+        &self.fps_history
+    }
+
+    /// Get memory history for graphing
+    pub fn memory_history(&self) -> &VecDeque<f64> {
+        &self.memory_history
+    }
+
+    /// Get PTY I/O history for graphing
+    pub fn pty_io_history(&self) -> &VecDeque<f64> {
+        &self.pty_io_history
+    }
+
     /// Reset all metrics
     pub fn reset(&mut self) {
+        let now = Instant::now();
         self.frame_times.clear();
         self.message_times.clear();
         self.render_times.clear();
         self.pty_bytes_read.clear();
         self.pty_bytes_written.clear();
-        self.last_frame = Instant::now();
+        self.fps_history.clear();
+        self.memory_history.clear();
+        self.pty_io_history.clear();
+        self.last_frame = now;
+        self.last_fps_sample = now;
         self.last_render_start = None;
     }
 }
@@ -259,7 +318,7 @@ mod tests {
 
     #[test]
     fn test_metrics_fps() {
-        let mut metrics = Metrics::new(10);
+        let mut metrics = Metrics::new(10, 60);
 
         // Simulate frames at 60 FPS (16.67ms per frame)
         for _ in 0..10 {
@@ -272,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_metrics_pty_stats() {
-        let mut metrics = Metrics::new(10);
+        let mut metrics = Metrics::new(10, 60);
 
         metrics.record_pty_read(100);
         metrics.record_pty_read(200);

@@ -113,7 +113,8 @@ impl EnvironmentInfo {
         if let Ok(cgroup) = std::fs::read_to_string("/proc/self/cgroup") {
             if cgroup.contains("docker")
                 || cgroup.contains("kubepods")
-                || cgroup.contains("containerd") {
+                || cgroup.contains("containerd")
+            {
                 return true;
             }
         }
@@ -208,7 +209,8 @@ impl EnvironmentInfo {
         if term_type.starts_with("xterm")
             || term_type.starts_with("screen")
             || term_type.starts_with("tmux")
-            || term_type.starts_with("rxvt") {
+            || term_type.starts_with("rxvt")
+        {
             return true;
         }
 
@@ -232,7 +234,8 @@ impl EnvironmentInfo {
         }
 
         if let Ok(lc_ctype) = env::var("LC_CTYPE") {
-            if lc_ctype.to_lowercase().contains("utf-8") || lc_ctype.to_lowercase().contains("utf8") {
+            if lc_ctype.to_lowercase().contains("utf-8") || lc_ctype.to_lowercase().contains("utf8")
+            {
                 return true;
             }
         }

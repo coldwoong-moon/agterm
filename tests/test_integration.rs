@@ -8,9 +8,9 @@
 //! - Clipboard (OSC 52) base64 encoding
 //! - Tab management (creation, closing, cloning)
 
-use agterm::config::{AppConfig, CursorStyle, BellStyle, SelectionMode};
-use agterm::terminal::screen::{TerminalScreen, MouseMode, MouseEncoding};
-use agterm::theme::{Theme, ColorDef, ThemeVariant};
+use agterm::config::{AppConfig, BellStyle, CursorStyle, SelectionMode};
+use agterm::terminal::screen::{MouseEncoding, MouseMode, TerminalScreen};
+use agterm::theme::{ColorDef, Theme, ThemeVariant};
 use iced::Color;
 
 // ============================================================================
@@ -137,7 +137,9 @@ fn test_theme_by_name_lookup() {
 fn test_theme_variant_serialization() {
     // Test deserialization from TOML
     #[derive(serde::Deserialize)]
-    struct Wrapper { variant: ThemeVariant }
+    struct Wrapper {
+        variant: ThemeVariant,
+    }
 
     let dark: Wrapper = toml::from_str("variant = \"dark\"").unwrap();
     let light: Wrapper = toml::from_str("variant = \"light\"").unwrap();
@@ -217,7 +219,9 @@ fn test_config_mouse_defaults() {
 fn test_config_cursor_style_serialization() {
     // Test deserialization from TOML (more practical than serializing enums directly)
     #[derive(serde::Deserialize)]
-    struct Wrapper { cursor_style: CursorStyle }
+    struct Wrapper {
+        cursor_style: CursorStyle,
+    }
 
     let block: Wrapper = toml::from_str("cursor_style = \"block\"").unwrap();
     let underline: Wrapper = toml::from_str("cursor_style = \"underline\"").unwrap();
@@ -232,7 +236,9 @@ fn test_config_cursor_style_serialization() {
 fn test_config_bell_style_serialization() {
     // Test deserialization from TOML
     #[derive(serde::Deserialize)]
-    struct Wrapper { bell_style: BellStyle }
+    struct Wrapper {
+        bell_style: BellStyle,
+    }
 
     let visual: Wrapper = toml::from_str("bell_style = \"visual\"").unwrap();
     let sound: Wrapper = toml::from_str("bell_style = \"sound\"").unwrap();
@@ -249,7 +255,9 @@ fn test_config_bell_style_serialization() {
 fn test_config_selection_mode_serialization() {
     // Test deserialization from TOML
     #[derive(serde::Deserialize)]
-    struct Wrapper { selection_mode: SelectionMode }
+    struct Wrapper {
+        selection_mode: SelectionMode,
+    }
 
     let char_mode: Wrapper = toml::from_str("selection_mode = \"character\"").unwrap();
     let word_mode: Wrapper = toml::from_str("selection_mode = \"word\"").unwrap();
@@ -268,7 +276,10 @@ fn test_config_toml_roundtrip() {
 
     assert_eq!(parsed.general.app_name, config.general.app_name);
     assert_eq!(parsed.appearance.font_size, config.appearance.font_size);
-    assert_eq!(parsed.terminal.scrollback_lines, config.terminal.scrollback_lines);
+    assert_eq!(
+        parsed.terminal.scrollback_lines,
+        config.terminal.scrollback_lines
+    );
     assert_eq!(parsed.pty.default_cols, config.pty.default_cols);
 }
 
@@ -629,8 +640,8 @@ fn test_osc52_clipboard_empty_data() {
     // Accept any of: None (cleared), Some("") (empty), or Some("SGVsbG8=") (kept)
     assert!(
         clipboard_data.is_none()
-        || clipboard_data == Some("")
-        || clipboard_data == Some("SGVsbG8=")
+            || clipboard_data == Some("")
+            || clipboard_data == Some("SGVsbG8=")
     );
 }
 
@@ -654,9 +665,9 @@ fn test_osc52_clipboard_selection_types() {
 
     // Test different selection types (c=clipboard, p=primary, s=secondary)
     let selections = vec![
-        ("c", "SGVsbG8="),  // clipboard
-        ("p", "V29ybGQ="),  // primary
-        ("s", "VGVzdA=="),  // secondary
+        ("c", "SGVsbG8="), // clipboard
+        ("p", "V29ybGQ="), // primary
+        ("s", "VGVzdA=="), // secondary
     ];
 
     for (sel_type, data) in selections {
@@ -717,9 +728,24 @@ fn test_multiple_terminal_screens() {
     let lines2 = screen2.get_all_lines();
     let lines3 = screen3.get_all_lines();
 
-    let text1: String = lines1[0].iter().filter(|c| !c.placeholder).map(|c| c.c).take(13).collect();
-    let text2: String = lines2[0].iter().filter(|c| !c.placeholder).map(|c| c.c).take(13).collect();
-    let text3: String = lines3[0].iter().filter(|c| !c.placeholder).map(|c| c.c).take(13).collect();
+    let text1: String = lines1[0]
+        .iter()
+        .filter(|c| !c.placeholder)
+        .map(|c| c.c)
+        .take(13)
+        .collect();
+    let text2: String = lines2[0]
+        .iter()
+        .filter(|c| !c.placeholder)
+        .map(|c| c.c)
+        .take(13)
+        .collect();
+    let text3: String = lines3[0]
+        .iter()
+        .filter(|c| !c.placeholder)
+        .map(|c| c.c)
+        .take(13)
+        .collect();
 
     assert_eq!(text1.trim(), "Tab 1 content");
     assert_eq!(text2.trim(), "Tab 2 content");
@@ -896,7 +922,10 @@ fn test_config_with_terminal_initialization() {
         config.pty.default_rows as usize,
     );
 
-    let (rows, cols) = (config.pty.default_rows as usize, config.pty.default_cols as usize);
+    let (rows, cols) = (
+        config.pty.default_rows as usize,
+        config.pty.default_cols as usize,
+    );
     let lines = screen.get_all_lines();
 
     // Screen should be initialized with config dimensions
@@ -959,11 +988,12 @@ mod base64 {
     pub fn decode(encoded: &str) -> Result<Vec<u8>, String> {
         use std::collections::HashMap;
 
-        let alphabet: HashMap<char, u8> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-            .chars()
-            .enumerate()
-            .map(|(i, c)| (c, i as u8))
-            .collect();
+        let alphabet: HashMap<char, u8> =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+                .chars()
+                .enumerate()
+                .map(|(i, c)| (c, i as u8))
+                .collect();
 
         let mut result = Vec::new();
         let chars: Vec<char> = encoded.chars().filter(|c| *c != '=').collect();

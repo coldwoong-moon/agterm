@@ -109,10 +109,7 @@ fn bench_sgr_sequences(c: &mut Criterion) {
         ("bg_color_basic", b"\x1b[41mRed BG\x1b[0m".to_vec()),
         ("fg_color_256", b"\x1b[38;5;196mBright Red\x1b[0m".to_vec()),
         ("bg_color_256", b"\x1b[48;5;21mBlue BG\x1b[0m".to_vec()),
-        (
-            "fg_color_rgb",
-            b"\x1b[38;2;255;0;0mRGB Red\x1b[0m".to_vec(),
-        ),
+        ("fg_color_rgb", b"\x1b[38;2;255;0;0mRGB Red\x1b[0m".to_vec()),
         (
             "bg_color_rgb",
             b"\x1b[48;2;0;0;255mRGB Blue BG\x1b[0m".to_vec(),
@@ -233,8 +230,7 @@ fn bench_mixed_content(c: &mut Criterion) {
         ),
         (
             "progress_bar",
-            b"\rDownloading [===========>           ] 55%"
-                .to_vec(),
+            b"\rDownloading [===========>           ] 55%".to_vec(),
         ),
         (
             "vim_screen",
@@ -338,7 +334,10 @@ fn bench_hyperlinks(c: &mut Criterion) {
             screen.process(b"\x1b]8;;https://example.com\x1b\\Link Text\x1b]8;;\x1b\\");
             // Multiple hyperlinks
             for i in 0..10 {
-                let url = format!("\x1b]8;;https://example.com/{}\x1b\\Link{}\x1b]8;;\x1b\\", i, i);
+                let url = format!(
+                    "\x1b]8;;https://example.com/{}\x1b\\Link{}\x1b]8;;\x1b\\",
+                    i, i
+                );
                 screen.process(url.as_bytes());
             }
         });

@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 mod config;
 mod debug;
 mod logging;
+mod sound;
 mod terminal;
 mod terminal_canvas;
 
@@ -362,6 +363,8 @@ struct AgTerm {
     current_match_index: Option<usize>,
     /// Environment information (SSH, container, terminal capabilities, etc.)
     env_info: EnvironmentInfo,
+    /// Bell sound player
+    bell_sound: sound::BellSound,
 }
 
 impl Default for AgTerm {
@@ -491,6 +494,7 @@ impl Default for AgTerm {
             search_matches: Vec::new(),
             current_match_index: None,
             env_info,
+            bell_sound: sound::BellSound::new(),
         }
     }
 }
@@ -713,6 +717,26 @@ impl AgTerm {
                     .map(|s| s.to_string())
             })
             .unwrap_or_else(|| "shell".to_string())
+    }
+
+    /// Play bell sound based on configuration
+    fn play_bell_sound(&self) {
+        let config = get_config();
+
+        // Check if bell is enabled
+        if !config.terminal.bell_enabled {
+            return;
+        }
+
+        // Play sound based on bell_style
+        match config.terminal.bell_style {
+            config::BellStyle::Sound | config::BellStyle::Both => {
+                self.bell_sound.play(config.terminal.bell_volume);
+            }
+            _ => {
+                // Visual or None - don't play sound
+            }
+        }
     }
 
     /// Save current session state to file
@@ -1403,6 +1427,7 @@ impl AgTerm {
                 };
 
                 // Poll PTY output only for active tab
+                let mut active_bell_triggered = false;
                 if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                     if let Some(session_id) = &tab.session_id {
                         if let Ok(data) = self.pty_manager.read(session_id) {
@@ -1416,9 +1441,9 @@ impl AgTerm {
                                 // Process bytes through VTE parser
                                 tab.screen.process(&data);
 
-                                // Check for bell (BEL character) and clear the active tab's bell
-                                // (active tab clears immediately, background tabs keep it)
-                                let _ = tab.screen.take_bell_triggered();
+                                // Check for bell (BEL character) in active tab
+                                // Store result to play sound after releasing the borrow
+                                active_bell_triggered = tab.screen.take_bell_triggered();
 
                                 // Update tab title from OSC sequences (OSC 0 or OSC 2)
                                 if let Some(window_title) = tab.screen.window_title() {
@@ -1466,11 +1491,18 @@ impl AgTerm {
                                 tab.canvas_state
                                     .scroll_to_bottom(tab.parsed_line_cache.len(), self.font_size);
                             }
+
                         }
                     }
                 }
 
+                // Play bell sound if triggered in active tab (after releasing tab borrow)
+                if active_bell_triggered {
+                    self.play_bell_sound();
+                }
+
                 // Check background tabs for bell notifications
+                let mut background_bell_triggered = false;
                 for (i, tab) in self.tabs.iter_mut().enumerate() {
                     if i == self.active_tab {
                         continue; // Skip active tab (already processed above)
@@ -1479,7 +1511,13 @@ impl AgTerm {
                     // Check if bell was triggered in background tab
                     if tab.screen.take_bell_triggered() {
                         tab.bell_pending = true;
+                        background_bell_triggered = true;
                     }
+                }
+
+                // Play bell sound for background tabs (after releasing tabs borrow)
+                if background_bell_triggered {
+                    self.play_bell_sound();
                 }
 
                 // Check for URL clicks
@@ -2016,6 +2054,7 @@ mod tests {
             search_matches: Vec::new(),
             current_match_index: None,
             env_info: EnvironmentInfo::detect(),
+            bell_sound: sound::BellSound::new(),
         }
     }
 
