@@ -19,6 +19,7 @@ mod history;
 mod keybind;
 mod logging;
 mod macros;
+mod mouse_actions;
 mod notification;
 mod session;
 mod shell;

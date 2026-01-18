@@ -29,7 +29,12 @@
 //! - Bookmark system for frequently used commands
 //! - Command alias system with shell integration
 //! - Statistics dashboard for usage analytics and productivity tracking
+//! - Shell integration for bash, zsh, and fish with OSC support
+//! - Accessibility features with WCAG compliance and screen reader support
+//! - Plugin API for extensibility with permission-based security
+//! - Internationalization (i18n) with multi-language support
 
+pub mod accessibility;
 pub mod aliases;
 pub mod annotations;
 pub mod automation;
@@ -46,25 +51,32 @@ pub mod env_manager;
 pub mod filters;
 pub mod highlighting;
 pub mod history;
+pub mod i18n;
 pub mod image_protocol;
 pub mod keybind;
 pub mod link_handler;
 pub mod logging;
 pub mod macros;
 pub mod markdown;
+pub mod mouse_actions;
 pub mod notification;
+pub mod performance_monitor;
 pub mod pipeline;
+pub mod plugin_api;
 pub mod profiles;
+pub mod quick_actions;
 pub mod recording;
 pub mod render_cache;
 pub mod session;
 pub mod session_tags;
 pub mod shell;
+pub mod shell_integration;
 pub mod snippets;
 pub mod sound;
 pub mod splits;
 pub mod ssh;
 pub mod statistics;
+pub mod tab_manager;
 pub mod terminal;
 pub mod timer;
 
