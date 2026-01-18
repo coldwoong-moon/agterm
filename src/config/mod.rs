@@ -70,6 +70,10 @@ pub struct AppConfig {
     pub notification: NotificationConfig,
     #[serde(default)]
     pub status_bar: StatusBarConfig,
+    #[serde(default)]
+    pub completion: CompletionConfig,
+    #[serde(default)]
+    pub history: HistoryConfig,
 }
 
 /// General application settings
@@ -1229,6 +1233,63 @@ impl Default for StatusBarConfig {
     }
 }
 
+/// Completion (autocomplete) configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_max_items")]
+    pub max_items: usize,
+    #[serde(default = "default_false")]
+    pub include_hidden: bool,
+}
+
+impl Default for CompletionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_items: default_max_items(),
+            include_hidden: false,
+        }
+    }
+}
+
+/// Command history configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryConfig {
+    /// Enable command history
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Maximum number of history entries to keep
+    #[serde(default = "default_history_max_size")]
+    pub max_size: usize,
+    /// Save history to file
+    #[serde(default = "default_true")]
+    pub save_to_file: bool,
+    /// Path to history file (None = use default: ~/.config/agterm/history)
+    #[serde(default)]
+    pub file_path: Option<PathBuf>,
+    /// Ignore consecutive duplicate commands
+    #[serde(default = "default_true")]
+    pub ignore_duplicates: bool,
+    /// Ignore commands starting with space
+    #[serde(default = "default_true")]
+    pub ignore_space: bool,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_size: default_history_max_size(),
+            save_to_file: true,
+            file_path: None,
+            ignore_duplicates: true,
+            ignore_space: true,
+        }
+    }
+}
+
 // ============================================================================
 // Default value functions
 // ============================================================================
@@ -1365,6 +1426,14 @@ fn default_false() -> bool {
     false
 }
 
+fn default_max_items() -> usize {
+    20
+}
+
+fn default_history_max_size() -> usize {
+    10000
+}
+
 fn default_term() -> String {
     "xterm-256color".to_string()
 }
@@ -1481,6 +1550,8 @@ impl AppConfig {
             debug: overlay.debug,
             notification: overlay.notification,
             status_bar: overlay.status_bar,
+            completion: overlay.completion,
+            history: overlay.history,
         }
     }
 
@@ -1522,6 +1593,8 @@ impl Default for AppConfig {
             debug: DebugConfig::default(),
             notification: NotificationConfig::default(),
             status_bar: StatusBarConfig::default(),
+            completion: CompletionConfig::default(),
+            history: HistoryConfig::default(),
         })
     }
 }

@@ -11,8 +11,11 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod completion;
 mod config;
 mod debug;
+mod history;
+mod keybind;
 mod logging;
 mod notification;
 mod shell;
@@ -22,14 +25,18 @@ mod terminal_canvas;
 mod theme;
 mod ui;
 
+use completion::{CompletionEngine, CompletionItem};
 use config::AppConfig;
 use debug::panel::TerminalState;
 use debug::{DebugPanel, DebugPanelMessage};
+use history::HistoryManager;
+use keybind::{Action as KeyAction, KeyBindings};
 use logging::{LogBuffer, LoggingConfig};
 use notification::NotificationManager;
 use shell::ShellInfo;
 use terminal_canvas::{CursorState, CursorStyle, TerminalCanvas, TerminalCanvasState};
 use theme::Theme;
+use ui::palette::{CommandPalette, PaletteMessage};
 
 use terminal::env::EnvironmentInfo;
 use terminal::pty::PtyManager;
@@ -430,6 +437,18 @@ struct AgTerm {
     current_modifiers: Modifiers,
     /// Desktop notification manager
     notification_manager: NotificationManager,
+    /// Key bindings manager
+    keybindings: KeyBindings,
+    /// Command palette
+    command_palette: CommandPalette,
+    /// Command history manager
+    history_manager: HistoryManager,
+    /// Completion engine
+    completion_engine: CompletionEngine,
+    /// Completion popup state
+    completion_items: Vec<CompletionItem>,
+    completion_selected: usize,
+    completion_visible: bool,
 }
 
 impl Default for AgTerm {
@@ -554,6 +573,25 @@ impl Default for AgTerm {
         // Initialize notification manager
         let notification_manager = NotificationManager::new(config.notification.clone());
 
+        // Initialize key bindings from config
+        let keybindings = KeyBindings::from_config(&config.keybindings.bindings);
+
+        // Initialize history manager
+        let mut history_manager = HistoryManager::with_config(
+            config.history.max_size,
+            config.history.ignore_duplicates,
+            config.history.ignore_space,
+        );
+        if config.history.enabled && config.history.save_to_file {
+            let history_path = config.history.file_path.clone().unwrap_or_else(|| {
+                let config_dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+                config_dir.join("agterm").join("history")
+            });
+            if let Err(e) = history_manager.load_from_file(history_path) {
+                tracing::warn!("Failed to load history: {}", e);
+            }
+        }
+
         tracing::info!("AgTerm application initialized");
         Self {
             tabs,
@@ -580,6 +618,13 @@ impl Default for AgTerm {
             current_theme,
             current_modifiers: Modifiers::default(),
             notification_manager,
+            keybindings,
+            command_palette: CommandPalette::with_default_commands(),
+            history_manager,
+            completion_engine: CompletionEngine::new(),
+            completion_items: Vec::new(),
+            completion_selected: 0,
+            completion_visible: false,
         }
     }
 }
@@ -588,6 +633,12 @@ impl Drop for AgTerm {
     fn drop(&mut self) {
         // Save session state when application exits
         self.save_session();
+
+        // Save command history
+        if let Err(e) = self.history_manager.save_to_file() {
+            tracing::warn!("Failed to save history: {}", e);
+        }
+
         tracing::info!("AgTerm shutting down");
     }
 }
@@ -798,6 +849,9 @@ enum Message {
     #[allow(dead_code)]
     DebugPanelMessage(DebugPanelMessage),
 
+    // Command palette
+    PaletteMessage(PaletteMessage),
+
     // Font size adjustment
     IncreaseFontSize,
     DecreaseFontSize,
@@ -825,6 +879,21 @@ enum Message {
     TabRenameInput(String),
     TabRenameSubmit,
     TabRenameCancel,
+
+    // History search (Ctrl+R)
+    StartHistorySearch,
+    UpdateHistorySearch(String),
+    HistorySearchNext,
+    HistorySearchPrev,
+    EndHistorySearch,
+    CancelHistorySearch,
+
+    // Completion (Tab autocomplete)
+    TriggerCompletion,
+    CompletionNext,
+    CompletionPrev,
+    CompletionSelect,
+    CompletionCancel,
 }
 
 impl From<DebugPanelMessage> for Message {
@@ -1204,6 +1273,11 @@ impl AgTerm {
             }
 
             Message::RawInputChanged(new_input) => {
+                // If in history search mode, update search query instead
+                if self.history_manager.is_searching() {
+                    return self.update(Message::UpdateHistorySearch(new_input));
+                }
+
                 // Handle text input in Raw mode (for IME/Korean support)
                 if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                     let old_len = tab.raw_input.chars().count();
@@ -1225,21 +1299,124 @@ impl AgTerm {
                     }
                     tab.raw_input = new_input;
                 }
+
+                // Hide completion on input change
+                if self.completion_visible {
+                    self.completion_visible = false;
+                    self.completion_items.clear();
+                }
+
                 Task::none()
             }
 
             Message::RawInputSubmit => {
                 // Enter key in Raw mode - send newline and clear input
                 if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    // Add command to completion history before sending
+                    if !tab.raw_input.trim().is_empty() {
+                        self.completion_engine.add_to_history(&tab.raw_input);
+                    }
+
                     if let Some(session_id) = &tab.session_id {
                         let _ = self.pty_manager.write(session_id, b"\r");
                     }
                     tab.raw_input.clear();
                 }
+
+                // Hide completion if visible
+                self.completion_visible = false;
+                self.completion_items.clear();
+
                 text_input::focus(raw_input_id())
             }
 
             Message::KeyPressed(key, modifiers) => {
+                // If palette is visible, handle its special keys first
+                if self.command_palette.is_visible() {
+                    match key.as_ref() {
+                        Key::Named(keyboard::key::Named::Escape) => {
+                            return self.update(Message::PaletteMessage(
+                                ui::palette::PaletteMessage::Close,
+                            ));
+                        }
+                        Key::Named(keyboard::key::Named::ArrowUp) => {
+                            return self.update(Message::PaletteMessage(
+                                ui::palette::PaletteMessage::Up,
+                            ));
+                        }
+                        Key::Named(keyboard::key::Named::ArrowDown) => {
+                            return self.update(Message::PaletteMessage(
+                                ui::palette::PaletteMessage::Down,
+                            ));
+                        }
+                        Key::Named(keyboard::key::Named::Enter) => {
+                            return self.update(Message::PaletteMessage(
+                                ui::palette::PaletteMessage::Execute,
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Handle Ctrl+R: Start reverse history search
+                if modifiers.control() && matches!(key.as_ref(), Key::Character("r")) {
+                    if self.history_manager.is_searching() {
+                        // Already searching, move to next match
+                        return self.update(Message::HistorySearchNext);
+                    } else {
+                        // Start new search
+                        return self.update(Message::StartHistorySearch);
+                    }
+                }
+
+                // If in history search mode, handle search-specific keys
+                if self.history_manager.is_searching() {
+                    match key.as_ref() {
+                        Key::Named(keyboard::key::Named::Escape) => {
+                            return self.update(Message::CancelHistorySearch);
+                        }
+                        Key::Named(keyboard::key::Named::Enter) => {
+                            return self.update(Message::EndHistorySearch);
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Handle Tab: Trigger completion
+                if matches!(key.as_ref(), Key::Named(keyboard::key::Named::Tab)) && !modifiers.shift() {
+                    if self.completion_visible {
+                        return self.update(Message::CompletionNext);
+                    } else {
+                        return self.update(Message::TriggerCompletion);
+                    }
+                }
+
+                // Handle Shift+Tab: Previous completion
+                if matches!(key.as_ref(), Key::Named(keyboard::key::Named::Tab)) && modifiers.shift() {
+                    if self.completion_visible {
+                        return self.update(Message::CompletionPrev);
+                    }
+                }
+
+                // If completion is visible, handle navigation keys
+                if self.completion_visible {
+                    match key.as_ref() {
+                        Key::Named(keyboard::key::Named::Escape) => {
+                            return self.update(Message::CompletionCancel);
+                        }
+                        Key::Named(keyboard::key::Named::ArrowUp) => {
+                            return self.update(Message::CompletionPrev);
+                        }
+                        Key::Named(keyboard::key::Named::ArrowDown) => {
+                            return self.update(Message::CompletionNext);
+                        }
+                        Key::Named(keyboard::key::Named::Enter) => {
+                            return self.update(Message::CompletionSelect);
+                        }
+                        _ => {}
+                    }
+                }
+
                 // Handle Cmd+Shift+C: Force clipboard copy
                 if modifiers.command()
                     && modifiers.shift()
@@ -1270,6 +1447,16 @@ impl AgTerm {
                     && matches!(key.as_ref(), Key::Character("h"))
                 {
                     return self.update(Message::SplitHorizontal);
+                }
+
+                // Handle Cmd+Shift+P: Open command palette
+                if modifiers.command()
+                    && modifiers.shift()
+                    && matches!(key.as_ref(), Key::Character("p"))
+                {
+                    return self.update(Message::PaletteMessage(
+                        ui::palette::PaletteMessage::Open,
+                    ));
                 }
 
                 // Handle Cmd+Shift+| (pipe): Split vertical
@@ -1567,6 +1754,52 @@ impl AgTerm {
 
             Message::DebugPanelMessage(msg) => {
                 self.debug_panel.update(msg);
+                Task::none()
+            }
+
+            Message::PaletteMessage(msg) => {
+                if let Some(command_id) = self.command_palette.update(msg) {
+                    // Execute the selected command by dispatching appropriate message
+                    match command_id.as_str() {
+                        // Tab management
+                        "new_tab" => return self.update(Message::NewTab),
+                        "close_tab" => return self.update(Message::CloseCurrentTab),
+                        "duplicate_tab" => return self.update(Message::DuplicateTab),
+                        "next_tab" => return self.update(Message::NextTab),
+                        "prev_tab" => return self.update(Message::PrevTab),
+                        // Pane management
+                        "split_horizontal" => return self.update(Message::SplitHorizontal),
+                        "split_vertical" => return self.update(Message::SplitVertical),
+                        "close_pane" => return self.update(Message::ClosePane),
+                        "next_pane" => return self.update(Message::NextPane),
+                        "prev_pane" => return self.update(Message::PrevPane),
+                        // "zoom_pane" => return self.update(Message::ZoomPane), // TODO: implement
+                        // View
+                        "toggle_debug" => return self.update(Message::ToggleDebugPanel),
+                        "clear_screen" => return self.update(Message::ClearScreen),
+                        "scroll_to_top" => return self.update(Message::ScrollToTop),
+                        "scroll_to_bottom" => return self.update(Message::ScrollToBottom),
+                        // Font
+                        "increase_font" => return self.update(Message::IncreaseFontSize),
+                        "decrease_font" => return self.update(Message::DecreaseFontSize),
+                        "reset_font" => return self.update(Message::ResetFontSize),
+                        // Theme
+                        "theme_warp" => return self.update(Message::SwitchTheme("warp".to_string())),
+                        "theme_dracula" => {
+                            return self.update(Message::SwitchTheme("dracula".to_string()))
+                        }
+                        "theme_nord" => return self.update(Message::SwitchTheme("nord".to_string())),
+                        "theme_solarized" => {
+                            return self.update(Message::SwitchTheme("solarized".to_string()))
+                        }
+                        // Clipboard
+                        "copy" => return self.update(Message::CopySelection),
+                        "paste" => return iced::clipboard::read().map(Message::ClipboardContent),
+                        _ => {
+                            tracing::warn!("Unknown command palette ID: {}", command_id);
+                        }
+                    }
+                }
                 Task::none()
             }
 
@@ -1927,6 +2160,114 @@ impl AgTerm {
                 self.tab_rename_input.clear();
                 Task::none()
             }
+
+            Message::StartHistorySearch => {
+                self.history_manager.start_reverse_search();
+                tracing::debug!("Started history search mode");
+                Task::none()
+            }
+
+            Message::UpdateHistorySearch(query) => {
+                self.history_manager.update_search(&query);
+                tracing::debug!(
+                    "Updated history search: query='{}', {} matches",
+                    query,
+                    self.history_manager.search_result_count()
+                );
+                Task::none()
+            }
+
+            Message::HistorySearchNext => {
+                self.history_manager.next_match();
+                tracing::debug!("Moved to next history match");
+                Task::none()
+            }
+
+            Message::HistorySearchPrev => {
+                self.history_manager.prev_match();
+                tracing::debug!("Moved to previous history match");
+                Task::none()
+            }
+
+            Message::EndHistorySearch => {
+                if let Some(command) = self.history_manager.end_search() {
+                    if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                        tab.raw_input = command.clone();
+                        tracing::debug!("Selected history command: {}", command);
+                    }
+                }
+                Task::none()
+            }
+
+            Message::CancelHistorySearch => {
+                self.history_manager.cancel_search();
+                tracing::debug!("Cancelled history search");
+                Task::none()
+            }
+
+            // Completion messages
+            Message::TriggerCompletion => {
+                // Trigger tab completion
+                let config = get_config();
+                if config.completion.enabled {
+                    if let Some(tab) = self.tabs.get(self.active_tab) {
+                        let input = &tab.raw_input;
+                        let cwd = &tab.cwd;
+
+                        let mut items = self.completion_engine.complete(input, cwd);
+
+                        // Limit items based on config
+                        if items.len() > config.completion.max_items {
+                            items.truncate(config.completion.max_items);
+                        }
+
+                        self.completion_items = items;
+                        if !self.completion_items.is_empty() {
+                            self.completion_visible = true;
+                            self.completion_selected = 0;
+                            tracing::debug!("Completion triggered: {} items", self.completion_items.len());
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::CompletionNext => {
+                if self.completion_visible && !self.completion_items.is_empty() {
+                    self.completion_selected = (self.completion_selected + 1) % self.completion_items.len();
+                }
+                Task::none()
+            }
+
+            Message::CompletionPrev => {
+                if self.completion_visible && !self.completion_items.is_empty() {
+                    if self.completion_selected == 0 {
+                        self.completion_selected = self.completion_items.len() - 1;
+                    } else {
+                        self.completion_selected -= 1;
+                    }
+                }
+                Task::none()
+            }
+
+            Message::CompletionSelect => {
+                if self.completion_visible && self.completion_selected < self.completion_items.len() {
+                    let completion = &self.completion_items[self.completion_selected];
+                    if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                        tab.raw_input = completion.text.clone();
+                    }
+                    self.completion_visible = false;
+                    self.completion_items.clear();
+                }
+                Task::none()
+            }
+
+            Message::CompletionCancel => {
+                self.completion_visible = false;
+                self.completion_items.clear();
+                self.completion_selected = 0;
+                Task::none()
+            }
         }
     }
 
@@ -1980,7 +2321,7 @@ impl AgTerm {
         };
 
         // Add bell flash overlay if active
-        let final_content = if self.bell_flash_active {
+        let with_flash = if self.bell_flash_active {
             let config = get_config();
 
             // Calculate flash opacity with fade-out animation
@@ -2013,6 +2354,17 @@ impl AgTerm {
             stack![main_content, flash_overlay].into()
         } else {
             main_content
+        };
+
+        // Add command palette overlay if visible
+        let final_content = if self.command_palette.is_visible() {
+            let palette_view: Element<Message> = self
+                .command_palette
+                .view()
+                .map(Message::PaletteMessage);
+            stack![with_flash, palette_view].into()
+        } else {
+            with_flash
         };
 
         container(final_content)
@@ -2452,6 +2804,13 @@ mod tests {
             current_theme: theme::Theme::warp_dark(),
             current_modifiers: Modifiers::default(),
             notification_manager: NotificationManager::new(config::NotificationConfig::default()),
+            keybindings: KeyBindings::default(),
+            command_palette: CommandPalette::with_default_commands(),
+            history_manager: HistoryManager::new(1000),
+            completion_engine: CompletionEngine::new(),
+            completion_items: Vec::new(),
+            completion_selected: 0,
+            completion_visible: false,
         }
     }
 

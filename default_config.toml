@@ -125,12 +125,32 @@ repeat_rate_ms = 30              # Interval between repeats (ms) - 30ms ≈ 33 k
 # - new_tab, close_tab, next_tab, prev_tab, duplicate_tab
 # - select_tab_1 through select_tab_9
 # - force_copy, paste, force_paste
-# - clear_screen, scroll_to_top, scroll_to_bottom
+# - clear_screen, clear_scrollback, scroll_to_top, scroll_to_bottom
+# - scroll_page_up, scroll_page_down, scroll_up, scroll_down
 # - increase_font_size, decrease_font_size, reset_font_size
-# - toggle_debug_panel
+# - toggle_debug_panel, command_palette, reverse_search
 # - split_horizontal, split_vertical
 #
 # Available modifiers: ctrl, shift, alt, cmd
+#
+# Example custom bindings:
+# [[bindings]]
+# key = "k"
+# modifiers = { ctrl = true }
+# action = "clear_scrollback"
+# description = "Clear scrollback buffer"
+#
+# [[bindings]]
+# key = "r"
+# modifiers = { ctrl = true }
+# action = "reverse_search"
+# description = "Search command history"
+#
+# [[bindings]]
+# key = "p"
+# modifiers = { cmd = true, shift = true }
+# action = "command_palette"
+# description = "Open command palette"
 
 # ============================================================================
 # Shell Configuration
@@ -274,3 +294,12 @@ enabled = true                   # Enable desktop notifications
 on_bell = true                   # Show notification when bell is triggered (background tabs only)
 on_command_complete = false      # Show notification when command completes (future feature)
 timeout_seconds = 5              # Notification timeout in seconds
+
+# ============================================================================
+# Completion (Autocomplete)
+# ============================================================================
+
+[completion]
+enabled = true                   # Enable tab completion
+max_items = 20                   # Maximum number of completion items to show
+include_hidden = false           # Include hidden files (starting with .) in completions
