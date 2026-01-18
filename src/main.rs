@@ -7,6 +7,7 @@ use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::text_input::Id as TextInputId;
 use iced::widget::{button, column, container, row, text, text_input, Space};
 use iced::{Alignment, Border, Color, Element, Font, Length, Subscription, Task};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -138,6 +139,57 @@ mod theme {
 }
 
 // ============================================================================
+// Session State Management
+// ============================================================================
+
+/// Represents the state of a terminal tab for session persistence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TabState {
+    /// Working directory when tab was saved
+    cwd: String,
+    /// Custom tab title (if set)
+    title: Option<String>,
+    /// Tab ID (for tracking)
+    id: usize,
+}
+
+/// Session state for persistence across app restarts
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SessionState {
+    /// List of tab states
+    tabs: Vec<TabState>,
+    /// Index of active tab
+    active_tab: usize,
+    /// Window dimensions (cols, rows)
+    window_size: Option<(u16, u16)>,
+    /// Font size
+    font_size: f32,
+}
+
+impl SessionState {
+    /// Save session state to file
+    fn save_to_file(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        tracing::info!("Session saved to {:?}", path);
+        Ok(())
+    }
+
+    /// Load session state from file
+    fn load_from_file(path: &std::path::Path) -> Result<Self, std::io::Error> {
+        let json = std::fs::read_to_string(path)?;
+        let state = serde_json::from_str(&json)?;
+        tracing::info!("Session loaded from {:?}", path);
+        Ok(state)
+    }
+}
+
+// ============================================================================
 // ANSI Color Parsing
 // ============================================================================
 
@@ -152,6 +204,7 @@ pub struct StyledSpan {
     pub dim: bool,
     pub italic: bool,
     pub strikethrough: bool,
+    pub hyperlink: Option<String>,
 }
 
 /// Convert terminal cells to styled spans
@@ -164,6 +217,7 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
     let mut current_dim = false;
     let mut current_italic = false;
     let mut current_strikethrough = false;
+    let mut current_hyperlink: Option<String> = None;
 
     for cell in cells {
         // Skip placeholder cells (second cell of wide characters)
@@ -184,6 +238,7 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
             || cell.dim != current_dim
             || cell.italic != current_italic
             || cell.strikethrough != current_strikethrough
+            || cell.hyperlink != current_hyperlink
         {
             if !current_text.is_empty() {
                 spans.push(StyledSpan {
@@ -194,6 +249,7 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
                     dim: current_dim,
                     italic: current_italic,
                     strikethrough: current_strikethrough,
+                    hyperlink: current_hyperlink.clone(),
                 });
             }
             current_color = color;
@@ -202,6 +258,7 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
             current_dim = cell.dim;
             current_italic = cell.italic;
             current_strikethrough = cell.strikethrough;
+            current_hyperlink = cell.hyperlink.clone();
         }
 
         current_text.push(cell.c);
@@ -217,6 +274,7 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
             dim: current_dim,
             italic: current_italic,
             strikethrough: current_strikethrough,
+            hyperlink: current_hyperlink,
         });
     }
 
@@ -309,53 +367,69 @@ impl Default for AgTerm {
         let config = get_config();
 
         let pty_manager = Arc::new(PtyManager::new());
-        let session_result = pty_manager.create_session(
-            config.pty.default_rows,
-            config.pty.default_cols,
-        );
-        let cwd = config
-            .general
-            .default_working_dir
-            .as_ref()
-            .and_then(|p| p.to_str())
-            .map(|s| s.to_string())
-            .or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string()))
-            .unwrap_or_else(|| "~".to_string());
 
-        let (session_id, error_message) = match session_result {
-            Ok(id) => {
-                tracing::info!(session_id = %id, "Initial PTY session created");
-                (Some(id), None)
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Failed to create initial PTY session");
-                (None, Some(format!("Failed to create PTY session: {}", e)))
-            }
-        };
+        // Try to restore session first
+        let (tabs, active_tab, font_size, next_tab_id) =
+            if let Some((restored_tabs, restored_active, restored_font)) =
+                Self::restore_session(&config, &pty_manager) {
 
-        let tab = TerminalTab {
-            id: 0,
-            session_id,
-            raw_input: String::new(),
-            input: String::new(),
-            cwd,
-            error_message,
-            history: Vec::new(),
-            history_index: None,
-            history_temp_input: String::new(),
-            mode: TerminalMode::Raw, // Default to Raw mode for interactive apps
-            parsed_line_cache: Vec::new(),
-            canvas_state: TerminalCanvasState::new(),
-            content_version: 0,
-            screen: TerminalScreen::new(
-                config.pty.default_cols as usize,
-                config.pty.default_rows as usize,
-            ),
-            cursor_blink_on: true,
-            bell_pending: false,
-            title: None,
-            last_copied_selection: None,
-        };
+                // Calculate next_tab_id from restored tabs
+                let max_id = restored_tabs.iter().map(|t| t.id).max().unwrap_or(0);
+                tracing::info!("Session restored with {} tabs", restored_tabs.len());
+
+                (restored_tabs, restored_active, restored_font, max_id + 1)
+            } else {
+                // No session to restore, create a fresh tab
+                let session_result = pty_manager.create_session(
+                    config.pty.default_rows,
+                    config.pty.default_cols,
+                );
+                let cwd = config
+                    .general
+                    .default_working_dir
+                    .as_ref()
+                    .and_then(|p| p.to_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string()))
+                    .unwrap_or_else(|| "~".to_string());
+
+                let (session_id, error_message) = match session_result {
+                    Ok(id) => {
+                        tracing::info!(session_id = %id, "Initial PTY session created");
+                        (Some(id), None)
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Failed to create initial PTY session");
+                        (None, Some(format!("Failed to create PTY session: {}", e)))
+                    }
+                };
+
+                let tab = TerminalTab {
+                    id: 0,
+                    session_id,
+                    raw_input: String::new(),
+                    input: String::new(),
+                    cwd,
+                    error_message,
+                    history: Vec::new(),
+                    history_index: None,
+                    history_temp_input: String::new(),
+                    mode: TerminalMode::Raw,
+                    parsed_line_cache: Vec::new(),
+                    canvas_state: TerminalCanvasState::new(),
+                    content_version: 0,
+                    screen: TerminalScreen::new(
+                        config.pty.default_cols as usize,
+                        config.pty.default_rows as usize,
+                    ),
+                    cursor_blink_on: true,
+                    bell_pending: false,
+                    title: None,
+                    last_copied_selection: None,
+                };
+
+                (vec![tab], 0, config.appearance.font_size, 1)
+            };
 
         let mut debug_panel = DebugPanel::new();
         // Connect log buffer to debug panel
@@ -370,20 +444,28 @@ impl Default for AgTerm {
 
         tracing::info!("AgTerm application initialized");
         Self {
-            tabs: vec![tab],
-            active_tab: 0,
+            tabs,
+            active_tab,
             pty_manager,
-            next_tab_id: 1,
+            next_tab_id,
             startup_focus_count: 10,
             debug_panel,
             last_pty_activity: Instant::now(),
             last_cursor_blink: Instant::now(),
-            font_size: config.appearance.font_size,
+            font_size,
             search_mode: false,
             search_query: String::new(),
             search_matches: Vec::new(),
             current_match_index: None,
         }
+    }
+}
+
+impl Drop for AgTerm {
+    fn drop(&mut self) {
+        // Save session state when application exits
+        self.save_session();
+        tracing::info!("AgTerm shutting down");
     }
 }
 
@@ -494,6 +576,9 @@ enum Message {
     ScrollToTop,
     ScrollToBottom,
 
+    // URL handling
+    OpenUrl(String),
+
     // Tick for PTY polling
     Tick,
 
@@ -520,6 +605,114 @@ impl AgTerm {
                     .map(|s| s.to_string())
             })
             .unwrap_or_else(|| "shell".to_string())
+    }
+
+    /// Save current session state to file
+    fn save_session(&self) {
+        let config = get_config();
+        if !config.general.session.save_on_exit {
+            return;
+        }
+
+        let session_path = config.session_file_path();
+
+        // Collect tab states
+        let tab_states: Vec<TabState> = self.tabs.iter().map(|tab| {
+            TabState {
+                cwd: tab.cwd.clone(),
+                title: tab.title.clone(),
+                id: tab.id,
+            }
+        }).collect();
+
+        let session = SessionState {
+            tabs: tab_states,
+            active_tab: self.active_tab,
+            window_size: None, // Will be set from actual window size if available
+            font_size: self.font_size,
+        };
+
+        if let Err(e) = session.save_to_file(&session_path) {
+            tracing::error!("Failed to save session: {}", e);
+        }
+    }
+
+    /// Restore session from file and create tabs
+    fn restore_session(config: &AppConfig, pty_manager: &Arc<PtyManager>) -> Option<(Vec<TerminalTab>, usize, f32)> {
+        if !config.general.session.restore_on_startup {
+            return None;
+        }
+
+        let session_path = config.session_file_path();
+        if !session_path.exists() {
+            tracing::info!("No session file found at {:?}, starting fresh", session_path);
+            return None;
+        }
+
+        match SessionState::load_from_file(&session_path) {
+            Ok(session) => {
+                if session.tabs.is_empty() {
+                    tracing::warn!("Session file has no tabs, starting fresh");
+                    return None;
+                }
+
+                tracing::info!("Restoring session with {} tabs", session.tabs.len());
+
+                let mut tabs = Vec::new();
+                for tab_state in session.tabs {
+                    let session_result = pty_manager.create_session(
+                        config.pty.default_rows,
+                        config.pty.default_cols,
+                    );
+
+                    let (session_id, error_message) = match session_result {
+                        Ok(id) => {
+                            tracing::info!(session_id = %id, "PTY session created for restored tab");
+                            (Some(id), None)
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "Failed to create PTY session for restored tab");
+                            (None, Some(format!("Failed to create PTY session: {}", e)))
+                        }
+                    };
+
+                    let tab = TerminalTab {
+                        id: tab_state.id,
+                        session_id,
+                        raw_input: String::new(),
+                        input: String::new(),
+                        cwd: tab_state.cwd,
+                        error_message,
+                        history: Vec::new(),
+                        history_index: None,
+                        history_temp_input: String::new(),
+                        mode: TerminalMode::Raw,
+                        parsed_line_cache: Vec::new(),
+                        canvas_state: TerminalCanvasState::new(),
+                        content_version: 0,
+                        screen: TerminalScreen::new(
+                            config.pty.default_cols as usize,
+                            config.pty.default_rows as usize,
+                        ),
+                        cursor_blink_on: true,
+                        bell_pending: false,
+                        title: tab_state.title,
+                        last_copied_selection: None,
+                    };
+
+                    tabs.push(tab);
+                }
+
+                let active_tab = session.active_tab.min(tabs.len().saturating_sub(1));
+                let font_size = session.font_size;
+
+                Some((tabs, active_tab, font_size))
+            }
+            Err(e) => {
+                tracing::error!("Failed to load session: {}", e);
+                None
+            }
+        }
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -985,6 +1178,15 @@ impl AgTerm {
                 Task::none()
             }
 
+            Message::OpenUrl(url) => {
+                // Open URL in default browser
+                tracing::info!("Opening URL: {}", url);
+                if let Err(e) = open::that(&url) {
+                    tracing::error!("Failed to open URL {}: {}", url, e);
+                }
+                Task::none()
+            }
+
             Message::WindowResized { width, height } => {
                 // Calculate terminal dimensions based on approximate character size
                 // D2Coding at ~13px = roughly 8px width, 18px height per character
@@ -1120,6 +1322,9 @@ impl AgTerm {
                                     }
                                 }
 
+                                // Detect URLs in terminal output
+                                tab.screen.detect_urls();
+
                                 // Convert screen buffer to parsed line cache for rendering
                                 let all_lines = tab.screen.get_all_lines();
                                 tab.parsed_line_cache = all_lines
@@ -1150,6 +1355,17 @@ impl AgTerm {
                     }
                 }
 
+                // Check for URL clicks
+                let url_task = if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                    if let Some(url) = tab.canvas_state.clicked_url.take() {
+                        Task::done(Message::OpenUrl(url))
+                    } else {
+                        Task::none()
+                    }
+                } else {
+                    Task::none()
+                };
+
                 // Handle copy-on-select for active tab
                 let config = get_config();
                 if config.mouse.copy_on_select {
@@ -1177,7 +1393,7 @@ impl AgTerm {
                     }
                 }
 
-                focus_task
+                Task::batch([focus_task, url_task])
             }
         }
     }

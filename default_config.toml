@@ -8,6 +8,12 @@ app_name = "agterm"
 # default_shell = "/bin/zsh"
 # default_working_dir = "~"
 
+# Session management
+[general.session]
+restore_on_startup = true      # Restore previous session on startup
+save_on_exit = true            # Save session on exit
+# session_file = "~/.config/agterm/session.json"
+
 # ============================================================================
 # Appearance Settings
 # ============================================================================

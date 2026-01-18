@@ -35,6 +35,7 @@ AgTerm is a modern terminal emulator built with Rust and the Iced GUI framework,
 - **Status Bar**: Shows current shell, mode, and active tab information
 - **Debug Panel**: Real-time terminal state inspection (F12 or Cmd+D)
 - **Font Size Control**: Dynamically adjust font size (8-24pt)
+- **Session Restoration**: Automatically restore tabs and working directories on startup
 
 ### Developer Features
 
@@ -138,21 +139,61 @@ AgTerm looks for configuration files in the following locations:
 ```toml
 [general]
 default_shell = "/bin/zsh"
+
+# Session management
+[general.session]
+restore_on_startup = true      # Restore previous tabs on startup
+save_on_exit = true            # Save session when closing
+# session_file = "~/.config/agterm/session.json"
+
+[appearance]
 font_size = 14.0
+theme = "default"
 
 [terminal]
 scrollback_lines = 10000
 cursor_blink_interval_ms = 530
+bracketed_paste = true
 
-[theme]
-name = "dark"
+[mouse]
+copy_on_select = true
+middle_click_paste = true
 
 [logging]
 level = "info"
-log_file = "~/.config/agterm/logs/agterm.log"
+file_output = true
 ```
 
-Note: Configuration system is currently planned. Current version uses hardcoded defaults.
+### Session Restoration
+
+AgTerm automatically saves your terminal session (tabs, working directories, titles) when you exit and restores it on startup. This feature is enabled by default.
+
+**How it works:**
+
+1. When you close AgTerm, it saves the current state to `~/.config/agterm/session.json`
+2. On next startup, it restores all tabs with their working directories and custom titles
+3. Each tab gets a fresh PTY session in the saved directory
+
+**Configuration:**
+
+```toml
+[general.session]
+restore_on_startup = true      # Enable/disable restoration
+save_on_exit = true            # Enable/disable saving
+# session_file = "~/.config/agterm/session.json"  # Custom location
+```
+
+**To disable session restoration:**
+
+```bash
+# Edit config file
+echo -e "[general.session]\nrestore_on_startup = false" >> ~/.config/agterm/config.toml
+
+# Or delete the session file
+rm ~/.config/agterm/session.json
+```
+
+See [Session Restoration Guide](docs/SESSION_RESTORATION.md) for detailed documentation.
 
 ## Technical Architecture
 

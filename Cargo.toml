@@ -25,6 +25,7 @@ iced = { version = "0.13", default-features = false, features = ["tokio", "advan
 portable-pty = "0.8"
 vte = "0.13"  # ANSI escape code parsing for enhanced terminal support
 unicode-width = "0.1"  # Wide character (CJK) width calculation
+regex = "1"  # URL pattern matching for hyperlink detection
 
 # TODO: implement async operations with tokio
 # tokio = { version = "1", features = ["full"] }
@@ -37,11 +38,15 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 # Configuration and serialization
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 toml = "0.8"
 dirs = "5"
 
 # Clipboard
 arboard = "3"
+
+# URL handling
+open = "5"
 
 # Logging
 log = "0.4"

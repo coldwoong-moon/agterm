@@ -227,6 +227,8 @@ pub struct TerminalCanvasState {
     pub selection: Option<Selection>,
     /// Mouse drag state
     pub is_dragging: bool,
+    /// Last clicked URL (for Cmd+Click handling)
+    pub clicked_url: Option<String>,
 }
 
 impl Default for TerminalCanvasState {
@@ -241,6 +243,7 @@ impl Default for TerminalCanvasState {
             streaming_mode: false,
             selection: None,
             is_dragging: false,
+            clicked_url: None,
         }
     }
 }
@@ -391,6 +394,26 @@ impl<'a> TerminalCanvas<'a> {
         let col = col.min(max_col.max(0));
 
         (row, col)
+    }
+
+    /// Get hyperlink at the given cell position
+    pub fn get_hyperlink_at(&self, row: usize, col: usize) -> Option<String> {
+        if row >= self.lines.len() {
+            return None;
+        }
+
+        let line = &self.lines[row];
+        let mut current_col = 0;
+
+        for span in line {
+            let span_len = span.text.chars().count();
+            if col >= current_col && col < current_col + span_len {
+                return span.hyperlink.clone();
+            }
+            current_col += span_len;
+        }
+
+        None
     }
 
     fn draw_selection(&self, frame: &mut Frame, state: &TerminalCanvasState, bounds: Rectangle) {
@@ -549,6 +572,7 @@ impl<'a> TerminalCanvas<'a> {
                         dim: current_dim,
                         italic: current_italic,
                         strikethrough: current_strikethrough,
+                        hyperlink: None,
                     };
                     self.draw_text_segment(
                         frame,
@@ -588,6 +612,7 @@ impl<'a> TerminalCanvas<'a> {
                 dim: current_dim,
                 italic: current_italic,
                 strikethrough: current_strikethrough,
+                hyperlink: None,
             };
             self.draw_text_segment(
                 frame,
@@ -609,10 +634,17 @@ impl<'a> TerminalCanvas<'a> {
         color: Color,
         span: &StyledSpan,
     ) {
+        // Use cyan color for hyperlinks
+        let display_color = if span.hyperlink.is_some() {
+            Color::from_rgb(0.3, 0.8, 0.8) // Cyan for URLs
+        } else {
+            color
+        };
+
         let text_obj = Text {
             content: text.to_string(),
             position: Point::new(x, y),
-            color,
+            color: display_color,
             size: self.font_size.into(),
             font: self.font,
             horizontal_alignment: iced::alignment::Horizontal::Left,
@@ -624,13 +656,13 @@ impl<'a> TerminalCanvas<'a> {
         let char_count = text.chars().count();
         let text_width = char_count as f32 * config::char_width(self.font_size);
 
-        // Draw underline
-        if span.underline {
+        // Draw underline for URLs or underlined text
+        if span.underline || span.hyperlink.is_some() {
             let underline_y = y + config::line_height(self.font_size) - 2.0;
             frame.fill_rectangle(
                 Point::new(x, underline_y),
                 Size::new(text_width, 1.0),
-                color,
+                display_color,
             );
         }
 
@@ -640,7 +672,7 @@ impl<'a> TerminalCanvas<'a> {
             frame.fill_rectangle(
                 Point::new(x, strikethrough_y),
                 Size::new(text_width, 1.0),
-                color,
+                display_color,
             );
         }
     }
@@ -754,6 +786,14 @@ where
                 if let Some(position) = cursor.position() {
                     let (row, col) =
                         self.pixel_to_cell(position.x, position.y, state.scroll_offset);
+
+                    // Check if clicking on a URL
+                    if let Some(url) = self.get_hyperlink_at(row, col) {
+                        state.clicked_url = Some(url);
+                        // Don't start selection when clicking URL
+                        return (canvas::event::Status::Captured, None);
+                    }
+
                     state.selection = Some(Selection::new(row, col));
                     state.is_dragging = true;
                     // Don't clear cache for selection start - selection overlay is separate

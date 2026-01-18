@@ -125,6 +125,8 @@ pub struct Cell {
     pub wide: bool,
     /// This cell is a placeholder for the second cell of a wide character
     pub placeholder: bool,
+    /// Hyperlink URL (for OSC 8 or auto-detected URLs)
+    pub hyperlink: Option<String>,
 }
 
 impl Default for Cell {
@@ -141,6 +143,7 @@ impl Default for Cell {
             strikethrough: false,
             wide: false,
             placeholder: false,
+            hyperlink: None,
         }
     }
 }
@@ -468,6 +471,67 @@ impl TerminalScreen {
         let mut all_lines: Vec<Vec<Cell>> = self.scrollback.iter().cloned().collect();
         all_lines.extend(self.buffer.clone());
         all_lines
+    }
+
+    /// Auto-detect URLs in all lines and update cell hyperlinks
+    pub fn detect_urls(&mut self) {
+        // URL regex pattern: http://, https://, file://
+        let url_pattern = regex::Regex::new(
+            r"(?i)(https?://[^\s<>{}|\\\^\[\]`]+|file://[^\s<>{}|\\\^\[\]`]+)"
+        ).unwrap();
+
+        // Process all lines in buffer
+        for row in &mut self.buffer {
+            // Convert row to string for regex matching
+            let line_text: String = row.iter()
+                .filter(|cell| !cell.placeholder)
+                .map(|cell| cell.c)
+                .collect();
+
+            // Find all URL matches
+            for mat in url_pattern.find_iter(&line_text) {
+                let url = mat.as_str().to_string();
+                let start_col = mat.start();
+                let end_col = mat.end();
+
+                // Update cells with hyperlink
+                let mut char_index = 0;
+                for cell in row.iter_mut() {
+                    if cell.placeholder {
+                        continue;
+                    }
+                    if char_index >= start_col && char_index < end_col {
+                        cell.hyperlink = Some(url.clone());
+                    }
+                    char_index += 1;
+                }
+            }
+        }
+
+        // Process scrollback buffer
+        for row in self.scrollback.iter_mut() {
+            let line_text: String = row.iter()
+                .filter(|cell| !cell.placeholder)
+                .map(|cell| cell.c)
+                .collect();
+
+            for mat in url_pattern.find_iter(&line_text) {
+                let url = mat.as_str().to_string();
+                let start_col = mat.start();
+                let end_col = mat.end();
+
+                let mut char_index = 0;
+                for cell in row.iter_mut() {
+                    if cell.placeholder {
+                        continue;
+                    }
+                    if char_index >= start_col && char_index < end_col {
+                        cell.hyperlink = Some(url.clone());
+                    }
+                    char_index += 1;
+                }
+            }
+        }
     }
 
     /// Get cursor position (row, col)
@@ -1095,6 +1159,7 @@ impl Perform for TerminalScreen {
                     strikethrough: self.strikethrough,
                     wide: true,
                     placeholder: false,
+                    hyperlink: None,
                 };
 
                 // Write placeholder to next cell if there's space
@@ -1111,6 +1176,7 @@ impl Perform for TerminalScreen {
                         strikethrough: self.strikethrough,
                         wide: false,
                         placeholder: true,
+                        hyperlink: None,
                     };
                 }
 
@@ -1129,6 +1195,7 @@ impl Perform for TerminalScreen {
                     strikethrough: self.strikethrough,
                     wide: false,
                     placeholder: false,
+                    hyperlink: None,
                 };
                 self.cursor_col += 1;
             }

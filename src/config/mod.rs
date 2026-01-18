@@ -46,6 +46,8 @@ pub struct GeneralConfig {
     pub default_shell: Option<String>,
     #[serde(default)]
     pub default_working_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub session: SessionConfig,
 }
 
 impl Default for GeneralConfig {
@@ -54,6 +56,28 @@ impl Default for GeneralConfig {
             app_name: default_app_name(),
             default_shell: None,
             default_working_dir: None,
+            session: SessionConfig::default(),
+        }
+    }
+}
+
+/// Session management configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionConfig {
+    #[serde(default = "default_true")]
+    pub restore_on_startup: bool,
+    #[serde(default = "default_true")]
+    pub save_on_exit: bool,
+    #[serde(default)]
+    pub session_file: Option<PathBuf>,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            restore_on_startup: true,
+            save_on_exit: true,
+            session_file: None,
         }
     }
 }
@@ -89,7 +113,7 @@ impl Default for AppearanceConfig {
 }
 
 /// Custom color scheme (optional override)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ColorScheme {
     pub background: String,
     pub foreground: String,
@@ -540,6 +564,18 @@ impl AppConfig {
             .map(|cwd| cwd.join(".agterm").join("config.toml"))
     }
 
+    /// Get the session file path (defaults to ~/.config/agterm/session.json)
+    pub fn session_file_path(&self) -> PathBuf {
+        self.general.session.session_file
+            .clone()
+            .or_else(|| {
+                dirs::config_dir().map(|config_dir| {
+                    config_dir.join("agterm").join("session.json")
+                })
+            })
+            .unwrap_or_else(|| PathBuf::from("session.json"))
+    }
+
     /// Merge two configs (overlay takes precedence)
     fn merge(_base: Self, overlay: Self) -> Self {
         // For now, just return overlay (in future, implement deep merge)
@@ -608,8 +644,223 @@ pub enum ConfigError {
     #[error("Parse error: {0}")]
     ParseError(String),
     #[error("Serialize error: {0}")]
-    #[allow(dead_code)]
     SerializeError(String),
+}
+
+// ============================================================================
+// Profile System
+// ============================================================================
+
+/// Terminal profile with custom settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Profile {
+    /// Profile name
+    pub name: String,
+    /// Shell program (e.g., "zsh", "bash", "/bin/fish")
+    pub shell: Option<String>,
+    /// Shell arguments
+    #[serde(default)]
+    pub shell_args: Vec<String>,
+    /// Environment variables
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    /// Color theme name
+    #[serde(default)]
+    pub theme: Option<String>,
+    /// Font size
+    #[serde(default)]
+    pub font_size: Option<f32>,
+    /// Working directory
+    #[serde(default)]
+    pub working_dir: Option<PathBuf>,
+    /// Custom color scheme (overrides theme)
+    #[serde(default)]
+    pub color_scheme: Option<ColorScheme>,
+}
+
+impl Profile {
+    /// Create a new profile with default settings
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            shell: None,
+            shell_args: Vec::new(),
+            env: HashMap::new(),
+            theme: None,
+            font_size: None,
+            working_dir: None,
+            color_scheme: None,
+        }
+    }
+
+    /// Get the profiles directory path (~/.config/agterm/profiles/)
+    pub fn profiles_dir() -> Option<PathBuf> {
+        dirs::config_dir().map(|config_dir| config_dir.join("agterm").join("profiles"))
+    }
+
+    /// Get the path for a profile file
+    pub fn profile_path(name: &str) -> Option<PathBuf> {
+        Self::profiles_dir().map(|dir| dir.join(format!("{}.toml", name)))
+    }
+
+    /// Load a profile by name
+    pub fn load(name: &str) -> Result<Self, ConfigError> {
+        let path = Self::profile_path(name)
+            .ok_or_else(|| ConfigError::IoError("Could not determine profile directory".to_string()))?;
+
+        if !path.exists() {
+            return Err(ConfigError::IoError(format!("Profile '{}' not found", name)));
+        }
+
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+        toml::from_str(&contents)
+            .map_err(|e| ConfigError::ParseError(format!("Failed to parse profile '{}': {}", name, e)))
+    }
+
+    /// Save this profile to disk
+    pub fn save(&self) -> Result<(), ConfigError> {
+        let profiles_dir = Self::profiles_dir()
+            .ok_or_else(|| ConfigError::IoError("Could not determine profile directory".to_string()))?;
+
+        // Create profiles directory if it doesn't exist
+        std::fs::create_dir_all(&profiles_dir)
+            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+        let path = profiles_dir.join(format!("{}.toml", self.name));
+        let toml_string = toml::to_string_pretty(self)
+            .map_err(|e| ConfigError::SerializeError(e.to_string()))?;
+
+        std::fs::write(&path, toml_string)
+            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+        tracing::info!("Saved profile '{}' to {:?}", self.name, path);
+        Ok(())
+    }
+
+    /// Delete a profile by name
+    pub fn delete(name: &str) -> Result<(), ConfigError> {
+        let path = Self::profile_path(name)
+            .ok_or_else(|| ConfigError::IoError("Could not determine profile directory".to_string()))?;
+
+        if !path.exists() {
+            return Err(ConfigError::IoError(format!("Profile '{}' not found", name)));
+        }
+
+        std::fs::remove_file(&path)
+            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+        tracing::info!("Deleted profile '{}'", name);
+        Ok(())
+    }
+
+    /// List all available profiles
+    pub fn list() -> Result<Vec<String>, ConfigError> {
+        let profiles_dir = Self::profiles_dir()
+            .ok_or_else(|| ConfigError::IoError("Could not determine profile directory".to_string()))?;
+
+        if !profiles_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let entries = std::fs::read_dir(&profiles_dir)
+            .map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+        let mut profiles = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|e| ConfigError::IoError(e.to_string()))?;
+            let path = entry.path();
+
+            if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    profiles.push(stem.to_string());
+                }
+            }
+        }
+
+        profiles.sort();
+        Ok(profiles)
+    }
+
+    /// Create default profiles (default, zsh, bash)
+    pub fn create_default_profiles() -> Result<(), ConfigError> {
+        // Default profile
+        let default = Profile {
+            name: "default".to_string(),
+            shell: None, // Use system default
+            shell_args: Vec::new(),
+            env: HashMap::new(),
+            theme: Some("default".to_string()),
+            font_size: Some(14.0),
+            working_dir: None,
+            color_scheme: None,
+        };
+        default.save()?;
+
+        // Zsh profile
+        let mut zsh_env = HashMap::new();
+        zsh_env.insert("SHELL".to_string(), "/bin/zsh".to_string());
+        let zsh = Profile {
+            name: "zsh".to_string(),
+            shell: Some("/bin/zsh".to_string()),
+            shell_args: vec!["-l".to_string()], // Login shell
+            env: zsh_env,
+            theme: Some("default".to_string()),
+            font_size: Some(14.0),
+            working_dir: None,
+            color_scheme: None,
+        };
+        zsh.save()?;
+
+        // Bash profile
+        let mut bash_env = HashMap::new();
+        bash_env.insert("SHELL".to_string(), "/bin/bash".to_string());
+        let bash = Profile {
+            name: "bash".to_string(),
+            shell: Some("/bin/bash".to_string()),
+            shell_args: vec!["-l".to_string()], // Login shell
+            env: bash_env,
+            theme: Some("default".to_string()),
+            font_size: Some(14.0),
+            working_dir: None,
+            color_scheme: None,
+        };
+        bash.save()?;
+
+        tracing::info!("Created default profiles: default, zsh, bash");
+        Ok(())
+    }
+
+    /// Apply this profile's settings to the given AppConfig
+    pub fn apply_to_config(&self, config: &mut AppConfig) {
+        // Apply shell settings
+        if let Some(shell) = &self.shell {
+            config.shell.program = Some(shell.clone());
+        }
+        if !self.shell_args.is_empty() {
+            config.shell.args = self.shell_args.clone();
+        }
+        if !self.env.is_empty() {
+            config.shell.env.extend(self.env.clone());
+        }
+
+        // Apply appearance settings
+        if let Some(theme) = &self.theme {
+            config.appearance.theme = theme.clone();
+        }
+        if let Some(font_size) = self.font_size {
+            config.appearance.font_size = font_size;
+        }
+        if let Some(color_scheme) = &self.color_scheme {
+            config.appearance.color_scheme = Some(color_scheme.clone());
+        }
+
+        // Apply working directory
+        if let Some(working_dir) = &self.working_dir {
+            config.general.default_working_dir = Some(working_dir.clone());
+        }
+    }
 }
 
 // ============================================================================
@@ -687,5 +938,245 @@ mod tests {
             toml::from_str::<Wrapper>("v = \"none\"").unwrap().v,
             BellStyle::None
         );
+    }
+
+    // ========== Profile System Tests ==========
+
+    #[test]
+    fn test_profile_creation() {
+        let profile = Profile::new("test".to_string());
+        assert_eq!(profile.name, "test");
+        assert_eq!(profile.shell, None);
+        assert!(profile.shell_args.is_empty());
+        assert!(profile.env.is_empty());
+        assert_eq!(profile.theme, None);
+        assert_eq!(profile.font_size, None);
+        assert_eq!(profile.working_dir, None);
+        assert_eq!(profile.color_scheme, None);
+    }
+
+    #[test]
+    fn test_profile_serialization() {
+        let mut env = HashMap::new();
+        env.insert("TEST_VAR".to_string(), "test_value".to_string());
+
+        let profile = Profile {
+            name: "test_profile".to_string(),
+            shell: Some("/bin/zsh".to_string()),
+            shell_args: vec!["-l".to_string()],
+            env: env.clone(),
+            theme: Some("dark".to_string()),
+            font_size: Some(16.0),
+            working_dir: Some(PathBuf::from("/home/user")),
+            color_scheme: None,
+        };
+
+        let toml_string = toml::to_string(&profile).unwrap();
+        let parsed: Profile = toml::from_str(&toml_string).unwrap();
+
+        assert_eq!(parsed.name, profile.name);
+        assert_eq!(parsed.shell, profile.shell);
+        assert_eq!(parsed.shell_args, profile.shell_args);
+        assert_eq!(parsed.env.get("TEST_VAR"), Some(&"test_value".to_string()));
+        assert_eq!(parsed.theme, profile.theme);
+        assert_eq!(parsed.font_size, profile.font_size);
+        assert_eq!(parsed.working_dir, profile.working_dir);
+    }
+
+    #[test]
+    fn test_profile_save_and_load() {
+        use tempfile::tempdir;
+
+        // Create a temporary directory for testing
+        let temp_dir = tempdir().unwrap();
+        let profiles_dir = temp_dir.path().join("agterm").join("profiles");
+        std::fs::create_dir_all(&profiles_dir).unwrap();
+
+        // Create a test profile
+        let mut env = HashMap::new();
+        env.insert("CUSTOM_VAR".to_string(), "custom_value".to_string());
+
+        let profile = Profile {
+            name: "test_save_load".to_string(),
+            shell: Some("/bin/bash".to_string()),
+            shell_args: vec!["-i".to_string()],
+            env: env.clone(),
+            theme: Some("light".to_string()),
+            font_size: Some(12.0),
+            working_dir: Some(PathBuf::from("/tmp")),
+            color_scheme: None,
+        };
+
+        // Save to file
+        let profile_path = profiles_dir.join("test_save_load.toml");
+        let toml_string = toml::to_string_pretty(&profile).unwrap();
+        std::fs::write(&profile_path, toml_string).unwrap();
+
+        // Load from file
+        let contents = std::fs::read_to_string(&profile_path).unwrap();
+        let loaded_profile: Profile = toml::from_str(&contents).unwrap();
+
+        // Verify loaded profile matches original
+        assert_eq!(loaded_profile.name, profile.name);
+        assert_eq!(loaded_profile.shell, profile.shell);
+        assert_eq!(loaded_profile.shell_args, profile.shell_args);
+        assert_eq!(loaded_profile.env, profile.env);
+        assert_eq!(loaded_profile.theme, profile.theme);
+        assert_eq!(loaded_profile.font_size, profile.font_size);
+        assert_eq!(loaded_profile.working_dir, profile.working_dir);
+    }
+
+    #[test]
+    fn test_profile_apply_to_config() {
+        let mut config = AppConfig::default();
+        let original_font_size = config.appearance.font_size;
+
+        // Create a profile with custom settings
+        let mut env = HashMap::new();
+        env.insert("PROFILE_VAR".to_string(), "value".to_string());
+
+        let profile = Profile {
+            name: "test_apply".to_string(),
+            shell: Some("/bin/fish".to_string()),
+            shell_args: vec!["--login".to_string()],
+            env: env.clone(),
+            theme: Some("custom_theme".to_string()),
+            font_size: Some(18.0),
+            working_dir: Some(PathBuf::from("/workspace")),
+            color_scheme: None,
+        };
+
+        // Apply profile to config
+        profile.apply_to_config(&mut config);
+
+        // Verify settings were applied
+        assert_eq!(config.shell.program, Some("/bin/fish".to_string()));
+        assert_eq!(config.shell.args, vec!["--login".to_string()]);
+        assert_eq!(config.shell.env.get("PROFILE_VAR"), Some(&"value".to_string()));
+        assert_eq!(config.appearance.theme, "custom_theme");
+        assert_eq!(config.appearance.font_size, 18.0);
+        assert_ne!(config.appearance.font_size, original_font_size);
+        assert_eq!(config.general.default_working_dir, Some(PathBuf::from("/workspace")));
+    }
+
+    #[test]
+    fn test_profile_partial_application() {
+        let mut config = AppConfig::default();
+        let original_shell = config.shell.program.clone();
+        let original_theme = config.appearance.theme.clone();
+
+        // Create a profile with only some settings
+        let profile = Profile {
+            name: "partial".to_string(),
+            shell: None, // Don't override shell
+            shell_args: Vec::new(),
+            env: HashMap::new(),
+            theme: Some("new_theme".to_string()),
+            font_size: None, // Don't override font size
+            working_dir: None,
+            color_scheme: None,
+        };
+
+        profile.apply_to_config(&mut config);
+
+        // Only theme should be updated
+        assert_eq!(config.shell.program, original_shell);
+        assert_ne!(config.appearance.theme, original_theme);
+        assert_eq!(config.appearance.theme, "new_theme");
+    }
+
+    #[test]
+    fn test_profile_with_color_scheme() {
+        let color_scheme = ColorScheme {
+            background: "#1e1e2e".to_string(),
+            foreground: "#cdd6f4".to_string(),
+            cursor: "#f5e0dc".to_string(),
+            selection: Some("#585b70".to_string()),
+            black: Some("#45475a".to_string()),
+            red: Some("#f38ba8".to_string()),
+            green: Some("#a6e3a1".to_string()),
+            yellow: Some("#f9e2af".to_string()),
+            blue: Some("#89b4fa".to_string()),
+            magenta: Some("#f5c2e7".to_string()),
+            cyan: Some("#94e2d5".to_string()),
+            white: Some("#bac2de".to_string()),
+            bright_black: Some("#585b70".to_string()),
+            bright_red: Some("#f38ba8".to_string()),
+            bright_green: Some("#a6e3a1".to_string()),
+            bright_yellow: Some("#f9e2af".to_string()),
+            bright_blue: Some("#89b4fa".to_string()),
+            bright_magenta: Some("#f5c2e7".to_string()),
+            bright_cyan: Some("#94e2d5".to_string()),
+            bright_white: Some("#a6adc8".to_string()),
+        };
+
+        let profile = Profile {
+            name: "catppuccin".to_string(),
+            shell: None,
+            shell_args: Vec::new(),
+            env: HashMap::new(),
+            theme: Some("catppuccin".to_string()),
+            font_size: Some(14.0),
+            working_dir: None,
+            color_scheme: Some(color_scheme),
+        };
+
+        // Serialize and deserialize
+        let toml_string = toml::to_string_pretty(&profile).unwrap();
+        let parsed: Profile = toml::from_str(&toml_string).unwrap();
+
+        assert_eq!(parsed.name, profile.name);
+        assert!(parsed.color_scheme.is_some());
+        let parsed_scheme = parsed.color_scheme.unwrap();
+        assert_eq!(parsed_scheme.background, "#1e1e2e");
+        assert_eq!(parsed_scheme.foreground, "#cdd6f4");
+    }
+
+    #[test]
+    fn test_default_profiles_structure() {
+        // Test that default profiles have expected structure
+        let default_profile = Profile {
+            name: "default".to_string(),
+            shell: None,
+            shell_args: Vec::new(),
+            env: HashMap::new(),
+            theme: Some("default".to_string()),
+            font_size: Some(14.0),
+            working_dir: None,
+            color_scheme: None,
+        };
+
+        assert_eq!(default_profile.name, "default");
+        assert_eq!(default_profile.shell, None);
+        assert_eq!(default_profile.font_size, Some(14.0));
+
+        let mut zsh_env = HashMap::new();
+        zsh_env.insert("SHELL".to_string(), "/bin/zsh".to_string());
+        let zsh_profile = Profile {
+            name: "zsh".to_string(),
+            shell: Some("/bin/zsh".to_string()),
+            shell_args: vec!["-l".to_string()],
+            env: zsh_env,
+            theme: Some("default".to_string()),
+            font_size: Some(14.0),
+            working_dir: None,
+            color_scheme: None,
+        };
+
+        assert_eq!(zsh_profile.name, "zsh");
+        assert_eq!(zsh_profile.shell, Some("/bin/zsh".to_string()));
+        assert_eq!(zsh_profile.shell_args, vec!["-l".to_string()]);
+    }
+
+    #[test]
+    fn test_profile_paths() {
+        // Test profile path generation
+        if let Some(profiles_dir) = Profile::profiles_dir() {
+            assert!(profiles_dir.to_string_lossy().contains("agterm/profiles"));
+        }
+
+        if let Some(profile_path) = Profile::profile_path("test") {
+            assert!(profile_path.to_string_lossy().ends_with("test.toml"));
+        }
     }
 }
