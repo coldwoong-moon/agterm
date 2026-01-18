@@ -23,9 +23,17 @@
 //! - Command history management with persistence
 //! - Structured logging with tracing ecosystem
 //! - Terminal bell sound system
+//! - Environment variable manager with categorization and security
 
+//! - Session tagging and organization system
+//! - Bookmark system for frequently used commands
+//! - Command alias system with shell integration
+//! - Statistics dashboard for usage analytics and productivity tracking
+
+pub mod aliases;
 pub mod annotations;
 pub mod automation;
+pub mod bookmarks;
 pub mod broadcast;
 pub mod clipboard_history;
 pub mod completion;
@@ -33,7 +41,10 @@ pub mod config;
 pub mod debug;
 pub mod diff_view;
 pub mod encoding;
+pub mod env_manager;
+
 pub mod filters;
+pub mod highlighting;
 pub mod history;
 pub mod image_protocol;
 pub mod keybind;
@@ -42,16 +53,21 @@ pub mod logging;
 pub mod macros;
 pub mod markdown;
 pub mod notification;
+pub mod pipeline;
 pub mod profiles;
 pub mod recording;
 pub mod render_cache;
 pub mod session;
+pub mod session_tags;
 pub mod shell;
 pub mod snippets;
 pub mod sound;
 pub mod splits;
 pub mod ssh;
+pub mod statistics;
 pub mod terminal;
+pub mod timer;
+
 pub mod theme;
 pub mod theme_editor;
 pub mod trigger;

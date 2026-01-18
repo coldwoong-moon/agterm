@@ -224,6 +224,7 @@ impl SessionState {
 pub struct StyledSpan {
     pub text: String,
     pub color: Option<Color>,
+    pub bg: Option<Color>,
     pub bold: bool,
     pub underline: bool,
     pub dim: bool,
@@ -237,6 +238,7 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
     let mut spans = Vec::new();
     let mut current_text = String::new();
     let mut current_color: Option<Color> = None;
+    let mut current_bg: Option<Color> = None;
     let mut current_bold = false;
     let mut current_underline = false;
     let mut current_dim = false;
@@ -250,14 +252,21 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
             continue;
         }
 
-        let color = if let Some(fg) = &cell.fg {
-            Some(fg.to_color())
+        // Handle reverse video mode by swapping fg and bg
+        let (fg_color, bg_color) = if cell.reverse {
+            // In reverse mode, swap foreground and background
+            let fg = cell.bg.as_ref().map(|c| c.to_color());
+            let bg = cell.fg.as_ref().map(|c| c.to_color());
+            (fg, bg)
         } else {
-            None
+            let fg = cell.fg.as_ref().map(|c| c.to_color());
+            let bg = cell.bg.as_ref().map(|c| c.to_color());
+            (fg, bg)
         };
 
         // If any style attribute changes, push current span and start new one
-        if color != current_color
+        if fg_color != current_color
+            || bg_color != current_bg
             || cell.bold != current_bold
             || cell.underline != current_underline
             || cell.dim != current_dim
@@ -269,6 +278,7 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
                 spans.push(StyledSpan {
                     text: std::mem::take(&mut current_text),
                     color: current_color,
+                    bg: current_bg,
                     bold: current_bold,
                     underline: current_underline,
                     dim: current_dim,
@@ -277,7 +287,8 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
                     hyperlink: current_hyperlink.clone(),
                 });
             }
-            current_color = color;
+            current_color = fg_color;
+            current_bg = bg_color;
             current_bold = cell.bold;
             current_underline = cell.underline;
             current_dim = cell.dim;
@@ -294,6 +305,7 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
         spans.push(StyledSpan {
             text: current_text,
             color: current_color,
+            bg: current_bg,
             bold: current_bold,
             underline: current_underline,
             dim: current_dim,
@@ -916,6 +928,27 @@ impl From<DebugPanelMessage> for Message {
 }
 
 impl AgTerm {
+    /// Resize PTY sessions when font size changes
+    /// Calculates new terminal dimensions based on old/new font sizes
+    fn resize_pty_for_font_change(&mut self, old_font_size: f32) {
+        // Calculate scaling factor
+        let scale = old_font_size / self.font_size;
+
+        for tab in &mut self.tabs {
+            let (current_cols, current_rows) = tab.screen.dimensions();
+            // Scale dimensions inversely with font size
+            let new_cols = ((current_cols as f32 * scale).max(80.0)) as u16;
+            let new_rows = ((current_rows as f32 * scale).max(24.0)) as u16;
+
+            // Resize PTY session
+            if let Some(session_id) = &tab.session_id {
+                let _ = self.pty_manager.resize(session_id, new_rows, new_cols);
+            }
+            // Resize screen buffer
+            tab.screen.resize(new_cols as usize, new_rows as usize);
+        }
+    }
+
     /// Get the current shell name (e.g., "zsh", "bash")
     fn get_shell_name(&self) -> String {
         std::env::var("SHELL")
@@ -1716,6 +1749,19 @@ impl AgTerm {
                         Key::Named(keyboard::key::Named::Delete) => Some("\x1b[3~".to_string()),
                         Key::Named(keyboard::key::Named::Insert) => Some("\x1b[2~".to_string()),
                         Key::Named(keyboard::key::Named::Tab) => Some("\t".to_string()),
+                        // Function keys (F1-F12)
+                        Key::Named(keyboard::key::Named::F1) => Some("\x1bOP".to_string()),
+                        Key::Named(keyboard::key::Named::F2) => Some("\x1bOQ".to_string()),
+                        Key::Named(keyboard::key::Named::F3) => Some("\x1bOR".to_string()),
+                        Key::Named(keyboard::key::Named::F4) => Some("\x1bOS".to_string()),
+                        Key::Named(keyboard::key::Named::F5) => Some("\x1b[15~".to_string()),
+                        Key::Named(keyboard::key::Named::F6) => Some("\x1b[17~".to_string()),
+                        Key::Named(keyboard::key::Named::F7) => Some("\x1b[18~".to_string()),
+                        Key::Named(keyboard::key::Named::F8) => Some("\x1b[19~".to_string()),
+                        Key::Named(keyboard::key::Named::F9) => Some("\x1b[20~".to_string()),
+                        Key::Named(keyboard::key::Named::F10) => Some("\x1b[21~".to_string()),
+                        Key::Named(keyboard::key::Named::F11) => Some("\x1b[23~".to_string()),
+                        Key::Named(keyboard::key::Named::F12) => Some("\x1b[24~".to_string()),
                         // Note: Enter, Backspace, Space are handled by text_input's on_submit and input changes
                         // Only handle them here as fallback if text_input doesn't capture them
                         _ => None,
@@ -1867,10 +1913,12 @@ impl AgTerm {
             }
 
             Message::WindowResized { width, height } => {
-                // Calculate terminal dimensions based on approximate character size
-                // D2Coding at ~13px = roughly 8px width, 18px height per character
-                let cols = ((width as f32 / 8.0).max(80.0)) as u16;
-                let rows = ((height as f32 / 18.0).max(24.0)) as u16;
+                // Calculate terminal dimensions based on current font size
+                // Monospace font: width ≈ 0.6 * font_size, height ≈ 1.4 * font_size (with line spacing)
+                let char_width = self.font_size * 0.6;
+                let line_height = self.font_size * 1.4;
+                let cols = ((width as f32 / char_width).max(80.0)) as u16;
+                let rows = ((height as f32 / line_height).max(24.0)) as u16;
 
                 // Resize all active PTY sessions and screen buffers
                 for tab in &mut self.tabs {
@@ -1940,25 +1988,31 @@ impl AgTerm {
             }
 
             Message::IncreaseFontSize => {
+                let old_font_size = self.font_size;
                 self.font_size = (self.font_size + 1.0).min(24.0);
+                self.resize_pty_for_font_change(old_font_size);
                 Task::none()
             }
 
             Message::DecreaseFontSize => {
+                let old_font_size = self.font_size;
                 self.font_size = (self.font_size - 1.0).max(8.0);
+                self.resize_pty_for_font_change(old_font_size);
                 Task::none()
             }
 
             Message::ResetFontSize => {
+                let old_font_size = self.font_size;
                 let config = get_config();
                 self.font_size = config.appearance.font.size;
+                self.resize_pty_for_font_change(old_font_size);
                 Task::none()
             }
 
             Message::SwitchTheme(theme_name) => {
                 // Switch to a new theme by name
                 if let Some(new_theme) = theme::Theme::by_name(&theme_name) {
-                    // TODO: self.current_theme = new_theme; (field not yet added)
+                    self.current_theme = new_theme;
                     tracing::info!("Switched to theme: {}", theme_name);
                 } else {
                     tracing::warn!("Theme '{}' not found, keeping current theme", theme_name);

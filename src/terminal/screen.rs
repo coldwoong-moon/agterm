@@ -3,9 +3,19 @@
 use iced::Color;
 use std::cmp::{max, min};
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use unicode_width::UnicodeWidthChar;
 use vte::{Params, Parser, Perform};
+
+/// Cached URL regex pattern (compiled once, reused everywhere)
+static URL_REGEX: OnceLock<regex::Regex> = OnceLock::new();
+
+fn get_url_regex() -> &'static regex::Regex {
+    URL_REGEX.get_or_init(|| {
+        regex::Regex::new(r"(?i)(https?://[^\s<>{}|\\\^\[\]`]+|file://[^\s<>{}|\\\^\[\]`]+)")
+            .expect("Invalid URL regex pattern")
+    })
+}
 
 mod memory;
 mod scrollback;
@@ -902,10 +912,8 @@ impl TerminalScreen {
 
     /// Auto-detect URLs in all lines and update cell hyperlinks
     pub fn detect_urls(&mut self) {
-        // URL regex pattern: http://, https://, file://
-        let url_pattern =
-            regex::Regex::new(r"(?i)(https?://[^\s<>{}|\\\^\[\]`]+|file://[^\s<>{}|\\\^\[\]`]+)")
-                .unwrap();
+        // Use cached URL regex pattern
+        let url_pattern = get_url_regex();
 
         // Process all lines in buffer
         for row in &mut self.buffer {

@@ -591,6 +591,7 @@ impl<'a> TerminalCanvas<'a> {
         // This reduces the number of draw calls significantly
         let mut merged_text = String::with_capacity(128); // Pre-allocate
         let mut current_color: Option<Color> = None;
+        let mut current_bg: Option<Color> = None;
         let mut current_bold = false;
         let mut current_underline = false;
         let mut current_dim = false;
@@ -622,6 +623,7 @@ impl<'a> TerminalCanvas<'a> {
 
             // Check if we can merge with current segment
             let can_merge = current_color == Some(color)
+                && current_bg == span.bg
                 && current_bold == span.bold
                 && current_underline == span.underline
                 && current_dim == span.dim
@@ -639,6 +641,7 @@ impl<'a> TerminalCanvas<'a> {
                     let span_data = StyledSpan {
                         text: merged_text.clone(),
                         color: Some(effective_color),
+                        bg: current_bg,
                         bold: current_bold,
                         underline: current_underline,
                         dim: current_dim,
@@ -664,6 +667,7 @@ impl<'a> TerminalCanvas<'a> {
                 // Start new segment
                 merged_text.push_str(&span.text);
                 current_color = Some(color);
+                current_bg = span.bg;
                 current_bold = span.bold;
                 current_underline = span.underline;
                 current_dim = span.dim;
@@ -679,6 +683,7 @@ impl<'a> TerminalCanvas<'a> {
             let span_data = StyledSpan {
                 text: merged_text.clone(),
                 color: Some(effective_color),
+                bg: current_bg,
                 bold: current_bold,
                 underline: current_underline,
                 dim: current_dim,
@@ -706,6 +711,15 @@ impl<'a> TerminalCanvas<'a> {
         color: Color,
         span: &StyledSpan,
     ) {
+        let char_count = text.chars().count();
+        let text_width = char_count as f32 * config::char_width(self.font_size);
+        let line_height = config::line_height(self.font_size);
+
+        // Draw background color if present
+        if let Some(bg) = span.bg {
+            frame.fill_rectangle(Point::new(x, y), Size::new(text_width, line_height), bg);
+        }
+
         // Use cyan color for hyperlinks
         let display_color = if span.hyperlink.is_some() {
             Color::from_rgb(0.3, 0.8, 0.8) // Cyan for URLs
@@ -725,12 +739,9 @@ impl<'a> TerminalCanvas<'a> {
         };
         frame.fill_text(text_obj);
 
-        let char_count = text.chars().count();
-        let text_width = char_count as f32 * config::char_width(self.font_size);
-
         // Draw underline for URLs or underlined text
         if span.underline || span.hyperlink.is_some() {
-            let underline_y = y + config::line_height(self.font_size) - 2.0;
+            let underline_y = y + line_height - 2.0;
             frame.fill_rectangle(
                 Point::new(x, underline_y),
                 Size::new(text_width, 1.0),
@@ -740,7 +751,7 @@ impl<'a> TerminalCanvas<'a> {
 
         // Draw strikethrough
         if span.strikethrough {
-            let strikethrough_y = y + config::line_height(self.font_size) / 2.0;
+            let strikethrough_y = y + line_height / 2.0;
             frame.fill_rectangle(
                 Point::new(x, strikethrough_y),
                 Size::new(text_width, 1.0),
