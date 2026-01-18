@@ -17,9 +17,9 @@
 //! use agterm::terminal::pty::PtyManager;
 //!
 //! let manager = PtyManager::new();
-//! let pty_id = manager.create_session(40, 120, None).unwrap();
-//! manager.write(pty_id, b"echo hello\n").unwrap();
-//! let output = manager.read(pty_id).unwrap();
+//! let pty_id = manager.create_session(40, 120).unwrap();
+//! manager.write(&pty_id, b"echo hello\n").unwrap();
+//! let output = manager.read(&pty_id).unwrap();
 //! ```
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
