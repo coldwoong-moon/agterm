@@ -62,6 +62,9 @@ cursor_blink_interval_ms = 530
 bell_enabled = true
 bell_style = "visual"            # visual, sound, both, none
 bell_volume = 0.5                # 0.0 to 1.0 (50% by default)
+visual_flash = true              # Enable visual flash effect
+flash_color = "#FFFFFF80"        # Flash color in hex format (#RRGGBB or #RRGGBBAA)
+flash_duration_ms = 100          # Flash duration in milliseconds
 bracketed_paste = true
 auto_scroll_on_output = true
 

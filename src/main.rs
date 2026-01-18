@@ -5,7 +5,7 @@
 
 use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::text_input::Id as TextInputId;
-use iced::widget::{button, column, container, row, text, text_input, Space};
+use iced::widget::{button, column, container, row, stack, text, text_input, Space};
 use iced::{Alignment, Border, Color, Element, Font, Length, Subscription, Task};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -362,6 +362,10 @@ struct AgTerm {
     env_info: EnvironmentInfo,
     /// Bell sound player
     bell_sound: sound::BellSound,
+    /// Bell flash animation state
+    bell_flash_active: bool,
+    /// When the flash started (for animation timing)
+    flash_started_at: Option<Instant>,
 }
 
 impl Default for AgTerm {
@@ -494,6 +498,8 @@ impl Default for AgTerm {
             current_match_index: None,
             env_info,
             bell_sound: sound::BellSound::new(),
+            bell_flash_active: false,
+            flash_started_at: None,
         }
     }
 }
@@ -685,6 +691,9 @@ enum Message {
     // Tick for PTY polling
     Tick,
 
+    // Bell flash animation tick
+    BellFlashTick,
+
     // Debug panel
     ToggleDebugPanel,
     #[allow(dead_code)]
@@ -733,6 +742,27 @@ impl AgTerm {
             }
             _ => {
                 // Visual or None - don't play sound
+            }
+        }
+    }
+
+    /// Trigger bell flash effect based on configuration
+    fn trigger_bell_flash(&mut self) {
+        let config = get_config();
+
+        // Check if bell is enabled and visual flash is enabled
+        if !config.terminal.bell_enabled || !config.terminal.visual_flash {
+            return;
+        }
+
+        // Check if visual bell is enabled in bell_style
+        match config.terminal.bell_style {
+            config::BellStyle::Visual | config::BellStyle::Both => {
+                self.bell_flash_active = true;
+                self.flash_started_at = Some(Instant::now());
+            }
+            _ => {
+                // Sound or None - don't show flash
             }
         }
     }
@@ -1406,6 +1436,20 @@ impl AgTerm {
                 Task::none()
             }
 
+            Message::BellFlashTick => {
+                // Update flash animation state
+                let config = get_config();
+                if let Some(start_time) = self.flash_started_at {
+                    let elapsed = start_time.elapsed().as_millis() as u64;
+                    if elapsed >= config.terminal.flash_duration_ms {
+                        // Flash animation complete
+                        self.bell_flash_active = false;
+                        self.flash_started_at = None;
+                    }
+                }
+                Task::none()
+            }
+
             Message::Tick => {
                 // Record frame for metrics
                 self.debug_panel.metrics.record_frame();
@@ -1521,9 +1565,10 @@ impl AgTerm {
                     }
                 }
 
-                // Play bell sound if triggered in active tab (after releasing tab borrow)
+                // Play bell sound and trigger flash if triggered in active tab (after releasing tab borrow)
                 if active_bell_triggered {
                     self.play_bell_sound();
+                    self.trigger_bell_flash();
                 }
 
                 // Check background tabs for bell notifications
@@ -1665,7 +1710,43 @@ impl AgTerm {
             terminal_area.height(Length::Fill).into()
         };
 
-        container(main_content)
+        // Add bell flash overlay if active
+        let final_content = if self.bell_flash_active {
+            let config = get_config();
+
+            // Calculate flash opacity with fade-out animation
+            let opacity = if let Some(start_time) = self.flash_started_at {
+                let elapsed = start_time.elapsed().as_millis() as u64;
+                let progress = elapsed as f32 / config.terminal.flash_duration_ms as f32;
+                // Fade out: start at full opacity, fade to 0
+                (1.0 - progress).max(0.0)
+            } else {
+                1.0
+            };
+
+            // Parse flash color from config
+            let (r, g, b, base_alpha) = config::parse_hex_color(&config.terminal.flash_color)
+                .unwrap_or((1.0, 1.0, 1.0, 0.5)); // Default to white with 50% opacity
+
+            // Apply fade-out animation to alpha
+            let flash_color = Color::from_rgba(r, g, b, base_alpha * opacity);
+
+            // Create flash overlay
+            let flash_overlay = container(Space::new(Length::Fill, Length::Fill))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(flash_color.into()),
+                    ..Default::default()
+                });
+
+            // Stack main content with flash overlay
+            stack![main_content, flash_overlay].into()
+        } else {
+            main_content
+        };
+
+        container(final_content)
             .width(Length::Fill)
             .height(Length::Fill)
             .style(theme::primary_background_style)
@@ -2023,7 +2104,14 @@ impl AgTerm {
             }
         });
 
-        Subscription::batch([timer, keyboard, window_events])
+        // Fast timer for bell flash animation (60 FPS for smooth fade-out)
+        let flash_timer = if self.bell_flash_active {
+            iced::time::every(Duration::from_millis(16)).map(|_| Message::BellFlashTick)
+        } else {
+            Subscription::none()
+        };
+
+        Subscription::batch([timer, keyboard, window_events, flash_timer])
     }
 }
 
@@ -2082,6 +2170,8 @@ mod tests {
             current_match_index: None,
             env_info: EnvironmentInfo::detect(),
             bell_sound: sound::BellSound::new(),
+            bell_flash_active: false,
+            flash_started_at: None,
         }
     }
 

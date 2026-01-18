@@ -13,6 +13,29 @@ use std::path::PathBuf;
 /// Default configuration embedded in binary
 const DEFAULT_CONFIG: &str = include_str!("../../default_config.toml");
 
+/// Parse hex color string to RGBA components
+/// Supports formats: #RRGGBB, #RRGGBBAA
+pub fn parse_hex_color(hex: &str) -> Option<(f32, f32, f32, f32)> {
+    let hex = hex.trim_start_matches('#');
+
+    if hex.len() == 6 {
+        // #RRGGBB format
+        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+        Some((r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0))
+    } else if hex.len() == 8 {
+        // #RRGGBBAA format
+        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+        let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+        Some((r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0))
+    } else {
+        None
+    }
+}
+
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -174,6 +197,15 @@ pub struct TerminalConfig {
     pub bell_style: BellStyle,
     #[serde(default = "default_bell_volume")]
     pub bell_volume: f32,
+    /// Enable visual flash effect for bell
+    #[serde(default = "default_true")]
+    pub visual_flash: bool,
+    /// Flash overlay color (hex format: #RRGGBB or #RRGGBBAA)
+    #[serde(default = "default_flash_color")]
+    pub flash_color: String,
+    /// Flash duration in milliseconds
+    #[serde(default = "default_flash_duration")]
+    pub flash_duration_ms: u64,
     #[serde(default = "default_true")]
     pub bracketed_paste: bool,
     #[serde(default = "default_true")]
@@ -192,6 +224,9 @@ impl Default for TerminalConfig {
             bell_enabled: true,
             bell_style: default_bell_style(),
             bell_volume: default_bell_volume(),
+            visual_flash: true,
+            flash_color: default_flash_color(),
+            flash_duration_ms: default_flash_duration(),
             bracketed_paste: true,
             auto_scroll_on_output: true,
             images: ImageConfig::default(),
@@ -921,6 +956,14 @@ fn default_bell_style() -> BellStyle {
 
 fn default_bell_volume() -> f32 {
     0.5 // 50% volume
+}
+
+fn default_flash_color() -> String {
+    "#FFFFFF80".to_string() // White with 50% opacity
+}
+
+fn default_flash_duration() -> u64 {
+    100 // 100ms
 }
 
 fn default_image_max_size() -> usize {

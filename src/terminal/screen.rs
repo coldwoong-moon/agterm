@@ -252,14 +252,196 @@ struct AlternateScreenState {
     saved_cursor_state: Option<(usize, usize, Option<AnsiColor>, Option<AnsiColor>, bool)>,
 }
 
+/// Run-length encoded segment for compression
+#[derive(Clone, Debug)]
+struct RleSegment {
+    /// The cell to repeat
+    cell: Cell,
+    /// Number of times this cell repeats
+    count: usize,
+}
+
+/// Compressed line representation using run-length encoding
+#[derive(Clone, Debug)]
+pub struct CompressedLine {
+    /// Run-length encoded segments
+    segments: Vec<RleSegment>,
+    /// Original line length (for validation)
+    original_length: usize,
+    /// Uncompressed size in bytes (approximate)
+    uncompressed_size: usize,
+    /// Compressed size in bytes (approximate)
+    compressed_size: usize,
+}
+
+impl CompressedLine {
+    /// Compress a line of cells using run-length encoding
+    fn compress(line: &[Cell]) -> Self {
+        let mut segments = Vec::new();
+
+        if line.is_empty() {
+            return Self {
+                segments,
+                original_length: 0,
+                uncompressed_size: 0,
+                compressed_size: 0,
+            };
+        }
+
+        let mut current_cell = line[0].clone();
+        let mut count = 1;
+
+        for cell in line.iter().skip(1) {
+            // Check if cells are identical for RLE
+            if cells_equal(&current_cell, cell) {
+                count += 1;
+            } else {
+                segments.push(RleSegment {
+                    cell: current_cell.clone(),
+                    count,
+                });
+                current_cell = cell.clone();
+                count = 1;
+            }
+        }
+
+        // Push the last segment
+        segments.push(RleSegment {
+            cell: current_cell,
+            count,
+        });
+
+        let original_length = line.len();
+        let uncompressed_size = original_length * std::mem::size_of::<Cell>();
+        let compressed_size = segments.len() * (std::mem::size_of::<Cell>() + std::mem::size_of::<usize>());
+
+        Self {
+            segments,
+            original_length,
+            uncompressed_size,
+            compressed_size,
+        }
+    }
+
+    /// Decompress the line back to a vector of cells
+    fn decompress(&self) -> Vec<Cell> {
+        let mut line = Vec::with_capacity(self.original_length);
+
+        for segment in &self.segments {
+            for _ in 0..segment.count {
+                line.push(segment.cell.clone());
+            }
+        }
+
+        line
+    }
+
+    /// Get compression ratio (compressed_size / uncompressed_size)
+    fn compression_ratio(&self) -> f64 {
+        if self.uncompressed_size == 0 {
+            return 1.0;
+        }
+        self.compressed_size as f64 / self.uncompressed_size as f64
+    }
+
+    /// Get space saved in bytes
+    fn space_saved(&self) -> isize {
+        self.uncompressed_size as isize - self.compressed_size as isize
+    }
+}
+
+/// Check if two cells are equal for compression purposes
+fn cells_equal(a: &Cell, b: &Cell) -> bool {
+    a.c == b.c
+        && a.fg == b.fg
+        && a.bg == b.bg
+        && a.bold == b.bold
+        && a.underline == b.underline
+        && a.reverse == b.reverse
+        && a.dim == b.dim
+        && a.italic == b.italic
+        && a.strikethrough == b.strikethrough
+        && a.wide == b.wide
+        && a.placeholder == b.placeholder
+        && match (&a.hyperlink, &b.hyperlink) {
+            (None, None) => true,
+            (Some(a_link), Some(b_link)) => Arc::ptr_eq(a_link, b_link) || a_link == b_link,
+            _ => false,
+        }
+        // Ignore image comparison for performance - images are rare
+        && a.image.is_none() && b.image.is_none()
+}
+
+/// Compression statistics for monitoring
+#[derive(Clone, Debug, Default)]
+pub struct CompressionStats {
+    /// Total lines compressed
+    pub total_lines: usize,
+    /// Total uncompressed size in bytes
+    pub total_uncompressed: usize,
+    /// Total compressed size in bytes
+    pub total_compressed: usize,
+    /// Best compression ratio achieved
+    pub best_ratio: f64,
+    /// Worst compression ratio achieved
+    pub worst_ratio: f64,
+    /// Average compression ratio
+    pub avg_ratio: f64,
+}
+
+impl CompressionStats {
+    /// Create new empty stats
+    fn new() -> Self {
+        Self {
+            total_lines: 0,
+            total_uncompressed: 0,
+            total_compressed: 0,
+            best_ratio: f64::MAX,
+            worst_ratio: 0.0,
+            avg_ratio: 0.0,
+        }
+    }
+
+    /// Update stats with a new compressed line
+    fn update(&mut self, compressed: &CompressedLine) {
+        self.total_lines += 1;
+        self.total_uncompressed += compressed.uncompressed_size;
+        self.total_compressed += compressed.compressed_size;
+
+        let ratio = compressed.compression_ratio();
+        self.best_ratio = self.best_ratio.min(ratio);
+        self.worst_ratio = self.worst_ratio.max(ratio);
+
+        // Update average
+        if self.total_uncompressed > 0 {
+            self.avg_ratio = self.total_compressed as f64 / self.total_uncompressed as f64;
+        }
+    }
+
+    /// Get total space saved in bytes
+    pub fn space_saved(&self) -> isize {
+        self.total_uncompressed as isize - self.total_compressed as isize
+    }
+
+    /// Get space saved as percentage
+    pub fn space_saved_percent(&self) -> f64 {
+        if self.total_uncompressed == 0 {
+            return 0.0;
+        }
+        (self.space_saved() as f64 / self.total_uncompressed as f64) * 100.0
+    }
+}
+
 /// Terminal screen buffer with VTE parser
 pub struct TerminalScreen {
     cols: usize,
     rows: usize,
     /// Screen buffer (rows x cols) - only visible lines
     buffer: Vec<Vec<Cell>>,
-    /// Scrollback buffer (historical lines)
-    scrollback: VecDeque<Vec<Cell>>,
+    /// Scrollback buffer (historical lines) - compressed for memory efficiency
+    scrollback: VecDeque<CompressedLine>,
+    /// Compression statistics
+    compression_stats: CompressionStats,
     /// Cursor position
     cursor_row: usize,
     cursor_col: usize,
@@ -291,8 +473,8 @@ pub struct TerminalScreen {
     clipboard_request: Option<String>,
     /// Alternate screen buffer (for applications like vim, less, etc.)
     alternate_buffer: Option<Vec<Vec<Cell>>>,
-    /// Alternate scrollback buffer
-    alternate_scrollback: Option<VecDeque<Vec<Cell>>>,
+    /// Alternate scrollback buffer (compressed)
+    alternate_scrollback: Option<VecDeque<CompressedLine>>,
     /// Whether we're currently using the alternate screen
     use_alternate_screen: bool,
     /// Saved main screen state (cursor pos, attributes, scroll region, etc.)
@@ -340,6 +522,7 @@ impl TerminalScreen {
             rows,
             buffer: vec![vec![Cell::default(); cols]; rows],
             scrollback: VecDeque::new(),
+            compression_stats: CompressionStats::new(),
             cursor_row: 0,
             cursor_col: 0,
             current_fg: None,
@@ -470,11 +653,13 @@ impl TerminalScreen {
 
         // Handle row resize
         if rows < old_rows {
-            // Rows decreased: move top lines to scrollback
+            // Rows decreased: move top lines to scrollback (compressed)
             let lines_to_save = old_rows - rows;
             for i in 0..lines_to_save {
                 if i < new_buffer.len() {
-                    self.scrollback.push_back(new_buffer[i].clone());
+                    let compressed = CompressedLine::compress(&new_buffer[i]);
+                    self.compression_stats.update(&compressed);
+                    self.scrollback.push_back(compressed);
                 }
             }
 
@@ -491,10 +676,11 @@ impl TerminalScreen {
             // Rows increased: restore from scrollback if available
             let lines_to_restore = min(rows - old_rows, self.scrollback.len());
 
-            // Restore lines from scrollback (from the end)
+            // Restore lines from scrollback (from the end) - decompress
             let mut restored_lines = Vec::new();
             for _ in 0..lines_to_restore {
-                if let Some(mut line) = self.scrollback.pop_back() {
+                if let Some(compressed_line) = self.scrollback.pop_back() {
+                    let mut line = compressed_line.decompress();
                     // Reflow restored line to new column width
                     if cols != old_cols {
                         line.resize(cols, Cell::default());
@@ -553,7 +739,12 @@ impl TerminalScreen {
 
     /// Get all lines (scrollback + visible) for rendering
     pub fn get_all_lines(&self) -> Vec<Vec<Cell>> {
-        let mut all_lines: Vec<Vec<Cell>> = self.scrollback.iter().cloned().collect();
+        // Decompress scrollback lines lazily
+        let mut all_lines: Vec<Vec<Cell>> = self
+            .scrollback
+            .iter()
+            .map(|compressed| compressed.decompress())
+            .collect();
         all_lines.extend(self.buffer.clone());
         all_lines
     }
@@ -597,14 +788,17 @@ impl TerminalScreen {
             }
         }
 
-        // Process scrollback buffer
-        for row in self.scrollback.iter_mut() {
+        // Process scrollback buffer - decompress, update, recompress
+        for compressed_line in self.scrollback.iter_mut() {
+            let mut row = compressed_line.decompress();
+
             let line_text: String = row
                 .iter()
                 .filter(|cell| !cell.placeholder)
                 .map(|cell| cell.c)
                 .collect();
 
+            let mut modified = false;
             for mat in url_pattern.find_iter(&line_text) {
                 let url = mat.as_str().to_string();
                 let start_col = mat.start();
@@ -620,9 +814,15 @@ impl TerminalScreen {
                     }
                     if char_index >= start_col && char_index < end_col {
                         cell.hyperlink = Some(Arc::clone(&interned_url));
+                        modified = true;
                     }
                     char_index += 1;
                 }
+            }
+
+            // Recompress the line if modified
+            if modified {
+                *compressed_line = CompressedLine::compress(&row);
             }
         }
 
@@ -647,6 +847,11 @@ impl TerminalScreen {
     /// Get scrollback buffer size
     pub fn scrollback_size(&self) -> usize {
         self.scrollback.len()
+    }
+
+    /// Get compression statistics for scrollback buffer
+    pub fn compression_stats(&self) -> &CompressionStats {
+        &self.compression_stats
     }
 
     /// Get window title (OSC 0 or OSC 2) - reserved for future window title bar integration
@@ -803,10 +1008,10 @@ impl TerminalScreen {
             .map(|line| memory::line_memory_size(line))
             .sum();
 
-        let scrollback_bytes = self
+        let scrollback_bytes: usize = self
             .scrollback
             .iter()
-            .map(|line| memory::line_memory_size(line))
+            .map(|compressed| compressed.compressed_size)
             .sum();
 
         let interner_bytes = self.string_interner.memory_usage();
@@ -842,9 +1047,11 @@ impl TerminalScreen {
         let (top, bottom) = self.scroll_region.unwrap_or((0, self.rows - 1));
 
         for _ in 0..n {
-            // Save top line to scrollback
+            // Save top line to scrollback (compressed)
             if top == 0 {
-                self.scrollback.push_back(self.buffer[top].clone());
+                let compressed = CompressedLine::compress(&self.buffer[top]);
+                self.compression_stats.update(&compressed);
+                self.scrollback.push_back(compressed);
                 if self.scrollback.len() > MAX_SCROLLBACK {
                     self.scrollback.pop_front();
                 }
@@ -3749,5 +3956,343 @@ mod alternate_screen_tests {
         assert_eq!(row, 9);
         assert_eq!(col, 19);
         assert!(!screen.cursor_blink_enabled()); // Blink state preserved
+    }
+}
+
+#[cfg(test)]
+mod compression_tests {
+    use super::*;
+
+    #[test]
+    fn test_compress_empty_line() {
+        let line: Vec<Cell> = vec![];
+        let compressed = CompressedLine::compress(&line);
+
+        assert_eq!(compressed.original_length, 0);
+        assert_eq!(compressed.segments.len(), 0);
+        assert_eq!(compressed.uncompressed_size, 0);
+        assert_eq!(compressed.compressed_size, 0);
+
+        let decompressed = compressed.decompress();
+        assert_eq!(decompressed.len(), 0);
+    }
+
+    #[test]
+    fn test_compress_single_cell() {
+        let line = vec![Cell::default()];
+        let compressed = CompressedLine::compress(&line);
+
+        assert_eq!(compressed.original_length, 1);
+        assert_eq!(compressed.segments.len(), 1);
+        assert_eq!(compressed.segments[0].count, 1);
+
+        let decompressed = compressed.decompress();
+        assert_eq!(decompressed.len(), 1);
+        assert_eq!(decompressed[0].c, ' ');
+    }
+
+    #[test]
+    fn test_compress_uniform_line() {
+        // All spaces - should compress to 1 segment
+        let line = vec![Cell::default(); 80];
+        let compressed = CompressedLine::compress(&line);
+
+        assert_eq!(compressed.original_length, 80);
+        assert_eq!(compressed.segments.len(), 1);
+        assert_eq!(compressed.segments[0].count, 80);
+        assert_eq!(compressed.segments[0].cell.c, ' ');
+
+        // Verify compression ratio
+        let ratio = compressed.compression_ratio();
+        assert!(ratio < 0.1); // Should compress very well
+
+        let decompressed = compressed.decompress();
+        assert_eq!(decompressed.len(), 80);
+        for cell in decompressed {
+            assert_eq!(cell.c, ' ');
+        }
+    }
+
+    #[test]
+    fn test_compress_alternating_cells() {
+        // Worst case: alternating characters
+        let mut line = Vec::new();
+        for i in 0..80 {
+            let mut cell = Cell::default();
+            cell.c = if i % 2 == 0 { 'A' } else { 'B' };
+            line.push(cell);
+        }
+
+        let compressed = CompressedLine::compress(&line);
+
+        assert_eq!(compressed.original_length, 80);
+        assert_eq!(compressed.segments.len(), 80); // No compression possible
+
+        // Compression ratio should be close to or greater than 1.0 (no benefit)
+        let ratio = compressed.compression_ratio();
+        assert!(ratio >= 0.9);
+
+        let decompressed = compressed.decompress();
+        assert_eq!(decompressed.len(), 80);
+        for (i, cell) in decompressed.iter().enumerate() {
+            let expected = if i % 2 == 0 { 'A' } else { 'B' };
+            assert_eq!(cell.c, expected);
+        }
+    }
+
+    #[test]
+    fn test_compress_realistic_terminal_line() {
+        // Realistic case: prompt + text + spaces
+        let mut line = Vec::new();
+
+        // "$ ls -la" followed by spaces
+        let text = "$ ls -la";
+        for ch in text.chars() {
+            let mut cell = Cell::default();
+            cell.c = ch;
+            cell.bold = true;
+            line.push(cell);
+        }
+
+        // Fill rest with spaces
+        for _ in text.len()..80 {
+            line.push(Cell::default());
+        }
+
+        let compressed = CompressedLine::compress(&line);
+
+        assert_eq!(compressed.original_length, 80);
+        // Should compress to: text.len() segments for text + 1 segment for spaces
+        assert!(compressed.segments.len() <= text.len() + 1);
+
+        // Should have good compression due to trailing spaces
+        let ratio = compressed.compression_ratio();
+        assert!(ratio < 0.5);
+
+        let decompressed = compressed.decompress();
+        assert_eq!(decompressed.len(), 80);
+        assert_eq!(decompressed[0].c, '$');
+        assert_eq!(decompressed[1].c, ' ');
+        assert_eq!(decompressed[2].c, 'l');
+        assert!(decompressed[79].c == ' ');
+    }
+
+    #[test]
+    fn test_compress_line_with_colors() {
+        let mut line = Vec::new();
+
+        // Red 'A' repeated 20 times
+        for _ in 0..20 {
+            let mut cell = Cell::default();
+            cell.c = 'A';
+            cell.fg = Some(AnsiColor::Indexed(1)); // Red
+            line.push(cell);
+        }
+
+        // Green 'B' repeated 20 times
+        for _ in 0..20 {
+            let mut cell = Cell::default();
+            cell.c = 'B';
+            cell.fg = Some(AnsiColor::Indexed(2)); // Green
+            line.push(cell);
+        }
+
+        // Spaces
+        for _ in 0..40 {
+            line.push(Cell::default());
+        }
+
+        let compressed = CompressedLine::compress(&line);
+
+        assert_eq!(compressed.original_length, 80);
+        assert_eq!(compressed.segments.len(), 3); // 3 runs
+        assert_eq!(compressed.segments[0].count, 20);
+        assert_eq!(compressed.segments[1].count, 20);
+        assert_eq!(compressed.segments[2].count, 40);
+
+        let decompressed = compressed.decompress();
+        assert_eq!(decompressed.len(), 80);
+        assert_eq!(decompressed[0].c, 'A');
+        assert_eq!(decompressed[0].fg, Some(AnsiColor::Indexed(1)));
+        assert_eq!(decompressed[20].c, 'B');
+        assert_eq!(decompressed[20].fg, Some(AnsiColor::Indexed(2)));
+        assert_eq!(decompressed[40].c, ' ');
+    }
+
+    #[test]
+    fn test_compression_stats_tracking() {
+        let mut stats = CompressionStats::new();
+
+        // Compress several lines
+        let line1 = vec![Cell::default(); 80]; // All spaces
+        let compressed1 = CompressedLine::compress(&line1);
+        stats.update(&compressed1);
+
+        let mut line2 = Vec::new();
+        for i in 0..80 {
+            let mut cell = Cell::default();
+            cell.c = if i % 2 == 0 { 'A' } else { 'B' };
+            line2.push(cell);
+        }
+        let compressed2 = CompressedLine::compress(&line2);
+        stats.update(&compressed2);
+
+        assert_eq!(stats.total_lines, 2);
+        assert!(stats.total_uncompressed > 0);
+        assert!(stats.total_compressed > 0);
+        assert!(stats.best_ratio < stats.worst_ratio);
+        assert!(stats.avg_ratio > 0.0);
+        assert!(stats.space_saved_percent() >= 0.0);
+    }
+
+    #[test]
+    fn test_scrollback_compression_on_scroll() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Fill screen with text
+        for i in 0..30 {
+            screen.process(format!("Line {}\n", i).as_bytes());
+        }
+
+        // Check that scrollback is compressed
+        let scrollback_size = screen.scrollback_size();
+        assert!(scrollback_size > 0);
+
+        // Get compression stats
+        let stats = screen.compression_stats();
+        assert_eq!(stats.total_lines, scrollback_size);
+        assert!(stats.total_compressed > 0);
+        assert!(stats.total_uncompressed > 0);
+
+        // For lines with text, compression should save space
+        // (due to trailing spaces)
+        assert!(stats.space_saved() > 0);
+    }
+
+    #[test]
+    fn test_scrollback_compression_roundtrip() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Add lines that will go to scrollback
+        for i in 0..50 {
+            screen.process(format!("Test line {}\n", i).as_bytes());
+        }
+
+        // Get all lines (should decompress scrollback)
+        let all_lines = screen.get_all_lines();
+
+        // Should have scrollback + visible lines
+        let expected_total = screen.scrollback_size() + screen.rows;
+        assert_eq!(all_lines.len(), expected_total);
+
+        // Check that first line is readable
+        let first_line_text: String = all_lines[0]
+            .iter()
+            .filter(|c| !c.placeholder)
+            .map(|c| c.c)
+            .collect::<String>()
+            .trim()
+            .to_string();
+
+        assert!(first_line_text.contains("Test line"));
+    }
+
+    #[test]
+    fn test_cells_equal() {
+        let cell1 = Cell::default();
+        let mut cell2 = Cell::default();
+
+        // Same cells should be equal
+        assert!(cells_equal(&cell1, &cell2));
+
+        // Different character
+        cell2.c = 'A';
+        assert!(!cells_equal(&cell1, &cell2));
+        cell2.c = ' ';
+
+        // Different color
+        cell2.fg = Some(AnsiColor::Indexed(1));
+        assert!(!cells_equal(&cell1, &cell2));
+        cell2.fg = None;
+
+        // Different bold
+        cell2.bold = true;
+        assert!(!cells_equal(&cell1, &cell2));
+        cell2.bold = false;
+
+        // Different underline
+        cell2.underline = true;
+        assert!(!cells_equal(&cell1, &cell2));
+    }
+
+    #[test]
+    fn test_compression_with_wide_characters() {
+        let mut line = Vec::new();
+
+        // Add wide characters (e.g., CJK)
+        for _ in 0..10 {
+            let mut cell = Cell::default();
+            cell.c = '中';
+            cell.wide = true;
+            line.push(cell);
+
+            // Placeholder for second half
+            let mut placeholder = Cell::default();
+            placeholder.placeholder = true;
+            line.push(placeholder);
+        }
+
+        // Fill with spaces
+        for _ in 0..60 {
+            line.push(Cell::default());
+        }
+
+        let compressed = CompressedLine::compress(&line);
+
+        assert_eq!(compressed.original_length, 80);
+        // Should compress well: runs of wide chars, placeholders, and spaces
+        assert!(compressed.segments.len() < 80);
+
+        let decompressed = compressed.decompress();
+        assert_eq!(decompressed.len(), 80);
+        assert_eq!(decompressed[0].c, '中');
+        assert!(decompressed[0].wide);
+        assert!(decompressed[1].placeholder);
+    }
+
+    #[test]
+    fn test_compression_stats_space_saved() {
+        let mut stats = CompressionStats::new();
+
+        // All spaces line - excellent compression
+        let line = vec![Cell::default(); 100];
+        let compressed = CompressedLine::compress(&line);
+        stats.update(&compressed);
+
+        assert!(stats.space_saved() > 0);
+        assert!(stats.space_saved_percent() > 50.0); // Should save >50%
+    }
+
+    #[test]
+    fn test_resize_with_compression() {
+        let mut screen = TerminalScreen::new(80, 24);
+
+        // Fill screen
+        for i in 0..30 {
+            screen.process(format!("Line {}\n", i).as_bytes());
+        }
+
+        let scrollback_before = screen.scrollback_size();
+        assert!(scrollback_before > 0);
+
+        // Resize smaller (should compress more lines to scrollback)
+        screen.resize(80, 20);
+
+        let scrollback_after = screen.scrollback_size();
+        assert!(scrollback_after > scrollback_before);
+
+        // Stats should be updated
+        let stats = screen.compression_stats();
+        assert_eq!(stats.total_lines, scrollback_after);
     }
 }
