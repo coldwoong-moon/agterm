@@ -1,7 +1,5 @@
 //! Integration test for session restoration
 
-use std::fs;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 #[test]

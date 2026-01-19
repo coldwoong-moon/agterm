@@ -14,12 +14,11 @@ fn main() {
 #[cfg(feature = "iced-gui")]
 use iced::Color;
 
-#[cfg(feature = "iced-gui")]
-
 // Note: This is a standalone example showing the API usage.
 // In production, the render_cache module would be imported from agterm crate.
 
 /// Example: Basic style caching
+#[cfg(feature = "iced-gui")]
 fn example_style_cache() {
     println!("=== Style Cache Example ===");
 
@@ -32,6 +31,7 @@ fn example_style_cache() {
 }
 
 /// Example: Glyph metric caching
+#[cfg(feature = "iced-gui")]
 fn example_glyph_cache() {
     println!("=== Glyph Cache Example ===");
 
@@ -45,6 +45,7 @@ fn example_glyph_cache() {
 }
 
 /// Example: Cell rendering cache
+#[cfg(feature = "iced-gui")]
 fn example_cell_cache() {
     println!("=== Cell Cache Example ===");
 
@@ -58,6 +59,7 @@ fn example_cell_cache() {
 }
 
 /// Example: Line-level caching with dirty tracking
+#[cfg(feature = "iced-gui")]
 fn example_line_cache() {
     println!("=== Line Cache Example ===");
 
@@ -78,6 +80,7 @@ fn example_line_cache() {
 }
 
 /// Example: Complete cache manager usage
+#[cfg(feature = "iced-gui")]
 fn example_cache_manager() {
     println!("=== Render Cache Manager Example ===");
 
@@ -109,6 +112,7 @@ fn example_cache_manager() {
 }
 
 /// Example: Cache statistics and profiling
+#[cfg(feature = "iced-gui")]
 fn example_cache_stats() {
     println!("=== Cache Statistics Example ===");
 
@@ -133,6 +137,7 @@ fn example_cache_stats() {
 }
 
 /// Example: Integration with terminal rendering
+#[cfg(feature = "iced-gui")]
 fn example_integration() {
     println!("=== Terminal Rendering Integration ===");
 
@@ -165,6 +170,7 @@ fn example_integration() {
 }
 
 /// Example: Memory management and tuning
+#[cfg(feature = "iced-gui")]
 fn example_memory_management() {
     println!("=== Memory Management ===");
 

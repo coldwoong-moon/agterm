@@ -2,7 +2,6 @@
 
 use agterm::snippets::{Snippet, SnippetManager, SnippetError};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use tempfile::tempdir;
 
 #[test]

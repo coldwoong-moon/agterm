@@ -1,6 +1,6 @@
 //! Demonstration of the bookmark system functionality
 
-use agterm::bookmarks::{Bookmark, BookmarkManager, BookmarkUpdate};
+use agterm::bookmarks::{BookmarkManager, BookmarkUpdate};
 use std::path::PathBuf;
 
 fn main() {
@@ -34,7 +34,7 @@ fn main() {
         .unwrap();
     println!("  ✓ Added 'Docker PS' bookmark");
 
-    let id3 = manager
+    let _id3 = manager
         .add_bookmark(
             "Cargo Build",
             "cargo build --release",

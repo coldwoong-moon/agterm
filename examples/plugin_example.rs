@@ -9,7 +9,7 @@
 
 use agterm::plugin_api::{
     HookContext, HookHandler, HookType, LogLevel, Notification, Permission, Plugin, PluginContext,
-    PluginDependency, PluginError, PluginEvent, PluginId, PluginManager, PluginMetadata,
+    PluginDependency, PluginError, PluginEvent, PluginManager, PluginMetadata,
     TerminalPermission,
 };
 use std::sync::Arc;

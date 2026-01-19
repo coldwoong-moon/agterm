@@ -348,7 +348,7 @@ fn test_command_with_backspace() {
     screen.process(b"\x08"); // Backspace
     screen.process(b"o test\r\n"); // Correction
 
-    let lines = screen.get_all_lines();
+    let _lines = screen.get_all_lines();
     // After backspaces, cursor moves back
     // The exact output depends on whether shell echoes the correction
 }

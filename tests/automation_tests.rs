@@ -3,7 +3,6 @@
 use agterm::automation::*;
 use agterm::terminal::pty::PtyManager;
 use regex::Regex;
-use std::collections::HashMap;
 use std::time::Duration;
 
 // Helper function to create a test engine

@@ -442,7 +442,7 @@ fn test_emoji_sequences() {
     screen.process("👨‍💻 ".as_bytes()); // Technologist (multi-codepoint)
     screen.process("❤️ ".as_bytes()); // Heart (with variation selector)
 
-    let lines = screen.get_all_lines();
+    let _lines = screen.get_all_lines();
     // Should have some content (exact width handling may vary)
     let pos = screen.cursor_position();
     assert!(pos.1 > 0);

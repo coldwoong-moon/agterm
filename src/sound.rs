@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn test_bell_sound_creation() {
-        let bell = BellSound::new();
+        let _bell = BellSound::new();
         // Should not panic
         assert!(true);
     }

@@ -3,7 +3,6 @@
 //! This example demonstrates how to use the AgTerm profile system.
 
 use agterm::profiles::{Profile, ProfileManager, FontSettings, ColorSettings, TerminalSettings, ShellSettings};
-use std::collections::HashMap;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== AgTerm Profile System Demo ===\n");

@@ -368,7 +368,6 @@ mod systemtime_serde {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::TempDir;
 
     #[test]

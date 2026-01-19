@@ -11,7 +11,7 @@
 mod floem_integration {
     use agterm::floem_app::settings::{Settings, CursorStyle};
     use agterm::floem_app::pane::{PaneTree, SplitDirection, NavigationDirection};
-    use agterm::floem_app::theme::{Theme, ColorPalette};
+    use agterm::floem_app::theme::Theme;
     use agterm::terminal::pty::PtyManager;
     use std::sync::Arc;
 

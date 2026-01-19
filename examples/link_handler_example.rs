@@ -3,7 +3,7 @@
 //! This example demonstrates how to use the link_handler module to detect
 //! and handle various types of links in terminal output.
 
-use agterm::link_handler::{Link, LinkAction, LinkDetector, LinkHandler, LinkType};
+use agterm::link_handler::{LinkAction, LinkDetector, LinkHandler, LinkType};
 
 fn main() {
     // Example 1: Basic link detection

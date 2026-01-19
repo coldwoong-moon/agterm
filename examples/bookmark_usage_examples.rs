@@ -2,7 +2,7 @@
 //!
 //! This file demonstrates all major features and common use cases.
 
-use agterm::bookmarks::{Bookmark, BookmarkManager, BookmarkUpdate};
+use agterm::bookmarks::{BookmarkManager, BookmarkUpdate};
 use std::path::PathBuf;
 
 fn main() {
@@ -292,7 +292,7 @@ fn example_persistence() {
 fn example_advanced_patterns() {
     println!("=== Advanced Patterns ===\n");
 
-    let mut manager = BookmarkManager::with_defaults();
+    let manager = BookmarkManager::with_defaults();
 
     // Fuzzy search across multiple fields
     let query = "build";
