@@ -857,6 +857,14 @@ impl StandaloneMcpServer {
                                 "limit": {"type": "integer", "description": "Maximum number of entries to return (default: 50)"}
                             }
                         }
+                    },
+                    {
+                        "name": "open_gui",
+                        "description": "Open AgTerm GUI window (launches separate process)",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {}
+                        }
                     }
                 ]
             })),
@@ -904,6 +912,7 @@ impl StandaloneMcpServer {
             "set_cwd" => self.set_cwd(args),
             "set_env" => self.set_env(args),
             "get_history" => self.get_history(args),
+            "open_gui" => self.open_gui(),
             _ => Err(JsonRpcError {
                 code: -32602,
                 message: format!("Unknown tool: {}", name),
@@ -1566,6 +1575,37 @@ impl StandaloneMcpServer {
             "content": [{
                 "type": "text",
                 "text": serde_json::to_string_pretty(&history).unwrap_or_else(|_| "[]".to_string())
+            }]
+        }))
+    }
+
+    fn open_gui(&self) -> Result<Value, JsonRpcError> {
+        // Get the path to the current executable
+        let exe_path = std::env::current_exe()
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Failed to get executable path: {}", e),
+                data: None,
+            })?;
+
+        tracing::info!("Opening AgTerm GUI from: {:?}", exe_path);
+
+        // Launch GUI process (without --mcp-server flag)
+        let child = std::process::Command::new(&exe_path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Failed to launch GUI: {}", e),
+                data: None,
+            })?;
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": format!("AgTerm GUI launched (PID: {})", child.id())
             }]
         }))
     }

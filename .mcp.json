@@ -2,7 +2,7 @@
   "mcpServers": {
     "agterm": {
       "command": "/Users/yunwoopc/SIDE-PROJECT/agterm/target/debug/agterm",
-      "args": ["--mcp-server"]
+      "args": ["--mcp-server", "--headless"]
     }
   }
 }
