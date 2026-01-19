@@ -1161,6 +1161,20 @@ impl Default for LoggingConfig {
     }
 }
 
+impl LoggingConfig {
+    /// Convert to the logging module's LoggingConfig type
+    pub fn to_logging_config(&self) -> crate::logging::LoggingConfig {
+        crate::logging::LoggingConfig {
+            level: crate::logging::parse_level(&self.level),
+            format: crate::logging::LogFormat::from_str(&self.format),
+            timestamps: self.timestamps,
+            file_line: self.file_line,
+            file_output: self.file_output,
+            file_path: self.file_path.clone(),
+        }
+    }
+}
+
 /// Debug panel configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebugConfig {

@@ -90,11 +90,26 @@ const DEFAULT_LOG_BUFFER_SIZE: usize = 100;
 ///
 /// # Environment Variables
 /// - `AGTERM_LOG`: Override log level (e.g., "agterm=debug,agterm::terminal::pty=trace")
+/// - `AGTERM_LOG_LEVEL`: Simple log level override (trace, debug, info, warn, error)
+/// - `AGTERM_LOG_PATH`: Override log file directory path
 /// - `AGTERM_DEBUG`: Enable debug panel on startup
 pub fn init_logging(config: &LoggingConfig) -> LogBuffer {
+    // Allow simple level override via AGTERM_LOG_LEVEL
+    let effective_level = std::env::var("AGTERM_LOG_LEVEL")
+        .ok()
+        .and_then(|s| match s.to_lowercase().as_str() {
+            "trace" => Some(Level::TRACE),
+            "debug" => Some(Level::DEBUG),
+            "info" => Some(Level::INFO),
+            "warn" | "warning" => Some(Level::WARN),
+            "error" => Some(Level::ERROR),
+            _ => None,
+        })
+        .unwrap_or(config.level);
+
     // Build the environment filter
     let env_filter = EnvFilter::try_from_env("AGTERM_LOG").unwrap_or_else(|_| {
-        EnvFilter::new(format!("agterm={}", config.level.as_str().to_lowercase()))
+        EnvFilter::new(format!("agterm={}", effective_level.as_str().to_lowercase()))
     });
 
     // Create the console layer
@@ -115,7 +130,12 @@ pub fn init_logging(config: &LoggingConfig) -> LogBuffer {
 
     // Create file layer if enabled
     let file_layer = if config.file_output {
-        let log_dir = config.file_path.clone().unwrap_or_else(default_log_dir);
+        // Allow log path override via environment variable
+        let log_dir = std::env::var("AGTERM_LOG_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| config.file_path.clone())
+            .unwrap_or_else(default_log_dir);
 
         // Ensure log directory exists
         if let Err(e) = std::fs::create_dir_all(&log_dir) {
@@ -124,6 +144,8 @@ pub fn init_logging(config: &LoggingConfig) -> LogBuffer {
             );
             None
         } else {
+            eprintln!("AgTerm logs will be written to: {}", log_dir.display());
+
             let file_appender = RollingFileAppender::new(Rotation::DAILY, &log_dir, "agterm.log");
 
             let file_layer = fmt::layer()
@@ -153,12 +175,18 @@ pub fn init_logging(config: &LoggingConfig) -> LogBuffer {
         .with(log_buffer_layer)
         .init();
 
-    tracing::info!("Logging initialized");
+    tracing::info!(
+        level = %effective_level,
+        file_output = config.file_output,
+        "AgTerm logging initialized"
+    );
     tracing::debug!(
-        level = %config.level,
+        level = %effective_level,
         format = ?config.format,
         file_output = config.file_output,
-        "Logging configuration"
+        timestamps = config.timestamps,
+        file_line = config.file_line,
+        "Detailed logging configuration"
     );
 
     log_buffer

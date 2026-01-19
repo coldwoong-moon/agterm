@@ -1,6 +1,6 @@
 //! Terminal screen buffer with ANSI escape code parsing
 
-use iced::Color;
+use crate::color::Color;
 use std::cmp::{max, min};
 use std::collections::VecDeque;
 use std::sync::{Arc, OnceLock};
@@ -168,23 +168,25 @@ impl AnsiColor {
 /// Convert 16-color index to Iced Color
 fn indexed_to_color(idx: u8) -> Color {
     match idx {
-        0 => Color::from_rgb(0.0, 0.0, 0.0),  // Black
-        1 => Color::from_rgb(0.8, 0.2, 0.2),  // Red
-        2 => Color::from_rgb(0.2, 0.8, 0.2),  // Green
-        3 => Color::from_rgb(0.8, 0.8, 0.2),  // Yellow
-        4 => Color::from_rgb(0.2, 0.2, 0.8),  // Blue
-        5 => Color::from_rgb(0.8, 0.2, 0.8),  // Magenta
-        6 => Color::from_rgb(0.2, 0.8, 0.8),  // Cyan
-        7 => Color::from_rgb(0.8, 0.8, 0.8),  // White
-        8 => Color::from_rgb(0.5, 0.5, 0.5),  // Bright Black (Gray)
-        9 => Color::from_rgb(1.0, 0.3, 0.3),  // Bright Red
-        10 => Color::from_rgb(0.3, 1.0, 0.3), // Bright Green
-        11 => Color::from_rgb(1.0, 1.0, 0.3), // Bright Yellow
-        12 => Color::from_rgb(0.3, 0.3, 1.0), // Bright Blue
-        13 => Color::from_rgb(1.0, 0.3, 1.0), // Bright Magenta
-        14 => Color::from_rgb(0.3, 1.0, 1.0), // Bright Cyan
-        15 => Color::from_rgb(1.0, 1.0, 1.0), // Bright White
-        _ => Color::from_rgb(0.8, 0.8, 0.8),  // Default
+        // Standard ANSI colors (0-7)
+        0 => Color::from_rgb8(0, 0, 0),          // Black
+        1 => Color::from_rgb8(205, 49, 49),      // Red
+        2 => Color::from_rgb8(13, 188, 121),     // Green
+        3 => Color::from_rgb8(229, 229, 16),     // Yellow
+        4 => Color::from_rgb8(36, 114, 200),     // Blue
+        5 => Color::from_rgb8(188, 63, 188),     // Magenta
+        6 => Color::from_rgb8(17, 168, 205),     // Cyan
+        7 => Color::from_rgb8(229, 229, 229),    // White
+        // Bright ANSI colors (8-15)
+        8 => Color::from_rgb8(102, 102, 102),    // Bright Black (Gray)
+        9 => Color::from_rgb8(241, 76, 76),      // Bright Red
+        10 => Color::from_rgb8(35, 209, 139),    // Bright Green
+        11 => Color::from_rgb8(245, 245, 67),    // Bright Yellow
+        12 => Color::from_rgb8(59, 142, 234),    // Bright Blue
+        13 => Color::from_rgb8(214, 112, 214),   // Bright Magenta
+        14 => Color::from_rgb8(41, 184, 219),    // Bright Cyan
+        15 => Color::from_rgb8(255, 255, 255),   // Bright White
+        _ => Color::from_rgb8(229, 229, 229),    // Default
     }
 }
 
@@ -666,6 +668,15 @@ pub struct TerminalScreen {
     interner_cleanup_counter: usize,
     /// Dirty tracking for incremental rendering
     dirty_tracker: DirtyTracker,
+    /// Shell integration: Command boundary markers (OSC 133)
+    /// Prompt started (OSC 133;A)
+    prompt_started: bool,
+    /// Command started (OSC 133;C)
+    command_started: bool,
+    /// Last command exit code (OSC 133;D;exit_code)
+    last_exit_code: Option<i32>,
+    /// Command start row for marking command blocks
+    command_start_row: Option<usize>,
 }
 
 impl TerminalScreen {
@@ -717,6 +728,10 @@ impl TerminalScreen {
             string_interner: StringInterner::new(),
             interner_cleanup_counter: 0,
             dirty_tracker: DirtyTracker::new(),
+            prompt_started: false,
+            command_started: false,
+            last_exit_code: None,
+            command_start_row: None,
         }
     }
 
@@ -1037,6 +1052,50 @@ impl TerminalScreen {
         self.scrollback.len()
     }
 
+    /// Get a line from scrollback buffer by index (0 = oldest)
+    pub fn get_scrollback_line(&self, index: usize) -> Option<Vec<Cell>> {
+        self.scrollback
+            .get(index)
+            .map(|compressed| compressed.decompress())
+    }
+
+    /// Get rendered buffer with scrollback
+    ///
+    /// Returns lines to render based on scroll_offset:
+    /// - scroll_offset = 0: show current buffer (live view)
+    /// - scroll_offset > 0: show scrollback + buffer
+    pub fn get_rendered_lines(&self, scroll_offset: usize) -> Vec<Vec<Cell>> {
+        let total_scrollback = self.scrollback.len();
+
+        if scroll_offset == 0 {
+            // Live view - just return current buffer
+            return self.buffer.clone();
+        }
+
+        // Calculate how many lines to take from scrollback
+        let scrollback_lines_to_show = scroll_offset.min(total_scrollback);
+        let buffer_lines_to_show = self.rows.saturating_sub(scrollback_lines_to_show);
+
+        let mut result = Vec::with_capacity(self.rows);
+
+        // Add scrollback lines (from the end of scrollback buffer)
+        let scrollback_start = total_scrollback.saturating_sub(scroll_offset);
+        for i in scrollback_start..(scrollback_start + scrollback_lines_to_show) {
+            if let Some(line) = self.get_scrollback_line(i) {
+                result.push(line);
+            }
+        }
+
+        // Add current buffer lines
+        for i in 0..buffer_lines_to_show {
+            if i < self.buffer.len() {
+                result.push(self.buffer[i].clone());
+            }
+        }
+
+        result
+    }
+
     /// Get compression statistics for scrollback buffer
     pub fn compression_stats(&self) -> &CompressionStats {
         &self.compression_stats
@@ -1069,8 +1128,7 @@ impl TerminalScreen {
         self.icon_name.as_deref()
     }
 
-    /// Get current working directory from shell (OSC 7) - reserved for future tab label enhancement
-    #[allow(dead_code)]
+    /// Get current working directory from shell (OSC 7)
     pub fn cwd_from_shell(&self) -> Option<&str> {
         self.cwd_from_shell.as_deref()
     }
@@ -1090,6 +1148,26 @@ impl TerminalScreen {
     /// Take clipboard request and clear it (consume)
     pub fn take_clipboard_request(&mut self) -> Option<String> {
         self.clipboard_request.take()
+    }
+
+    /// Get last command exit code from OSC 133;D
+    pub fn last_exit_code(&self) -> Option<i32> {
+        self.last_exit_code
+    }
+
+    /// Check if prompt is active (OSC 133;A received)
+    pub fn is_prompt_active(&self) -> bool {
+        self.prompt_started && !self.command_started
+    }
+
+    /// Check if command is running (OSC 133;C received)
+    pub fn is_command_running(&self) -> bool {
+        self.command_started
+    }
+
+    /// Get command start row for block-based UI
+    pub fn command_start_row(&self) -> Option<usize> {
+        self.command_start_row
     }
 
     /// Parse file:// URI to extract path
@@ -1947,6 +2025,45 @@ impl Perform for TerminalScreen {
                     } else if !data.is_empty() {
                         // OSC 52 set - store clipboard data
                         self.clipboard_request = Some(data);
+                    }
+                }
+            }
+            133 => {
+                // OSC 133 ; <mark> - Shell integration command boundaries
+                // Format: OSC 133 ; A/B/C/D [; exit_code] ST
+                // A = prompt start, B = prompt end, C = command start, D = command end
+                if params.len() > 1 {
+                    let mark = String::from_utf8_lossy(params[1]);
+                    match mark.as_ref() {
+                        "A" => {
+                            // Prompt started
+                            self.prompt_started = true;
+                            self.command_started = false;
+                        }
+                        "B" => {
+                            // Prompt ended (user about to enter command)
+                            self.prompt_started = false;
+                        }
+                        "C" => {
+                            // Command started
+                            self.command_started = true;
+                            self.command_start_row = Some(self.cursor_row);
+                        }
+                        "D" => {
+                            // Command ended
+                            self.command_started = false;
+                            self.command_start_row = None;
+                            // Parse exit code if provided (OSC 133;D;exit_code)
+                            if params.len() > 2 {
+                                let exit_code_str = String::from_utf8_lossy(params[2]);
+                                if let Ok(code) = exit_code_str.parse::<i32>() {
+                                    self.last_exit_code = Some(code);
+                                }
+                            }
+                        }
+                        _ => {
+                            // Unknown mark - ignore
+                        }
                     }
                 }
             }
@@ -3493,12 +3610,12 @@ fn test_ansi_color_to_iced_color() {
     // Test Indexed color conversion
     let indexed = AnsiColor::Indexed(1); // Red
     let color = indexed.to_color();
-    assert_eq!(color, Color::from_rgb(0.8, 0.2, 0.2));
+    assert_eq!(color, Color::from_rgb8(205, 49, 49));
 
     // Test 256-color palette conversion (standard color)
     let palette_std = AnsiColor::Palette256(9); // Bright Red
     let color_std = palette_std.to_color();
-    assert_eq!(color_std, Color::from_rgb(1.0, 0.3, 0.3));
+    assert_eq!(color_std, Color::from_rgb8(241, 76, 76));
 
     // Test 256-color palette conversion (color cube)
     let palette_cube = AnsiColor::Palette256(16); // First color in 6x6x6 cube

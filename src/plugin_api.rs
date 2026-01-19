@@ -13,7 +13,7 @@
 //!
 //! # Example
 //! ```no_run
-//! use agterm::plugin_api::{Plugin, PluginMetadata, PluginContext, PluginEvent, PluginError};
+//! use agterm::plugin_api::{Plugin, PluginMetadata, PluginContext, PluginEvent, PluginError, LogLevel};
 //!
 //! struct MyPlugin {
 //!     metadata: PluginMetadata,
@@ -568,6 +568,7 @@ pub trait Plugin: Send + Sync {
 pub struct PluginManager {
     plugins: HashMap<PluginId, Box<dyn Plugin>>,
     states: HashMap<PluginId, PluginState>,
+    #[allow(dead_code)]
     registry: PluginRegistry,
     context: PluginContext,
 }

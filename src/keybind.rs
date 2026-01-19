@@ -7,6 +7,7 @@
 //! - Support multiple modifier keys (Ctrl, Shift, Alt, Cmd)
 
 use std::collections::HashMap;
+#[cfg(feature = "iced-gui")]
 use iced::keyboard::{Key, Modifiers};
 use crate::config::{KeyBinding as ConfigKeyBinding, KeyModifiers as ConfigKeyModifiers};
 

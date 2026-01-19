@@ -15,10 +15,12 @@ use iced::widget::canvas::{self, Cache, Frame, Geometry, Text};
 use iced::{Color, Font, Point, Rectangle, Renderer, Size, Theme};
 
 use crate::StyledSpan;
-use std::time::{Duration, Instant};
+use std::time::Instant;
+#[cfg(debug_assertions)]
+use std::time::Duration;
 
 // Re-export Selection types from terminal::selection module
-pub use crate::terminal::selection::{Selection, SelectionMode, SelectionPoint};
+pub use agterm::terminal::selection::{Selection, SelectionMode, SelectionPoint};
 
 /// Extract selected text from terminal lines
 pub fn get_selected_text(lines: &[Vec<StyledSpan>], selection: &Selection) -> String {
@@ -183,8 +185,10 @@ pub struct TerminalCanvasState {
     pub clicked_url: Option<String>,
     /// Performance tracking (debug mode)
     #[cfg(debug_assertions)]
+    #[allow(dead_code)]
     last_frame_time: Option<Duration>,
     #[cfg(debug_assertions)]
+    #[allow(dead_code)]
     last_lines_rendered: usize,
 }
 
@@ -277,7 +281,7 @@ pub struct TerminalCanvas<'a> {
     pub font_size: f32,
     pub search_matches: &'a [(usize, usize, usize)], // (line, start_col, end_col)
     pub current_match_index: Option<usize>,
-    pub bracket_match: Option<crate::terminal::bracket::BracketMatch>,
+    pub bracket_match: Option<agterm::terminal::bracket::BracketMatch>,
 }
 
 impl<'a> TerminalCanvas<'a> {
@@ -326,7 +330,7 @@ impl<'a> TerminalCanvas<'a> {
     /// Set bracket match for highlighting
     pub fn with_bracket_match(
         mut self,
-        bracket_match: Option<crate::terminal::bracket::BracketMatch>,
+        bracket_match: Option<agterm::terminal::bracket::BracketMatch>,
     ) -> Self {
         self.bracket_match = bracket_match;
         self
@@ -959,6 +963,16 @@ where
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
+        // Guard against non-normal bounds to prevent iced_tiny_skia panic
+        // "Quad with non-normal height!" occurs when bounds have invalid dimensions
+        if bounds.width <= 0.0
+            || bounds.height <= 0.0
+            || !bounds.width.is_finite()
+            || !bounds.height.is_finite()
+        {
+            return vec![];
+        }
+
         #[cfg(debug_assertions)]
         let start_time = Instant::now();
 

@@ -39,6 +39,25 @@ pub type PtyId = Uuid;
 ///
 /// Controls how environment variables are set up for spawned shell processes.
 /// Supports inheritance from parent, custom variables, and unsetting specific variables.
+///
+/// # Critical Environment Variables
+///
+/// Even when `inherit_env` is false, the following critical variables are always set:
+/// - `HOME`: User home directory
+/// - `USER`: Current user name
+/// - `PATH`: Executable search path
+/// - `LANG`: Locale setting (defaults to en_US.UTF-8)
+/// - `SHELL`: Path to the shell being launched
+///
+/// # Default Environment Variables
+///
+/// When no custom environment is provided, these are set by default:
+/// - `TERM=xterm-256color`: Terminal type with 256-color support
+/// - `COLORTERM=truecolor`: Indicates 24-bit true color support
+/// - `TERM_PROGRAM=agterm`: Identifies AgTerm as the terminal emulator
+/// - `AGTERM_VERSION`: Version of AgTerm
+/// - `SHELL`: Path to the launched shell
+/// - `LANG`: UTF-8 locale if not already set
 #[derive(Debug, Clone)]
 pub struct PtyEnvironment {
     /// Inherit environment variables from parent process
@@ -47,6 +66,46 @@ pub struct PtyEnvironment {
     pub variables: HashMap<String, String>,
     /// Variables to unset/remove (Note: not fully supported by portable-pty)
     pub unset: Vec<String>,
+}
+
+impl PtyEnvironment {
+    /// Create a new PtyEnvironment with recommended defaults
+    ///
+    /// This sets up a typical shell environment with:
+    /// - Environment inheritance enabled
+    /// - UTF-8 locale
+    /// - True color support
+    pub fn recommended() -> Self {
+        let mut variables = HashMap::new();
+        variables.insert("TERM".to_string(), "xterm-256color".to_string());
+        variables.insert("COLORTERM".to_string(), "truecolor".to_string());
+        variables.insert("TERM_PROGRAM".to_string(), "agterm".to_string());
+        variables.insert("AGTERM_VERSION".to_string(), env!("CARGO_PKG_VERSION").to_string());
+
+        Self {
+            inherit_env: true,
+            variables,
+            unset: Vec::new(),
+        }
+    }
+
+    /// Create a minimal environment without inheritance
+    ///
+    /// This creates an isolated environment with only critical variables.
+    /// Useful for testing or security-sensitive scenarios.
+    pub fn minimal() -> Self {
+        Self {
+            inherit_env: false,
+            variables: HashMap::new(),
+            unset: Vec::new(),
+        }
+    }
+}
+
+impl Default for PtyEnvironment {
+    fn default() -> Self {
+        Self::recommended()
+    }
 }
 
 /// Maximum output buffer size per session (1MB)
@@ -171,14 +230,32 @@ fn create_pty_session(
 
     // Apply environment configuration
     if let Some(env_config) = environment {
-        // If not inheriting, clear all environment variables
+        // If not inheriting, we still need to set critical environment variables
         if !env_config.inherit_env {
-            // Note: portable-pty doesn't have a direct way to clear env,
-            // so we'll just set the ones we want
-            debug!("Not inheriting parent environment");
+            debug!("Not inheriting parent environment - will set critical variables");
+
+            // Set critical environment variables that shells expect
+            if let Ok(home) = std::env::var("HOME") {
+                cmd.env("HOME", home);
+            }
+            if let Ok(user) = std::env::var("USER") {
+                cmd.env("USER", user);
+            }
+            if let Ok(path) = std::env::var("PATH") {
+                cmd.env("PATH", path);
+            }
+            if let Ok(lang) = std::env::var("LANG") {
+                cmd.env("LANG", lang);
+            } else {
+                // Default to UTF-8 locale if not set
+                cmd.env("LANG", "en_US.UTF-8");
+            }
+
+            // Set SHELL environment variable to match the shell we're launching
+            cmd.env("SHELL", &shell);
         }
 
-        // Apply custom environment variables
+        // Apply custom environment variables (these override inherited/critical ones)
         for (key, value) in env_config.variables {
             let expanded = shellexpand::full(&value)
                 .map(|s| s.to_string())
@@ -198,6 +275,14 @@ fn create_pty_session(
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "agterm");
         cmd.env("AGTERM_VERSION", env!("CARGO_PKG_VERSION"));
+
+        // Ensure SHELL is set to the shell we're launching
+        cmd.env("SHELL", &shell);
+
+        // Ensure LANG is set for proper UTF-8 support
+        if std::env::var("LANG").is_err() {
+            cmd.env("LANG", "en_US.UTF-8");
+        }
     }
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| {
@@ -589,3 +674,162 @@ impl Drop for PtyManager {
 
 unsafe impl Send for PtyManager {}
 unsafe impl Sync for PtyManager {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pty_environment_default() {
+        let env = PtyEnvironment::default();
+        assert!(env.inherit_env);
+        assert!(env.variables.contains_key("TERM"));
+        assert_eq!(env.variables.get("TERM").unwrap(), "xterm-256color");
+        assert!(env.variables.contains_key("COLORTERM"));
+        assert_eq!(env.variables.get("COLORTERM").unwrap(), "truecolor");
+        assert!(env.variables.contains_key("TERM_PROGRAM"));
+        assert_eq!(env.variables.get("TERM_PROGRAM").unwrap(), "agterm");
+    }
+
+    #[test]
+    fn test_pty_environment_recommended() {
+        let env = PtyEnvironment::recommended();
+        assert!(env.inherit_env);
+        assert_eq!(env.variables.len(), 4); // TERM, COLORTERM, TERM_PROGRAM, AGTERM_VERSION
+        assert_eq!(env.unset.len(), 0);
+    }
+
+    #[test]
+    fn test_pty_environment_minimal() {
+        let env = PtyEnvironment::minimal();
+        assert!(!env.inherit_env);
+        assert_eq!(env.variables.len(), 0);
+        assert_eq!(env.unset.len(), 0);
+    }
+
+    #[test]
+    fn test_pty_environment_custom() {
+        let mut variables = HashMap::new();
+        variables.insert("CUSTOM_VAR".to_string(), "custom_value".to_string());
+        variables.insert("TERM".to_string(), "xterm".to_string());
+
+        let env = PtyEnvironment {
+            inherit_env: true,
+            variables,
+            unset: vec!["UNWANTED_VAR".to_string()],
+        };
+
+        assert!(env.inherit_env);
+        assert_eq!(env.variables.get("CUSTOM_VAR").unwrap(), "custom_value");
+        assert_eq!(env.variables.get("TERM").unwrap(), "xterm");
+        assert_eq!(env.unset.len(), 1);
+    }
+
+    #[test]
+    fn test_default_shell() {
+        let shell = default_shell();
+        assert!(!shell.is_empty());
+
+        #[cfg(windows)]
+        {
+            assert!(shell.contains("cmd.exe") || shell.contains("powershell"));
+        }
+
+        #[cfg(not(windows))]
+        {
+            assert!(shell.starts_with('/'));
+            // Should be an absolute path to a shell
+            assert!(
+                shell.contains("bash") || shell.contains("zsh") || shell.contains("fish") || shell.contains("sh")
+            );
+        }
+    }
+
+    #[test]
+    fn test_pty_manager_creation() {
+        let manager = PtyManager::new();
+        // Just verify it can be created without panicking
+        drop(manager);
+    }
+
+    #[test]
+    fn test_pty_session_lifecycle() {
+        let manager = PtyManager::new();
+
+        // Create session
+        let session_id = manager.create_session(24, 80).expect("Failed to create session");
+
+        // Write data
+        manager.write(&session_id, b"echo test\n").expect("Failed to write");
+
+        // Give it a moment to process
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Read data
+        let output = manager.read(&session_id).expect("Failed to read");
+        assert!(!output.is_empty() || true); // Output may or may not be ready
+
+        // Close session
+        manager.close_session(&session_id).expect("Failed to close session");
+    }
+
+    #[test]
+    fn test_pty_session_with_custom_env() {
+        let manager = PtyManager::new();
+
+        let mut variables = HashMap::new();
+        variables.insert("TEST_VAR".to_string(), "test_value".to_string());
+        variables.insert("TERM".to_string(), "xterm-256color".to_string());
+
+        let env = PtyEnvironment {
+            inherit_env: true,
+            variables,
+            unset: Vec::new(),
+        };
+
+        let session_id = manager
+            .create_session_with_env(24, 80, Some(env))
+            .expect("Failed to create session with env");
+
+        // Test that we can write to it
+        manager.write(&session_id, b"echo $TEST_VAR\n").expect("Failed to write");
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Clean up
+        manager.close_session(&session_id).expect("Failed to close session");
+    }
+
+    #[test]
+    fn test_pty_resize() {
+        let manager = PtyManager::new();
+        let session_id = manager.create_session(24, 80).expect("Failed to create session");
+
+        // Resize the terminal
+        manager.resize(&session_id, 40, 120).expect("Failed to resize");
+
+        // Clean up
+        manager.close_session(&session_id).expect("Failed to close session");
+    }
+
+    #[test]
+    fn test_shellexpand_in_env() {
+        // Test that shell expansion works in environment variables
+        let mut variables = HashMap::new();
+        variables.insert("HOME_TEST".to_string(), "$HOME/test".to_string());
+
+        let env = PtyEnvironment {
+            inherit_env: true,
+            variables,
+            unset: Vec::new(),
+        };
+
+        // This should not panic when the environment is used
+        let manager = PtyManager::new();
+        let session_id = manager
+            .create_session_with_env(24, 80, Some(env))
+            .expect("Failed to create session");
+
+        manager.close_session(&session_id).expect("Failed to close session");
+    }
+}

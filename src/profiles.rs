@@ -9,8 +9,10 @@
 //! - Clone and duplicate existing profiles
 //! - Set a default profile for new terminals
 
-use crate::keybind::{Action, KeyCombo, KeyModifiers};
 use crate::shell::ShellType;
+#[cfg(feature = "iced-gui")]
+use crate::keybind::{Action, KeyCombo, KeyModifiers};
+#[cfg(feature = "iced-gui")]
 use crate::theme::Theme;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -49,13 +51,129 @@ pub enum ProfileError {
 pub type ProfileResult<T> = Result<T, ProfileError>;
 
 // ============================================================================
+// Legacy Profile Format (for backward compatibility)
+// ============================================================================
+
+/// Legacy profile format for backward compatibility
+/// This handles old profile files that used different field names and structures
+#[derive(Debug, Clone, Deserialize)]
+struct LegacyProfile {
+    #[serde(default = "generate_profile_id")]
+    id: String,
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+
+    // Legacy top-level fields
+    #[serde(default)]
+    shell: Option<String>,
+    #[serde(default)]
+    shell_args: Option<Vec<String>>,
+    #[serde(default)]
+    theme: Option<String>,
+    #[serde(default)]
+    font_size: Option<f32>,
+    #[serde(default)]
+    font_family: Option<String>,
+
+    // Current nested structures (may be missing in legacy files)
+    #[serde(default)]
+    font: Option<FontSettings>,
+    #[serde(default)]
+    colors: Option<ColorSettings>,
+    #[serde(default)]
+    terminal: Option<TerminalSettings>,
+
+    // Remaining fields (note: 'env' is sometimes used instead of 'environment')
+    #[serde(default)]
+    environment: HashMap<String, String>,
+    #[serde(default)]
+    env: Option<HashMap<String, String>>,
+    #[serde(default)]
+    working_directory: Option<PathBuf>,
+    #[serde(default)]
+    startup_commands: Vec<String>,
+    #[serde(default)]
+    tab_title: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
+    #[serde(default)]
+    read_only: bool,
+    #[serde(default)]
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    modified_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl LegacyProfile {
+    /// Migrate legacy profile to current format
+    fn migrate(self) -> Profile {
+        // Merge environment variables (prefer 'environment' over 'env')
+        let mut environment = self.environment;
+        if let Some(env) = self.env {
+            for (k, v) in env {
+                environment.entry(k).or_insert(v);
+            }
+        }
+
+        let mut profile = Profile {
+            id: if self.id.is_empty() {
+                Uuid::new_v4().to_string()
+            } else {
+                self.id
+            },
+            name: self.name,
+            description: self.description,
+            font: self.font.unwrap_or_default(),
+            colors: self.colors.unwrap_or_default(),
+            terminal: self.terminal.unwrap_or_default(),
+            shell: ShellSettings::default(),
+            environment,
+            #[cfg(feature = "iced-gui")]
+            keybindings: Vec::new(),
+            working_directory: self.working_directory,
+            startup_commands: self.startup_commands,
+            tab_title: self.tab_title,
+            icon: self.icon,
+            read_only: self.read_only,
+            created_at: self.created_at,
+            modified_at: self.modified_at,
+        };
+
+        // Apply legacy top-level shell settings
+        if let Some(shell_cmd) = self.shell {
+            profile.shell.command = Some(shell_cmd);
+        }
+        if let Some(args) = self.shell_args {
+            profile.shell.args = args;
+        }
+
+        // Apply legacy top-level theme
+        if let Some(theme) = self.theme {
+            profile.colors.theme = theme;
+        }
+
+        // Apply legacy top-level font settings
+        if let Some(size) = self.font_size {
+            profile.font.size = size;
+        }
+        if let Some(family) = self.font_family {
+            profile.font.family = family;
+        }
+
+        profile
+    }
+}
+
+// ============================================================================
 // Profile Structure
 // ============================================================================
 
 /// A terminal profile containing all customizable settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
-    /// Unique identifier for this profile
+    /// Unique identifier for this profile (auto-generated if missing)
+    #[serde(default = "generate_profile_id")]
     pub id: String,
 
     /// Display name of the profile
@@ -87,6 +205,7 @@ pub struct Profile {
 
     /// Key binding overrides
     #[serde(default)]
+    #[cfg(feature = "iced-gui")]
     pub keybindings: Vec<KeyBindingOverride>,
 
     /// Working directory
@@ -665,6 +784,7 @@ impl Profile {
             terminal: TerminalSettings::default(),
             shell: ShellSettings::default(),
             environment: HashMap::new(),
+            #[cfg(feature = "iced-gui")]
             keybindings: Vec::new(),
             working_directory: None,
             startup_commands: Vec::new(),
@@ -679,8 +799,50 @@ impl Profile {
     /// Load a profile from a TOML file
     pub fn load_from_file(path: &Path) -> ProfileResult<Self> {
         let content = std::fs::read_to_string(path)?;
-        let profile: Profile = toml::from_str(&content)?;
-        Ok(profile)
+
+        // Try to load as the current format first
+        match toml::from_str::<Profile>(&content) {
+            Ok(mut profile) => {
+                // Ensure the profile has an ID
+                if profile.id.is_empty() {
+                    profile.id = Uuid::new_v4().to_string();
+                }
+                Ok(profile)
+            }
+            Err(e) => {
+                // Try to load as legacy format
+                #[cfg(debug_assertions)]
+                {
+                    eprintln!("Failed to load profile as current format from {path:?}: {e}");
+                    eprintln!("Attempting to load as legacy format...");
+                }
+
+                match toml::from_str::<LegacyProfile>(&content) {
+                    Ok(legacy) => {
+                        #[cfg(debug_assertions)]
+                        eprintln!("Successfully loaded as legacy format, migrating...");
+
+                        let migrated = legacy.migrate();
+
+                        // Save the migrated profile back to disk in the new format
+                        if let Err(_save_err) = migrated.save_to_file(path) {
+                            #[cfg(debug_assertions)]
+                            eprintln!("Warning: Failed to save migrated profile to {path:?}: {_save_err}");
+                        } else {
+                            #[cfg(debug_assertions)]
+                            eprintln!("Migrated profile saved to {path:?}");
+                        }
+
+                        Ok(migrated)
+                    }
+                    Err(_legacy_err) => {
+                        #[cfg(debug_assertions)]
+                        eprintln!("Failed to load as legacy format: {_legacy_err}");
+                        Err(e.into())
+                    }
+                }
+            }
+        }
     }
 
     /// Save the profile to a TOML file
@@ -691,11 +853,13 @@ impl Profile {
     }
 
     /// Load the theme for this profile
+    #[cfg(feature = "iced-gui")]
     pub fn load_theme(&self) -> Option<Theme> {
         Theme::by_name(&self.colors.theme)
     }
 
     /// Apply this profile's key bindings
+    #[cfg(feature = "iced-gui")]
     pub fn apply_keybindings(&self) -> Vec<(KeyCombo, Action)> {
         self.keybindings
             .iter()
@@ -739,6 +903,10 @@ impl Default for Profile {
 // ============================================================================
 // Default Value Functions
 // ============================================================================
+
+fn generate_profile_id() -> String {
+    Uuid::new_v4().to_string()
+}
 
 fn default_font_family() -> String {
     if cfg!(target_os = "macos") {
@@ -1051,6 +1219,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "iced-gui")]
     fn test_profile_load_theme() {
         let mut profile = Profile::default();
         profile.colors.theme = "dracula".to_string();
@@ -1061,6 +1230,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "iced-gui")]
     fn test_profile_keybindings() {
         let mut profile = Profile::new("Keybind Test".to_string());
 
@@ -1209,5 +1379,63 @@ mod tests {
         assert_ne!(imported.id, id);
         // But same settings
         assert_eq!(imported.font.size, 22.0);
+    }
+
+    #[test]
+    fn test_legacy_profile_loading() {
+        let temp_dir = TempDir::new().unwrap();
+        let legacy_path = temp_dir.path().join("legacy.toml");
+
+        // Write a legacy format profile
+        let legacy_content = r#"
+name = "legacy_test"
+shell = "/bin/bash"
+shell_args = ["-l"]
+theme = "dracula"
+font_size = 16.0
+font_family = "Monaco"
+startup_commands = ["echo 'hello'"]
+read_only = false
+        "#;
+
+        std::fs::write(&legacy_path, legacy_content).unwrap();
+
+        // Load the legacy profile
+        let profile = Profile::load_from_file(&legacy_path).unwrap();
+
+        // Verify migration
+        assert_eq!(profile.name, "legacy_test");
+        assert!(!profile.id.is_empty()); // Should have auto-generated ID
+        assert_eq!(profile.shell.command, Some("/bin/bash".to_string()));
+        assert_eq!(profile.shell.args, vec!["-l"]);
+        assert_eq!(profile.colors.theme, "dracula");
+        assert_eq!(profile.font.size, 16.0);
+        assert_eq!(profile.font.family, "Monaco");
+        assert_eq!(profile.startup_commands, vec!["echo 'hello'"]);
+        assert!(!profile.read_only);
+    }
+
+    #[test]
+    fn test_legacy_profile_without_id() {
+        let temp_dir = TempDir::new().unwrap();
+        let legacy_path = temp_dir.path().join("no_id.toml");
+
+        // Write a legacy format profile without ID
+        let legacy_content = r#"
+name = "no_id_profile"
+shell = "/bin/zsh"
+theme = "solarized_light"
+        "#;
+
+        std::fs::write(&legacy_path, legacy_content).unwrap();
+
+        // Load the profile
+        let profile = Profile::load_from_file(&legacy_path).unwrap();
+
+        // Verify ID was auto-generated
+        assert_eq!(profile.name, "no_id_profile");
+        assert!(!profile.id.is_empty());
+        assert_eq!(profile.shell.command, Some("/bin/zsh".to_string()));
+        assert_eq!(profile.colors.theme, "solarized_light");
     }
 }

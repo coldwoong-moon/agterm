@@ -95,6 +95,7 @@ impl ScreenReaderAnnouncement {
 
 /// Screen reader engine for text-to-speech announcements
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ScreenReader {
     queue: VecDeque<ScreenReaderAnnouncement>,
     enabled: bool,

@@ -4,7 +4,7 @@
 
 use iced::widget::text_input::Id as TextInputId;
 use iced::widget::{column, container, row, scrollable, text, text_input, Space};
-use iced::{Border, Color, Element, Length, Task};
+use iced::{Border, Color, Element, Length};
 
 /// Get the palette input ID
 pub fn palette_input_id() -> TextInputId {
