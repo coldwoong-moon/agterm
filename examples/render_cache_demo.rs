@@ -2,8 +2,19 @@
 //!
 //! This example demonstrates how to use the AgTerm rendering cache system
 //! to optimize terminal rendering performance.
+//!
+//! Requires the `iced-gui` feature to be enabled.
 
+#[cfg(not(feature = "iced-gui"))]
+fn main() {
+    eprintln!("This example requires the `iced-gui` feature. Run with:");
+    eprintln!("  cargo run --example render_cache_demo --features iced-gui");
+}
+
+#[cfg(feature = "iced-gui")]
 use iced::Color;
+
+#[cfg(feature = "iced-gui")]
 
 // Note: This is a standalone example showing the API usage.
 // In production, the render_cache module would be imported from agterm crate.
@@ -177,6 +188,7 @@ fn example_memory_management() {
     println!();
 }
 
+#[cfg(feature = "iced-gui")]
 fn main() {
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║      AgTerm Render Cache System - Usage Examples            ║");

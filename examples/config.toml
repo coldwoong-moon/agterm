@@ -1,0 +1,15 @@
+# AgTerm Configuration Example
+# Location: ~/.config/agterm/config.toml
+
+# Font size in points (min: 8.0, max: 24.0, default: 14.0)
+font_size = 14.0
+
+# Theme name ("Ghostty Dark" or "Ghostty Light")
+theme_name = "Ghostty Dark"
+
+# Shell command (optional, defaults to $SHELL or /bin/zsh)
+# shell = "/bin/zsh"
+
+# Default terminal size (optional)
+default_cols = 80
+default_rows = 24

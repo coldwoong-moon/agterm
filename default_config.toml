@@ -264,16 +264,27 @@ keybindings = "default"          # default, vim, emacs
 # ============================================================================
 # Logging
 # ============================================================================
+#
+# AgTerm uses the tracing ecosystem for structured logging.
+# Logs are written to both console (during development) and rotating log files.
+#
+# Environment variable overrides:
+# - AGTERM_LOG_LEVEL: Simple log level (trace, debug, info, warn, error)
+# - AGTERM_LOG: Advanced filter (e.g., "agterm=debug,agterm::terminal::pty=trace")
+# - AGTERM_LOG_PATH: Override log directory path
+#
+# Default log locations:
+# - macOS: ~/.local/share/agterm/logs/agterm.log.*
+# - Linux: ~/.local/share/agterm/logs/agterm.log.*
+# - Windows: %APPDATA%\agterm\logs\agterm.log.*
 
 [logging]
 level = "info"                   # trace, debug, info, warn, error
 format = "pretty"                # pretty, compact, json
-timestamps = true
-file_line = false
-file_output = true               # Enable file output
-# file_path = auto               # macOS: ~/Library/Application Support/agterm/logs
-                                 # Linux: ~/.local/share/agterm/logs
-                                 # Windows: %APPDATA%\agterm\logs
+timestamps = true                # Include timestamps in log output
+file_line = false                # Include file:line in logs (useful for debugging)
+file_output = true               # Enable file output with daily rotation
+# file_path = "/custom/path"     # Override default log directory (optional)
 
 # ============================================================================
 # Debug Panel

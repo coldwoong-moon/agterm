@@ -1,0 +1,61 @@
+# Example Custom Terminal Profile
+# Copy this file to ~/.config/agterm/profiles/ to use it
+
+id = "custom-dev-profile"
+name = "My Dev Profile"
+description = "Custom development environment profile"
+icon = "💻"
+read_only = false
+
+[font]
+family = "JetBrains Mono"
+size = 16.0
+line_height = 1.3
+bold_as_bright = true
+use_ligatures = true
+use_thin_strokes = false
+
+[colors]
+theme = "dracula"
+background_opacity = 0.95
+cursor_style = "block"
+cursor_blink_interval = 500
+
+[terminal]
+scrollback_lines = 50000
+scroll_on_input = true
+bell_style = "visual"
+audible_bell = false
+visual_bell = true
+copy_on_select = false
+paste_on_middle_click = true
+word_separators = " ,│`|:\"'()[]{}<>"
+
+[shell]
+# command = "/bin/zsh"  # Uncomment to specify a shell
+# args = ["-l"]         # Uncomment to add shell arguments
+# shell_type = "zsh"    # Supported: bash, zsh, fish, nushell, powershell, cmd
+login_shell = true
+
+# Environment variables
+[environment]
+# EDITOR = "vim"
+# PATH = "/usr/local/bin:$PATH"
+
+# Working directory (leave empty for home directory)
+# working_directory = "/Users/yourname/projects"
+
+# Startup commands to run after shell launches
+startup_commands = [
+    # "echo 'Welcome to AgTerm!'",
+    # "source ~/.profile",
+]
+
+# Tab title template (variables: {cwd}, {shell}, {command})
+# tab_title = "{cwd}"
+
+# Key binding overrides
+# [[keybindings]]
+# key = "t"
+# modifiers = { ctrl = true }
+# action = "new_tab"

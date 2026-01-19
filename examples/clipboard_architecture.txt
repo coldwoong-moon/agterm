@@ -1,0 +1,159 @@
+┌─────────────────────────────────────────────────────────────────────┐
+│                    AgTerm Clipboard Paste Flow                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌──────────────┐
+│ User Action  │
+│   Cmd+V      │
+└──────┬───────┘
+       │
+       ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ floem_app/mod.rs :: handle_global_shortcuts()                       │
+│                                                                      │
+│ • Detects Cmd key + 'V' character                                   │
+│ • Logs: "Paste from clipboard (Cmd+V)"                              │
+│ • Calls: handle_paste(&app_state)                                   │
+└──────────────────────────────────┬──────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ floem_app/mod.rs :: handle_paste()                                  │
+│                                                                      │
+│ Step 1: Get clipboard content                                       │
+│ ┌─────────────────────────────────────────────────────────────────┐ │
+│ │ • Clipboard::new() -> Create clipboard instance                 │ │
+│ │ • clipboard.get_text() -> Read text from system clipboard       │ │
+│ │ • Error handling for clipboard access failures                  │ │
+│ └─────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│ Step 2: Validate clipboard                                          │
+│ ┌─────────────────────────────────────────────────────────────────┐ │
+│ │ • Check if clipboard is empty                                   │ │
+│ │ • Log clipboard size: "Pasting N bytes from clipboard"          │ │
+│ └─────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│ Step 3: Find active terminal pane                                   │
+│ ┌─────────────────────────────────────────────────────────────────┐ │
+│ │ • app_state.active_tab_ref() -> Get current tab                 │ │
+│ │ • tab.pane_tree.get() -> Get pane tree                          │ │
+│ │ • tree.get_focused_leaf() -> Find focused pane                  │ │
+│ └─────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│ Step 4: Get PTY session                                             │
+│ ┌─────────────────────────────────────────────────────────────────┐ │
+│ │ • terminal_state.pty_session() -> Get PTY session ID            │ │
+│ │ • Validate session exists                                        │ │
+│ └─────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│ Step 5: Send to PTY                                                 │
+│ ┌─────────────────────────────────────────────────────────────────┐ │
+│ │ • pty_manager.write(&session_id, clipboard_text.as_bytes())     │ │
+│ │ • Log success: "Successfully pasted N bytes to PTY"             │ │
+│ └─────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────┬──────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ terminal/pty.rs :: PtyManager::write()                              │
+│                                                                      │
+│ • Writes bytes to PTY master                                        │
+│ • PTY forwards to shell process                                     │
+└──────────────────────────────────┬──────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Shell Process (bash/zsh/fish)                                       │
+│                                                                      │
+│ • Receives pasted text as keyboard input                            │
+│ • Processes as if user typed the text                               │
+│ • Generates output                                                  │
+└──────────────────────────────────┬──────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Terminal Display                                                    │
+│                                                                      │
+│ • Pasted text appears in terminal                                   │
+│ • User can press Enter to execute (if command)                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Error Handling                              │
+└─────────────────────────────────────────────────────────────────────┘
+
+At each step, errors are caught and logged:
+
+1. Clipboard access fails
+   → Log: "Failed to create clipboard instance: {error}"
+   → Return early
+
+2. Clipboard read fails
+   → Log: "Failed to read from clipboard: {error}"
+   → Return early
+
+3. Clipboard is empty
+   → Log: "Clipboard is empty" (debug level)
+   → Return early
+
+4. No active tab
+   → Log: "No active tab found"
+   → Return early
+
+5. No focused pane
+   → Log: "No focused pane found"
+   → Return early
+
+6. No PTY session
+   → Log: "No PTY session found for focused pane"
+   → Return early
+
+7. PTY write fails
+   → Log: "Failed to write clipboard text to PTY: {error}"
+   → Return (error is not recoverable)
+
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                      Component Dependencies                         │
+└─────────────────────────────────────────────────────────────────────┘
+
+handle_paste()
+    │
+    ├─ arboard::Clipboard (external crate)
+    │   └─ System clipboard API (native)
+    │
+    ├─ AppState (floem_app/state.rs)
+    │   ├─ active_tab: RwSignal<usize>
+    │   ├─ tabs: RwSignal<Vec<Tab>>
+    │   └─ pty_manager: Arc<PtyManager>
+    │
+    ├─ Tab (floem_app/state.rs)
+    │   └─ pane_tree: RwSignal<PaneTree>
+    │
+    ├─ PaneTree (floem_app/pane.rs)
+    │   ├─ get_focused_leaf() -> Option<(Uuid, TerminalState)>
+    │   └─ [Recursive tree structure]
+    │
+    ├─ TerminalState (floem_app/views/terminal.rs)
+    │   ├─ pty_session() -> Option<Uuid>
+    │   └─ screen: Arc<Mutex<TerminalScreen>>
+    │
+    └─ PtyManager (terminal/pty.rs)
+        └─ write(&PtyId, &[u8]) -> Result<(), PtyError>
+
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Testing Checklist                           │
+└─────────────────────────────────────────────────────────────────────┘
+
+✅ Single-line text paste
+✅ Multi-line text paste
+✅ UTF-8 text paste (Korean, emoji, etc.)
+✅ Empty clipboard handling
+✅ Paste to different panes in split layout
+✅ Paste while command is running
+✅ Large clipboard content (> 1KB)
+✅ Special characters (quotes, backslashes, etc.)
+⬜ Integration with OSC 52 clipboard protocol
+⬜ Paste bracketing mode
