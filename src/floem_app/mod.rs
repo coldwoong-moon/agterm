@@ -99,6 +99,7 @@ pub fn app_view() -> impl IntoView {
     let mcp_panel_state = McpPanelState::with_bridge(
         bridge.command_tx().clone(),
         bridge.into_result_rx(),
+        app_state.clone(),
     );
 
     // Clone for polling in idle callback

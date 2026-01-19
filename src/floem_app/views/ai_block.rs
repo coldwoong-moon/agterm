@@ -194,7 +194,19 @@ impl Default for AiBlockState {
 }
 
 /// Main view for displaying all AI blocks
-pub fn ai_blocks_view(state: &AiBlockState) -> impl IntoView {
+pub fn ai_blocks_view<FExec, FEdit, FCancel, FCopy>(
+    state: &AiBlockState,
+    on_execute: FExec,
+    on_edit: FEdit,
+    on_cancel: FCancel,
+    on_copy: FCopy,
+) -> impl IntoView
+where
+    FExec: Fn(String) + Clone + 'static,
+    FEdit: Fn(String) + Clone + 'static,
+    FCancel: Fn(String) + Clone + 'static,
+    FCopy: Fn(String) + Clone + 'static,
+{
     let blocks_signal = state.blocks;
 
     container(
@@ -212,7 +224,13 @@ pub fn ai_blocks_view(state: &AiBlockState) -> impl IntoView {
             dyn_stack(
                 move || blocks_signal.get(),
                 |block| block.id.clone(),
-                ai_block_item,
+                move |block| ai_block_item(
+                    block,
+                    on_execute.clone(),
+                    on_edit.clone(),
+                    on_cancel.clone(),
+                    on_copy.clone(),
+                ),
             )
             .style(|s| s.flex_col().gap(8.0)),
         ))
@@ -227,14 +245,31 @@ pub fn ai_blocks_view(state: &AiBlockState) -> impl IntoView {
 }
 
 /// Render a single AI block based on its type
-fn ai_block_item(block: AiBlock) -> impl IntoView {
+fn ai_block_item<FExec, FEdit, FCancel, FCopy>(
+    block: AiBlock,
+    on_execute: FExec,
+    on_edit: FEdit,
+    on_cancel: FCancel,
+    on_copy: FCopy,
+) -> impl IntoView
+where
+    FExec: Fn(String) + Clone + 'static,
+    FEdit: Fn(String) + Clone + 'static,
+    FCancel: Fn(String) + Clone + 'static,
+    FCopy: Fn(String) + Clone + 'static,
+{
     let block_type = block.block_type;
     dyn_container(
         move || block_type,
         move |bt| match bt {
             AiBlockType::Thinking => container(thinking_block_view(block.clone())),
-            AiBlockType::Response => container(response_block_view(block.clone())),
-            AiBlockType::Command => container(command_block_view(block.clone())),
+            AiBlockType::Response => container(response_block_view(block.clone(), on_copy.clone())),
+            AiBlockType::Command => container(command_block_view(
+                block.clone(),
+                on_execute.clone(),
+                on_edit.clone(),
+                on_cancel.clone(),
+            )),
             AiBlockType::Error => container(error_block_view(block.clone())),
         },
     )
@@ -273,8 +308,12 @@ fn thinking_block_view(block: AiBlock) -> impl IntoView {
 }
 
 /// Response block view with copy button
-fn response_block_view(block: AiBlock) -> impl IntoView {
+fn response_block_view<FCopy>(block: AiBlock, on_copy: FCopy) -> impl IntoView
+where
+    FCopy: Fn(String) + Clone + 'static,
+{
     let content = block.content.clone();
+    let content_for_copy = content.clone();
 
     container(
         v_stack((
@@ -296,6 +335,10 @@ fn response_block_view(block: AiBlock) -> impl IntoView {
                                 .color(theme::colors::ACCENT_BLUE)
                         })
                 )
+                .on_click_stop(move |_| {
+                    tracing::info!("Copy button clicked");
+                    on_copy(content_for_copy.clone());
+                })
                 .style(|s| {
                     s.padding_horiz(8.0)
                         .padding_vert(4.0)
@@ -324,9 +367,22 @@ fn response_block_view(block: AiBlock) -> impl IntoView {
 }
 
 /// Command block view with risk level indicator and action buttons
-fn command_block_view(block: AiBlock) -> impl IntoView {
+fn command_block_view<FExec, FEdit, FCancel>(
+    block: AiBlock,
+    on_execute: FExec,
+    on_edit: FEdit,
+    on_cancel: FCancel,
+) -> impl IntoView
+where
+    FExec: Fn(String) + Clone + 'static,
+    FEdit: Fn(String) + Clone + 'static,
+    FCancel: Fn(String) + Clone + 'static,
+{
     let content = block.content.clone();
     let command = block.command.clone().unwrap_or_default();
+    let command_for_exec = command.clone();
+    let command_for_edit = command.clone();
+    let block_id = block.id.clone();
     let risk_level = block.risk_level.unwrap_or(CommandRiskLevel::Low);
     let is_executed = block.is_executed;
     let risk_color = risk_level.color();
@@ -377,6 +433,13 @@ fn command_block_view(block: AiBlock) -> impl IntoView {
                 move || is_executed,
                 move |executed| {
                     if !executed {
+                        let on_execute = on_execute.clone();
+                        let on_edit = on_edit.clone();
+                        let on_cancel = on_cancel.clone();
+                        let cmd_exec = command_for_exec.clone();
+                        let cmd_edit = command_for_edit.clone();
+                        let bid = block_id.clone();
+
                         container(
                             h_stack((
                                 // Execute button
@@ -387,6 +450,10 @@ fn command_block_view(block: AiBlock) -> impl IntoView {
                                                 .color(Color::WHITE)
                                         })
                                 )
+                                .on_click_stop(move |_| {
+                                    tracing::info!("Execute button clicked for command: {}", cmd_exec);
+                                    on_execute(cmd_exec.clone());
+                                })
                                 .style(|s| {
                                     s.padding_horiz(12.0)
                                         .padding_vert(6.0)
@@ -406,6 +473,10 @@ fn command_block_view(block: AiBlock) -> impl IntoView {
                                                 .color(theme::colors::ACCENT_BLUE)
                                         })
                                 )
+                                .on_click_stop(move |_| {
+                                    tracing::info!("Edit button clicked for command: {}", cmd_edit);
+                                    on_edit(cmd_edit.clone());
+                                })
                                 .style(|s| {
                                     s.padding_horiz(12.0)
                                         .padding_vert(6.0)
@@ -427,6 +498,10 @@ fn command_block_view(block: AiBlock) -> impl IntoView {
                                                 .color(theme::colors::ACCENT_RED)
                                         })
                                 )
+                                .on_click_stop(move |_| {
+                                    tracing::info!("Cancel button clicked for block: {}", bid);
+                                    on_cancel(bid.clone());
+                                })
                                 .style(|s| {
                                     s.padding_horiz(12.0)
                                         .padding_vert(6.0)

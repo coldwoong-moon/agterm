@@ -25,6 +25,12 @@ pub struct SearchBarState {
     /// Total match count
     #[allow(dead_code)]
     pub match_count: RwSignal<usize>,
+    /// Case-sensitive search mode
+    #[allow(dead_code)]
+    pub case_sensitive: RwSignal<bool>,
+    /// Regex search mode
+    #[allow(dead_code)]
+    pub regex_mode: RwSignal<bool>,
 }
 
 impl SearchBarState {
@@ -34,6 +40,8 @@ impl SearchBarState {
             query: RwSignal::new(String::new()),
             current_match: RwSignal::new(None),
             match_count: RwSignal::new(0),
+            case_sensitive: RwSignal::new(false),
+            regex_mode: RwSignal::new(false),
         }
     }
 
@@ -50,6 +58,7 @@ impl SearchBarState {
         self.query.set(String::new());
         self.current_match.set(None);
         self.match_count.set(0);
+        // Keep case_sensitive and regex_mode states when hiding
     }
 
     /// Update match info
@@ -83,6 +92,8 @@ where
     let query = state.query;
     let current_match = state.current_match;
     let match_count = state.match_count;
+    let case_sensitive = state.case_sensitive;
+    let regex_mode = state.regex_mode;
 
     let on_next_clone = on_next.clone();
     let on_prev_clone = on_prev.clone();
@@ -90,6 +101,10 @@ where
     // Clone AppState for different style closures
     let app_state_label = app_state.clone();
     let app_state_input = app_state.clone();
+    let app_state_case_label = app_state.clone();
+    let app_state_case_btn = app_state.clone();
+    let app_state_regex_label = app_state.clone();
+    let app_state_regex_btn = app_state.clone();
     let app_state_counter = app_state.clone();
     let app_state_prev_label = app_state.clone();
     let app_state_prev_btn = app_state.clone();
@@ -121,7 +136,7 @@ where
 
             // Search input
             text_input(query)
-                .placeholder("Search... (Enter: next, Shift+Enter: prev)")
+                .placeholder("Search... (Enter: next, Shift+Enter: prev, Esc: close)")
                 .on_event(floem::event::EventListener::KeyDown, move |event| {
                     if let floem::event::Event::KeyDown(key_event) = event {
                         match &key_event.key.logical_key {
@@ -158,6 +173,120 @@ where
                                 .border(2.0)
                         })
                 }),
+
+            // Case-sensitive toggle button
+            container(
+                label(move || {
+                    if case_sensitive.get() {
+                        "Aa".to_string()
+                    } else {
+                        "Aa".to_string()
+                    }
+                })
+                .style(move |s| {
+                    let colors = app_state_case_label.colors();
+                    let is_active = case_sensitive.get();
+                    let text_color = if is_active {
+                        colors.accent_blue
+                    } else {
+                        colors.text_secondary
+                    };
+                    s.color(text_color)
+                        .font_size(13.0)
+                        .font_weight(floem::text::Weight::BOLD)
+                })
+            )
+            .on_click_stop({
+                let case_sensitive = case_sensitive;
+                move |_| {
+                    case_sensitive.update(|v| *v = !*v);
+                }
+            })
+            .style(move |s| {
+                let colors = app_state_case_btn.colors();
+                let is_active = case_sensitive.get();
+                let bg_color = if is_active {
+                    colors.bg_tab_active
+                } else {
+                    colors.bg_secondary
+                };
+                let border_color = if is_active {
+                    colors.accent_blue
+                } else {
+                    colors.border
+                };
+                s.padding_horiz(10.0)
+                    .padding_vert(6.0)
+                    .border(1.0)
+                    .border_color(border_color)
+                    .border_radius(4.0)
+                    .background(bg_color)
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(move |s| {
+                        if is_active {
+                            s.background(colors.bg_tab_hover)
+                        } else {
+                            s.background(colors::BG_HOVER)
+                        }
+                    })
+            }),
+
+            // Regex mode toggle button
+            container(
+                label(move || {
+                    if regex_mode.get() {
+                        ".*".to_string()
+                    } else {
+                        ".*".to_string()
+                    }
+                })
+                .style(move |s| {
+                    let colors = app_state_regex_label.colors();
+                    let is_active = regex_mode.get();
+                    let text_color = if is_active {
+                        colors.accent_blue
+                    } else {
+                        colors.text_secondary
+                    };
+                    s.color(text_color)
+                        .font_size(13.0)
+                        .font_weight(floem::text::Weight::BOLD)
+                })
+            )
+            .on_click_stop({
+                let regex_mode = regex_mode;
+                move |_| {
+                    regex_mode.update(|v| *v = !*v);
+                }
+            })
+            .style(move |s| {
+                let colors = app_state_regex_btn.colors();
+                let is_active = regex_mode.get();
+                let bg_color = if is_active {
+                    colors.bg_tab_active
+                } else {
+                    colors.bg_secondary
+                };
+                let border_color = if is_active {
+                    colors.accent_blue
+                } else {
+                    colors.border
+                };
+                s.padding_horiz(10.0)
+                    .padding_vert(6.0)
+                    .border(1.0)
+                    .border_color(border_color)
+                    .border_radius(4.0)
+                    .background(bg_color)
+                    .cursor(floem::style::CursorStyle::Pointer)
+                    .hover(move |s| {
+                        if is_active {
+                            s.background(colors.bg_tab_hover)
+                        } else {
+                            s.background(colors::BG_HOVER)
+                        }
+                    })
+            }),
 
             // Match counter with highlighting
             label(move || {

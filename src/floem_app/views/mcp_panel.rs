@@ -9,8 +9,9 @@ use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::style::{AlignItems, CursorStyle, FlexDirection, JustifyContent};
 use floem::views::{container, dyn_container, h_stack, label, scroll, v_stack, Decorators};
 
-use crate::floem_app::async_bridge::{AsyncCommand, AsyncResult, ToolInfo};
+use crate::floem_app::async_bridge::{AsyncCommand, AsyncResult, ToolInfo, RiskLevel};
 use crate::floem_app::theme::Theme;
+use crate::floem_app::state::AppState;
 use super::ai_block::{AiBlock, AiBlockState, ai_blocks_view};
 
 /// AI Agent type for MCP integration
@@ -72,6 +73,12 @@ pub struct McpPanelState {
     command_tx: Option<tokio::sync::mpsc::Sender<AsyncCommand>>,
     /// Result receiver for async operations
     result_rx: Option<std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<AsyncResult>>>>,
+    /// App state for accessing current terminal
+    app_state: Option<AppState>,
+    /// Panel width in pixels
+    pub width: RwSignal<f64>,
+    /// Whether the divider is being dragged
+    pub is_dragging: RwSignal<bool>,
 }
 
 impl McpPanelState {
@@ -88,6 +95,9 @@ impl McpPanelState {
             ai_block_state: AiBlockState::new(),
             command_tx: None,
             result_rx: None,
+            app_state: None,
+            width: RwSignal::new(350.0),
+            is_dragging: RwSignal::new(false),
         }
     }
 
@@ -95,6 +105,7 @@ impl McpPanelState {
     pub fn with_bridge(
         command_tx: tokio::sync::mpsc::Sender<AsyncCommand>,
         result_rx: std::sync::mpsc::Receiver<AsyncResult>,
+        app_state: AppState,
     ) -> Self {
         Self {
             visible: RwSignal::new(true),
@@ -107,6 +118,9 @@ impl McpPanelState {
             ai_block_state: AiBlockState::new(),
             command_tx: Some(command_tx),
             result_rx: Some(std::sync::Arc::new(std::sync::Mutex::new(result_rx))),
+            app_state: Some(app_state),
+            width: RwSignal::new(350.0),
+            is_dragging: RwSignal::new(false),
         }
     }
 
@@ -365,44 +379,126 @@ impl Default for McpPanelState {
 /// Create the MCP panel view
 pub fn mcp_panel(state: McpPanelState, theme: RwSignal<Theme>) -> impl IntoView {
     let visible = state.visible;
+    let width = state.width;
 
     dyn_container(
         move || visible.get(),
         move |is_visible| {
             if !is_visible {
-                return container(label(|| "")).style(|s| s.display(floem::style::Display::None));
+                return h_stack((label(|| ""),))
+                    .style(|s| s.display(floem::style::Display::None));
             }
 
-            // Panel container
-            container(
-                v_stack((
-                    // Header section
-                    header_view(state.clone(), theme),
-                    // Agent selector buttons
-                    agent_selector_view(state.clone(), theme),
-                    // Connection status
-                    connection_status_view(state.clone(), theme),
-                    // Tools list (scrollable)
-                    tools_list_view(state.clone(), theme),
-                    // AI blocks view (scrollable)
-                    ai_blocks_section_view(state.clone(), theme),
-                ))
+            // Panel container with divider
+            h_stack((
+                // Draggable divider
+                divider_view(state.clone(), theme),
+                // Panel content
+                container(
+                    v_stack((
+                        // Header section
+                        header_view(state.clone(), theme),
+                        // Agent selector buttons
+                        agent_selector_view(state.clone(), theme),
+                        // Connection status
+                        connection_status_view(state.clone(), theme),
+                        // Tools list (scrollable)
+                        tools_list_view(state.clone(), theme),
+                        // AI blocks view (scrollable)
+                        ai_blocks_section_view(state.clone(), theme),
+                    ))
+                    .style(move |s| {
+                        s.flex_direction(FlexDirection::Column)
+                            .width_full()
+                            .height_full()
+                    }),
+                )
                 .style(move |s| {
-                    s.flex_direction(FlexDirection::Column)
-                        .width(350.0)
+                    let colors = theme.get().colors();
+                    s.width_full()
                         .height_full()
+                        .background(colors.bg_primary)
                 }),
-            )
+            ))
             .style(move |s| {
-                let colors = theme.get().colors();
-                s.width(350.0)
+                s.width(width.get())
                     .height_full()
-                    .background(colors.bg_primary)
-                    .border_left(1.0)
-                    .border_color(colors.border)
             })
         },
     )
+}
+
+/// Draggable divider for resizing the panel
+fn divider_view(state: McpPanelState, theme: RwSignal<Theme>) -> impl IntoView {
+    let is_dragging = state.is_dragging;
+    let width = state.width;
+    let is_hovering = RwSignal::new(false);
+
+    // Track the initial mouse position and width when drag starts
+    let drag_start_x = RwSignal::new(0.0);
+    let drag_start_width = RwSignal::new(width.get());
+
+    container(label(|| ""))
+        .on_event(floem::event::EventListener::PointerDown, move |event| {
+            if let floem::event::Event::PointerDown(pointer_event) = event {
+                tracing::info!("Divider drag started at x={}", pointer_event.pos.x);
+                is_dragging.set(true);
+                drag_start_x.set(pointer_event.pos.x);
+                drag_start_width.set(width.get());
+                return floem::event::EventPropagation::Stop;
+            }
+            floem::event::EventPropagation::Continue
+        })
+        .on_event(floem::event::EventListener::PointerMove, move |event| {
+            if let floem::event::Event::PointerMove(pointer_event) = event {
+                if is_dragging.get() {
+                    let delta = drag_start_x.get() - pointer_event.pos.x;
+                    let new_width = drag_start_width.get() + delta;
+
+                    // Constrain width between min (200) and max (600)
+                    let constrained_width = new_width.max(200.0).min(600.0);
+
+                    width.set(constrained_width);
+                    tracing::trace!("Panel width updated to: {}", constrained_width);
+                    return floem::event::EventPropagation::Stop;
+                }
+            }
+            floem::event::EventPropagation::Continue
+        })
+        .on_event(floem::event::EventListener::PointerUp, move |_event| {
+            if is_dragging.get() {
+                tracing::info!("Divider drag ended, final width: {}", width.get());
+                is_dragging.set(false);
+                return floem::event::EventPropagation::Stop;
+            }
+            floem::event::EventPropagation::Continue
+        })
+        .on_event(floem::event::EventListener::PointerEnter, move |_event| {
+            is_hovering.set(true);
+            floem::event::EventPropagation::Continue
+        })
+        .on_event(floem::event::EventListener::PointerLeave, move |_event| {
+            is_hovering.set(false);
+            floem::event::EventPropagation::Continue
+        })
+        .style(move |s| {
+            let colors = theme.get().colors();
+            let is_dragging_val = is_dragging.get();
+            let is_hovering_val = is_hovering.get();
+
+            let bg_color = if is_dragging_val {
+                colors.accent_blue
+            } else if is_hovering_val {
+                colors.border
+            } else {
+                colors.border_subtle
+            };
+
+            s.width(5.0)
+                .height_full()
+                .background(bg_color)
+                .cursor(CursorStyle::ColResize)
+        })
 }
 
 /// Header with title and collapse button
@@ -795,10 +891,74 @@ fn ai_blocks_section_view(
                 // Empty state - no blocks to show
                 container(label(|| "")).style(|s| s.display(floem::style::Display::None))
             } else {
-                // Show AI blocks in a scrollable area
+                let state_for_execute = state.clone();
+                let state_for_cancel = state.clone();
+
+                // Execute callback - send command to PTY
+                let on_execute = move |command: String| {
+                    tracing::info!("Execute callback invoked for command: {}", command);
+
+                    // Get the focused pane's terminal ID
+                    let terminal_id = if let Some(ref app_state) = state_for_execute.app_state {
+                        if let Some(active_tab) = app_state.active_tab_ref() {
+                            if let Some((pane_id, _)) = active_tab.pane_tree.get().get_focused_leaf() {
+                                Some(pane_id)
+                            } else {
+                                tracing::warn!("No focused pane found");
+                                None
+                            }
+                        } else {
+                            tracing::warn!("No active tab found");
+                            None
+                        }
+                    } else {
+                        tracing::warn!("No app state available");
+                        None
+                    };
+
+                    if let Some(tid) = terminal_id {
+                        if let Some(ref tx) = state_for_execute.command_tx {
+                            // For now, use Medium risk level - in the future, this should come from the block
+                            if let Err(e) = tx.try_send(AsyncCommand::ExecuteCommand {
+                                command: command.clone(),
+                                terminal_id: tid,
+                                risk_level: RiskLevel::Medium,
+                            }) {
+                                tracing::error!("Failed to send execute command: {}", e);
+                            } else {
+                                tracing::info!("Command sent for execution: {}", command);
+                            }
+                        }
+                    }
+                };
+
+                // Edit callback - placeholder for now
+                let on_edit = move |command: String| {
+                    tracing::info!("Edit callback invoked for command: {}", command);
+                    // TODO: In the future, open an edit dialog or insert into input field
+                };
+
+                // Cancel callback - remove the block
+                let on_cancel = move |block_id: String| {
+                    tracing::info!("Cancel callback invoked for block: {}", block_id);
+                    state_for_cancel.ai_block_state.remove_block(&block_id);
+                };
+
+                // Copy callback - placeholder for clipboard
+                let on_copy = move |content: String| {
+                    tracing::info!("Copy callback invoked, content length: {}", content.len());
+                    // TODO: Implement clipboard copy in the future
+                };
+
                 container(
                     scroll(
-                        container(ai_blocks_view(&state.ai_block_state))
+                        container(ai_blocks_view(
+                            &state.ai_block_state,
+                            on_execute,
+                            on_edit,
+                            on_cancel,
+                            on_copy,
+                        ))
                             .style(|s| s.width_full())
                     )
                     .style(move |s| {

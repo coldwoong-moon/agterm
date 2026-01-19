@@ -107,14 +107,14 @@ fn render_leaf_pane(
             container(
                 v_stack((
                     terminal_canvas_view,
-                    // IME composing text overlay - positioned near cursor
+                    // IME composing text overlay - positioned at cursor with underline
                     container(
                         label(move || {
                             let composing = terminal_state_ime_label.ime_composing.get();
                             if composing.is_empty() {
                                 "".to_string()
                             } else {
-                                // Show just the composing text for cleaner look
+                                // Show the composing text
                                 composing
                             }
                         })
@@ -124,8 +124,8 @@ fn render_leaf_pane(
                             s.font_size(font_size)
                                 .font_family("JetBrains Mono, Noto Sans Mono CJK KR, Menlo, Monaco, monospace".to_string())
                                 .color(colors.text_primary)
-                                .padding_horiz(4.0)
-                                .padding_vert(2.0)
+                                .padding_horiz(6.0)
+                                .padding_vert(3.0)
                         })
                     )
                     .style(move |s| {
@@ -144,10 +144,13 @@ fn render_leaf_pane(
 
                             s.position(floem::style::Position::Absolute)
                                 .inset_left(x_pos)
-                                .inset_top(y_pos)
-                                .background(colors.accent_blue.multiply_alpha(0.9))
-                                .border_radius(2.0)
+                                .inset_top(y_pos + cell_height as f32)
+                                .background(colors.bg_secondary)
+                                .border(2.0)
+                                .border_color(colors.accent_blue)
+                                .border_radius(4.0)
                                 .z_index(100)
+                                .min_width(20.0)
                         }
                     }),
                 ))
