@@ -11,6 +11,7 @@ use floem::views::{container, dyn_container, h_stack, label, scroll, v_stack, De
 
 use crate::floem_app::async_bridge::{AsyncCommand, AsyncResult, ToolInfo};
 use crate::floem_app::theme::Theme;
+use super::ai_block::{AiBlock, AiBlockState, ai_blocks_view};
 
 /// AI Agent type for MCP integration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +66,8 @@ pub struct McpPanelState {
     pub is_loading: RwSignal<bool>,
     /// Error message (if any)
     pub error_message: RwSignal<Option<String>>,
+    /// AI block state for displaying tool results
+    pub ai_block_state: AiBlockState,
     /// Command sender for async operations
     command_tx: Option<tokio::sync::mpsc::Sender<AsyncCommand>>,
     /// Result receiver for async operations
@@ -82,6 +85,7 @@ impl McpPanelState {
             selected_agent: RwSignal::new(AgentType::ClaudeCode),
             is_loading: RwSignal::new(false),
             error_message: RwSignal::new(None),
+            ai_block_state: AiBlockState::new(),
             command_tx: None,
             result_rx: None,
         }
@@ -100,6 +104,7 @@ impl McpPanelState {
             selected_agent: RwSignal::new(AgentType::ClaudeCode),
             is_loading: RwSignal::new(false),
             error_message: RwSignal::new(None),
+            ai_block_state: AiBlockState::new(),
             command_tx: Some(command_tx),
             result_rx: Some(std::sync::Arc::new(std::sync::Mutex::new(result_rx))),
         }
@@ -199,6 +204,42 @@ impl McpPanelState {
         }
     }
 
+    /// Call a tool with given parameters
+    pub fn call_tool(&self, tool_name: String, params: serde_json::Value) {
+        if let Some(ref tx) = self.command_tx {
+            if !self.connected.get() {
+                self.set_error(Some("Not connected to MCP server".to_string()));
+                return;
+            }
+
+            self.set_loading(true);
+            self.set_error(None);
+
+            // Add a "thinking" block to show that we're calling the tool
+            let block_id = uuid::Uuid::new_v4().to_string();
+            self.ai_block_state.add_block(AiBlock::thinking(
+                block_id.clone(),
+                format!("Calling tool: {}", tool_name),
+            ));
+
+            if let Err(e) = tx.try_send(AsyncCommand::McpCallTool(tool_name.clone(), params)) {
+                tracing::error!("Failed to send call tool command: {}", e);
+                self.set_loading(false);
+                self.set_error(Some(format!("Failed to call tool: {e}")));
+                // Remove thinking block and add error block
+                self.ai_block_state.remove_block(&block_id);
+                self.ai_block_state.add_block(AiBlock::error(
+                    uuid::Uuid::new_v4().to_string(),
+                    format!("Failed to call {}: {}", tool_name, e),
+                ));
+            } else {
+                tracing::info!("Sent call tool command for: {}", tool_name);
+            }
+        } else {
+            self.set_error(Some("MCP bridge not initialized".to_string()));
+        }
+    }
+
     /// Poll for async results and update state (call this periodically)
     pub fn poll_results(&self) {
         if let Some(ref rx_arc) = self.result_rx {
@@ -226,6 +267,8 @@ impl McpPanelState {
                 self.set_connected(false, Some("No server".to_string()));
                 self.tools.set(Vec::new());
                 self.set_loading(false);
+                // Clear AI blocks when disconnecting
+                self.ai_block_state.clear();
             }
             AsyncResult::McpTools(tools) => {
                 tracing::info!("Received {} tools", tools.len());
@@ -235,11 +278,76 @@ impl McpPanelState {
             AsyncResult::McpToolResult(value) => {
                 tracing::info!("Tool result: {:?}", value);
                 self.set_loading(false);
+
+                // Remove any "thinking" blocks
+                let thinking_blocks: Vec<String> = self.ai_block_state.blocks.get()
+                    .iter()
+                    .filter(|b| b.block_type == super::ai_block::AiBlockType::Thinking)
+                    .map(|b| b.id.clone())
+                    .collect();
+                for id in thinking_blocks {
+                    self.ai_block_state.remove_block(&id);
+                }
+
+                // Convert the result to an AI block
+                let block_id = uuid::Uuid::new_v4().to_string();
+
+                // Check if the result is an error
+                let is_error = value.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                if is_error {
+                    // Display as error block
+                    let error_text = value.get("content")
+                        .and_then(|c| c.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|item| item.get("text"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("Unknown error");
+
+                    self.ai_block_state.add_block(AiBlock::error(
+                        block_id,
+                        error_text.to_string(),
+                    ));
+                } else {
+                    // Display as response block
+                    let content_text = value.get("content")
+                        .and_then(|c| c.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        })
+                        .unwrap_or_else(|| {
+                            // Fallback: show the raw JSON
+                            serde_json::to_string_pretty(&value).unwrap_or_else(|_| "Empty result".to_string())
+                        });
+
+                    self.ai_block_state.add_block(AiBlock::response(
+                        block_id,
+                        content_text,
+                    ));
+                }
             }
             AsyncResult::Error(msg) => {
                 tracing::error!("MCP error: {}", msg);
-                self.set_error(Some(msg));
+                self.set_error(Some(msg.clone()));
                 self.set_loading(false);
+
+                // Remove any "thinking" blocks and add error block
+                let thinking_blocks: Vec<String> = self.ai_block_state.blocks.get()
+                    .iter()
+                    .filter(|b| b.block_type == super::ai_block::AiBlockType::Thinking)
+                    .map(|b| b.id.clone())
+                    .collect();
+                for id in thinking_blocks {
+                    self.ai_block_state.remove_block(&id);
+                }
+
+                self.ai_block_state.add_block(AiBlock::error(
+                    uuid::Uuid::new_v4().to_string(),
+                    msg,
+                ));
             }
             AsyncResult::CommandApproved { .. } | AsyncResult::CommandBlocked { .. } => {
                 // Command validation results - handled elsewhere
@@ -276,6 +384,8 @@ pub fn mcp_panel(state: McpPanelState, theme: RwSignal<Theme>) -> impl IntoView 
                     connection_status_view(state.clone(), theme),
                     // Tools list (scrollable)
                     tools_list_view(state.clone(), theme),
+                    // AI blocks view (scrollable)
+                    ai_blocks_section_view(state.clone(), theme),
                 ))
                 .style(move |s| {
                     s.flex_direction(FlexDirection::Column)
@@ -592,7 +702,7 @@ fn tools_list_view(
                             v_stack((
                                 tool_list
                                     .iter()
-                                    .map(|tool| tool_item_view(tool.clone(), theme))
+                                    .map(|tool| tool_item_view(tool.clone(), state.clone(), theme))
                                     .collect::<Vec<_>>(),
                             ))
                             .style(|s| s.width_full().gap(8.0)),
@@ -611,14 +721,15 @@ fn tools_list_view(
     .style(move |s| {
         let colors = theme.get().colors();
         s.width_full()
-            .flex_grow(1.0)
+            .max_height(250.0)
             .background(colors.bg_primary)
     })
 }
 
 /// Individual tool item
-fn tool_item_view(tool: ToolInfo, theme: RwSignal<Theme>) -> impl IntoView {
+fn tool_item_view(tool: ToolInfo, state: McpPanelState, theme: RwSignal<Theme>) -> impl IntoView {
     let tool_name = tool.name.clone();
+    let tool_name_for_click = tool.name.clone();
     let tool_desc = tool.description.clone();
     let has_desc = tool.description.is_some();
 
@@ -648,6 +759,12 @@ fn tool_item_view(tool: ToolInfo, theme: RwSignal<Theme>) -> impl IntoView {
             }
         }),
     ))
+    .on_click_stop(move |_| {
+        tracing::info!("Tool clicked: {}", tool_name_for_click);
+        // Call the tool with empty parameters (for now)
+        // In the future, we could show a dialog to input parameters
+        state.call_tool(tool_name_for_click.clone(), serde_json::json!({}));
+    })
     .style(move |s| {
         let colors = theme.get().colors();
         s.width_full()
@@ -662,6 +779,45 @@ fn tool_item_view(tool: ToolInfo, theme: RwSignal<Theme>) -> impl IntoView {
                     .border_color(colors.border)
             })
     })
+}
+
+/// AI blocks section view
+fn ai_blocks_section_view(
+    state: McpPanelState,
+    theme: RwSignal<Theme>,
+) -> impl IntoView {
+    let ai_blocks = state.ai_block_state.blocks;
+
+    dyn_container(
+        move || ai_blocks.get().len(),
+        move |block_count| {
+            if block_count == 0 {
+                // Empty state - no blocks to show
+                container(label(|| "")).style(|s| s.display(floem::style::Display::None))
+            } else {
+                // Show AI blocks in a scrollable area
+                container(
+                    scroll(
+                        container(ai_blocks_view(&state.ai_block_state))
+                            .style(|s| s.width_full())
+                    )
+                    .style(move |s| {
+                        let colors = theme.get().colors();
+                        s.width_full()
+                            .flex_grow(1.0)
+                            .background(colors.bg_primary)
+                    })
+                )
+                .style(move |s| {
+                    let colors = theme.get().colors();
+                    s.width_full()
+                        .flex_grow(1.0)
+                        .border_top(1.0)
+                        .border_color(colors.border)
+                })
+            }
+        },
+    )
 }
 
 #[cfg(test)]

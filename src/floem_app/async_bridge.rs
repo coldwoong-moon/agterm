@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::floem_app::mcp_client::McpClient;
+use crate::floem_app::command_validator::CommandValidator;
 
 /// Commands that can be sent from the UI to the async worker
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +126,14 @@ impl AsyncBridge {
         self.command_tx
             .try_send(command)
             .map_err(|e| format!("Failed to send command: {e}"))
+    }
+
+    /// Assess the risk level of a command before execution
+    ///
+    /// This is a convenience method for UI code to check command risk
+    /// without needing to import CommandValidator directly.
+    pub fn assess_command_risk(command: &str) -> RiskLevel {
+        CommandValidator::assess_risk(command)
     }
 
     /// Try to receive a result (non-blocking)
@@ -392,16 +401,52 @@ impl BridgeWorker {
             terminal_id
         );
 
-        // For now, approve all low/medium risk commands
-        match risk_level {
+        // Validate the risk level matches the actual command
+        let assessed_risk = CommandValidator::assess_risk(&command);
+        if assessed_risk != risk_level {
+            tracing::warn!(
+                "Risk level mismatch: provided {:?}, assessed {:?} for command: {}",
+                risk_level,
+                assessed_risk,
+                command
+            );
+        }
+
+        // Use the assessed risk level for decision
+        match assessed_risk {
             RiskLevel::Low | RiskLevel::Medium => AsyncResult::CommandApproved {
                 command,
                 terminal_id,
             },
-            RiskLevel::High | RiskLevel::Critical => AsyncResult::CommandBlocked {
-                command,
-                reason: format!("Command blocked due to {risk_level:?} risk level"),
+            RiskLevel::High => AsyncResult::CommandBlocked {
+                command: command.clone(),
+                reason: format!("Command blocked: HIGH RISK - {}", Self::get_risk_reason(&command)),
             },
+            RiskLevel::Critical => AsyncResult::CommandBlocked {
+                command: command.clone(),
+                reason: format!("Command blocked: CRITICAL RISK - {}", Self::get_risk_reason(&command)),
+            },
+        }
+    }
+
+    /// Get a human-readable reason for blocking a command
+    fn get_risk_reason(command: &str) -> String {
+        if command.contains("rm -rf") || command.contains("rm -fr") {
+            "Recursive force deletion can cause irreversible data loss".to_string()
+        } else if command.starts_with("sudo") || command.starts_with("su ") {
+            "Privilege escalation requires manual approval".to_string()
+        } else if command.contains("dd") && (command.contains("/dev/") || command.contains("of=")) {
+            "Direct disk operations can destroy data".to_string()
+        } else if command.contains("mkfs") {
+            "Filesystem formatting will erase all data".to_string()
+        } else if command.contains("shutdown") || command.contains("reboot") {
+            "System power commands require manual approval".to_string()
+        } else if command.starts_with("rm ") {
+            "File deletion requires manual approval".to_string()
+        } else if command.contains("chmod") || command.contains("chown") {
+            "Permission changes can affect system security".to_string()
+        } else {
+            "This command requires manual review and approval".to_string()
         }
     }
 }
@@ -513,5 +558,88 @@ mod tests {
         } else {
             panic!("Expected Error result");
         }
+    }
+
+    #[tokio::test]
+    async fn test_command_risk_assessment() {
+        let (bridge, worker) = AsyncBridge::new();
+
+        // Spawn worker in background
+        tokio::spawn(async move {
+            worker.run().await;
+        });
+
+        // Test low-risk command (should be approved)
+        bridge
+            .send_command(AsyncCommand::ExecuteCommand {
+                command: "ls -la".to_string(),
+                terminal_id: Uuid::new_v4(),
+                risk_level: RiskLevel::Low,
+            })
+            .unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        let result = bridge.try_recv_result();
+        assert!(result.is_some());
+        match result.unwrap() {
+            AsyncResult::CommandApproved { command, .. } => {
+                assert_eq!(command, "ls -la");
+            }
+            _ => panic!("Expected CommandApproved"),
+        }
+
+        // Test high-risk command (should be blocked)
+        bridge
+            .send_command(AsyncCommand::ExecuteCommand {
+                command: "rm file.txt".to_string(),
+                terminal_id: Uuid::new_v4(),
+                risk_level: RiskLevel::High,
+            })
+            .unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        let result = bridge.try_recv_result();
+        assert!(result.is_some());
+        match result.unwrap() {
+            AsyncResult::CommandBlocked { command, reason } => {
+                assert_eq!(command, "rm file.txt");
+                assert!(reason.contains("HIGH RISK"));
+            }
+            _ => panic!("Expected CommandBlocked"),
+        }
+
+        // Test critical-risk command (should be blocked)
+        bridge
+            .send_command(AsyncCommand::ExecuteCommand {
+                command: "sudo rm -rf /".to_string(),
+                terminal_id: Uuid::new_v4(),
+                risk_level: RiskLevel::Critical,
+            })
+            .unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        let result = bridge.try_recv_result();
+        assert!(result.is_some());
+        match result.unwrap() {
+            AsyncResult::CommandBlocked { command, reason } => {
+                assert_eq!(command, "sudo rm -rf /");
+                assert!(reason.contains("CRITICAL RISK"));
+            }
+            _ => panic!("Expected CommandBlocked"),
+        }
+    }
+
+    #[test]
+    fn test_assess_command_risk_helper() {
+        // Test the public helper method
+        assert_eq!(AsyncBridge::assess_command_risk("ls"), RiskLevel::Low);
+        assert_eq!(AsyncBridge::assess_command_risk("rm file"), RiskLevel::High);
+        assert_eq!(
+            AsyncBridge::assess_command_risk("rm -rf /"),
+            RiskLevel::Critical
+        );
     }
 }

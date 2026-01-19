@@ -8,6 +8,7 @@ pub mod settings;
 pub mod menu;
 pub mod async_bridge;
 pub mod mcp_client;
+pub mod command_validator;
 
 use floem::prelude::*;
 use floem::views::{v_stack, h_stack, Decorators, stack, dyn_container};
