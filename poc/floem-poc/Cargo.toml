@@ -1,0 +1,19 @@
+[package]
+name = "floem-poc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+floem = "0.2"
+
+[[bin]]
+name = "ime-test"
+path = "src/ime_test.rs"
+
+[[bin]]
+name = "canvas-test"
+path = "src/canvas_test.rs"
+
+[[bin]]
+name = "pane-test"
+path = "src/pane_test.rs"
