@@ -12,7 +12,25 @@ use floem::views::{container, dyn_container, h_stack, label, scroll, v_stack, De
 use crate::floem_app::async_bridge::{AsyncCommand, AsyncResult, ToolInfo, RiskLevel};
 use crate::floem_app::theme::Theme;
 use crate::floem_app::state::AppState;
+use crate::floem_app::execution_pipeline::ExecutionPipeline;
 use super::ai_block::{AiBlock, AiBlockState, ai_blocks_view};
+use super::command_queue::command_queue_view;
+use super::context_inspector::{ContextInspectorState, context_inspector};
+use super::history_view::{HistoryViewState, history_view};
+
+/// Panel tab selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PanelTab {
+    /// Tools and AI responses (default)
+    #[default]
+    Tools,
+    /// Command execution queue
+    Queue,
+    /// Execution history
+    History,
+    /// Terminal context inspector
+    Context,
+}
 
 /// AI Agent type for MCP integration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +97,14 @@ pub struct McpPanelState {
     pub width: RwSignal<f64>,
     /// Whether the divider is being dragged
     pub is_dragging: RwSignal<bool>,
+    /// Active tab in the panel
+    pub active_tab: RwSignal<PanelTab>,
+    /// Execution pipeline state for command queue
+    pub execution_pipeline: ExecutionPipeline,
+    /// History view state
+    pub history_state: HistoryViewState,
+    /// Context inspector state
+    pub context_state: ContextInspectorState,
 }
 
 impl McpPanelState {
@@ -98,6 +124,10 @@ impl McpPanelState {
             app_state: None,
             width: RwSignal::new(350.0),
             is_dragging: RwSignal::new(false),
+            active_tab: RwSignal::new(PanelTab::Tools),
+            execution_pipeline: ExecutionPipeline::new(),
+            history_state: HistoryViewState::new(),
+            context_state: ContextInspectorState::new(),
         }
     }
 
@@ -121,7 +151,16 @@ impl McpPanelState {
             app_state: Some(app_state),
             width: RwSignal::new(350.0),
             is_dragging: RwSignal::new(false),
+            active_tab: RwSignal::new(PanelTab::Tools),
+            execution_pipeline: ExecutionPipeline::new(),
+            history_state: HistoryViewState::new(),
+            context_state: ContextInspectorState::new(),
         }
+    }
+
+    /// Set the active tab
+    pub fn set_active_tab(&self, tab: PanelTab) {
+        self.active_tab.set(tab);
     }
 
     /// Toggle panel visibility
@@ -398,14 +437,10 @@ pub fn mcp_panel(state: McpPanelState, theme: RwSignal<Theme>) -> impl IntoView 
                     v_stack((
                         // Header section
                         header_view(state.clone(), theme),
-                        // Agent selector buttons
-                        agent_selector_view(state.clone(), theme),
-                        // Connection status
-                        connection_status_view(state.clone(), theme),
-                        // Tools list (scrollable)
-                        tools_list_view(state.clone(), theme),
-                        // AI blocks view (scrollable)
-                        ai_blocks_section_view(state.clone(), theme),
+                        // Tab bar
+                        panel_tab_bar(state.clone(), theme),
+                        // Tab content (dynamic based on active tab)
+                        panel_tab_content(state.clone(), theme),
                     ))
                     .style(move |s| {
                         s.flex_direction(FlexDirection::Column)
@@ -978,6 +1013,128 @@ fn ai_blocks_section_view(
             }
         },
     )
+}
+
+/// Tab bar for panel navigation
+fn panel_tab_bar(state: McpPanelState, theme: RwSignal<Theme>) -> impl IntoView {
+    let active_tab = state.active_tab;
+
+    let create_tab_button = move |tab: PanelTab, icon: &'static str, label_text: &'static str| {
+        let state_clone = state.clone();
+        container(
+            h_stack((
+                label(move || icon).style(move |s| s.font_size(12.0)),
+                label(move || label_text).style(move |s| {
+                    let colors = theme.get().colors();
+                    s.font_size(11.0).color(colors.text_primary).margin_left(4.0)
+                }),
+            ))
+            .style(|s| s.items_center()),
+        )
+        .on_click_stop(move |_| {
+            state_clone.set_active_tab(tab);
+        })
+        .style(move |s| {
+            let colors = theme.get().colors();
+            let is_active = active_tab.get() == tab;
+
+            let base = s
+                .padding_horiz(10.0)
+                .padding_vert(6.0)
+                .cursor(CursorStyle::Pointer)
+                .border_bottom(2.0);
+
+            if is_active {
+                base.background(colors.bg_secondary)
+                    .border_color(colors.accent_blue)
+            } else {
+                base.border_color(Color::TRANSPARENT)
+                    .hover(|s| s.background(colors.bg_tab_hover))
+            }
+        })
+    };
+
+    h_stack((
+        create_tab_button(PanelTab::Tools, "🔧", "Tools"),
+        create_tab_button(PanelTab::Queue, "📋", "Queue"),
+        create_tab_button(PanelTab::History, "📜", "History"),
+        create_tab_button(PanelTab::Context, "🔍", "Context"),
+    ))
+    .style(move |s| {
+        let colors = theme.get().colors();
+        s.width_full()
+            .background(colors.bg_primary)
+            .border_bottom(1.0)
+            .border_color(colors.border)
+    })
+}
+
+/// Tab content based on active tab
+fn panel_tab_content(state: McpPanelState, theme: RwSignal<Theme>) -> impl IntoView {
+    let active_tab = state.active_tab;
+
+    dyn_container(
+        move || active_tab.get(),
+        move |tab| {
+            match tab {
+                PanelTab::Tools => {
+                    // Tools tab: Agent selector + connection status + tools list + AI blocks
+                    v_stack((
+                        agent_selector_view(state.clone(), theme),
+                        connection_status_view(state.clone(), theme),
+                        tools_list_view(state.clone(), theme),
+                        ai_blocks_section_view(state.clone(), theme),
+                    ))
+                    .style(|s| s.width_full().height_full().flex_col())
+                    .into_any()
+                }
+                PanelTab::Queue => {
+                    // Queue tab: Command execution queue
+                    let pipeline = state.execution_pipeline.clone();
+                    let on_approve = {
+                        let pipeline = pipeline.clone();
+                        move |id: uuid::Uuid| {
+                            let _ = pipeline.approve(id);
+                        }
+                    };
+                    let on_edit = {
+                        let pipeline = pipeline.clone();
+                        move |id: uuid::Uuid, new_command: String| {
+                            let _ = pipeline.approve_modified(id, &new_command);
+                        }
+                    };
+                    let on_reject = {
+                        let pipeline = pipeline.clone();
+                        move |id: uuid::Uuid| {
+                            let _ = pipeline.reject(id);
+                        }
+                    };
+
+                    command_queue_view(pipeline, theme, on_approve, on_edit, on_reject)
+                        .style(|s| s.width_full().height_full())
+                        .into_any()
+                }
+                PanelTab::History => {
+                    // History tab: Execution history
+                    let history_state = state.history_state.clone();
+                    let on_replay = |command: String| {
+                        tracing::info!("Replay command: {}", command);
+                    };
+                    history_view(history_state, theme.get(), on_replay)
+                        .style(|s| s.width_full().height_full())
+                        .into_any()
+                }
+                PanelTab::Context => {
+                    // Context tab: Terminal context inspector
+                    let context_state = state.context_state.clone();
+                    context_inspector(context_state, theme.get())
+                        .style(|s| s.width_full().height_full())
+                        .into_any()
+                }
+            }
+        },
+    )
+    .style(|s| s.width_full().height_full().flex_grow(1.0))
 }
 
 #[cfg(test)]

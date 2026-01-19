@@ -94,6 +94,7 @@ impl PipelineItem {
 }
 
 /// The execution pipeline manages command execution with approval workflow
+#[derive(Clone)]
 pub struct ExecutionPipeline {
     /// All pipeline items
     pub items: RwSignal<Vec<PipelineItem>>,
