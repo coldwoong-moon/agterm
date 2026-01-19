@@ -634,16 +634,21 @@ struct HistoryEntry {
     timestamp: u64,
 }
 
+/// Session idle timeout in seconds (default: 30 minutes)
+const SESSION_IDLE_TIMEOUT_SECS: u64 = 30 * 60;
+
+/// Maximum number of sessions allowed
+const MAX_SESSIONS: usize = 10;
+
 /// Session metadata for tracking
-#[derive(Debug, Clone)]
 struct SessionInfo {
     id: PtyId,
     #[allow(dead_code)]
     name: String,
     rows: u16,
     cols: u16,
-    #[allow(dead_code)]
     created_at: std::time::Instant,
+    last_activity: std::time::Instant,
     history: Vec<HistoryEntry>,
 }
 
@@ -667,6 +672,42 @@ impl StandaloneMcpServer {
         }
     }
 
+    /// Clean up expired sessions based on idle timeout
+    fn cleanup_expired_sessions(&self) -> Vec<String> {
+        let timeout = std::time::Duration::from_secs(SESSION_IDLE_TIMEOUT_SECS);
+        let now = std::time::Instant::now();
+        let mut expired = Vec::new();
+
+        let mut sessions = self.sessions.lock().unwrap();
+        let expired_names: Vec<String> = sessions
+            .iter()
+            .filter(|(_, info)| now.duration_since(info.last_activity) > timeout)
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        for name in &expired_names {
+            if let Some(session) = sessions.remove(name) {
+                // Close the PTY session
+                let _ = self.pty_manager.close_session(&session.id);
+                expired.push(name.clone());
+                tracing::info!("Session '{}' expired after idle timeout", name);
+            }
+        }
+
+        // Update active session if it was expired
+        if !expired.is_empty() {
+            let mut active = self.active_session.lock().unwrap();
+            if let Some(ref active_name) = *active {
+                if expired.contains(active_name) {
+                    // Set to first remaining session or None
+                    *active = sessions.keys().next().cloned();
+                }
+            }
+        }
+
+        expired
+    }
+
     /// Run the standalone MCP server (blocking, reads from stdin)
     pub async fn run(&self) {
         let stdin = std::io::stdin();
@@ -686,6 +727,12 @@ impl StandaloneMcpServer {
 
             if line.is_empty() {
                 continue;
+            }
+
+            // Clean up expired sessions before handling request
+            let expired = self.cleanup_expired_sessions();
+            if !expired.is_empty() {
+                tracing::debug!("Cleaned up {} expired session(s)", expired.len());
             }
 
             let response = self.handle_request(&line);
@@ -936,6 +983,16 @@ impl StandaloneMcpServer {
                             "type": "object",
                             "properties": {}
                         }
+                    },
+                    {
+                        "name": "keep_alive",
+                        "description": "Keep a session alive by resetting its idle timeout. Call this periodically for long-running sessions.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session": {"type": "string", "description": "Session name (optional, uses active session)"}
+                            }
+                        }
                     }
                 ]
             })),
@@ -984,6 +1041,7 @@ impl StandaloneMcpServer {
             "set_env" => self.set_env(args),
             "get_history" => self.get_history(args),
             "open_gui" => self.open_gui(),
+            "keep_alive" => self.keep_alive(args),
             _ => Err(JsonRpcError {
                 code: -32602,
                 message: format!("Unknown tool: {}", name),
@@ -993,6 +1051,18 @@ impl StandaloneMcpServer {
     }
 
     fn create_session(&self, args: Value) -> Result<Value, JsonRpcError> {
+        // Check session limit
+        {
+            let sessions = self.sessions.lock().unwrap();
+            if sessions.len() >= MAX_SESSIONS {
+                return Err(JsonRpcError {
+                    code: -32603,
+                    message: format!("Maximum session limit ({}) reached. Close some sessions first.", MAX_SESSIONS),
+                    data: None,
+                });
+            }
+        }
+
         let name = args.get("name")
             .and_then(|v| v.as_str())
             .map(String::from)
@@ -1008,12 +1078,14 @@ impl StandaloneMcpServer {
                 data: None,
             })?;
 
+        let now = std::time::Instant::now();
         let session_info = SessionInfo {
             id: pty_id,
             name: name.clone(),
             rows,
             cols,
-            created_at: std::time::Instant::now(),
+            created_at: now,
+            last_activity: now,
             history: Vec::new(),
         };
 
@@ -1069,6 +1141,9 @@ impl StandaloneMcpServer {
                     message: format!("Session '{}' not found", session_name),
                     data: None,
                 })?;
+
+            // Update last activity timestamp
+            session.last_activity = std::time::Instant::now();
 
             // Record command in history
             session.history.push(HistoryEntry {
@@ -1140,14 +1215,16 @@ impl StandaloneMcpServer {
         let wait_ms = args.get("wait_ms").and_then(|v| v.as_u64()).unwrap_or(100);
 
         let pty_id = {
-            let sessions = self.sessions.lock().unwrap();
-            sessions.get(&session_name)
-                .map(|s| s.id)
+            let mut sessions = self.sessions.lock().unwrap();
+            let session = sessions.get_mut(&session_name)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
                     message: format!("Session '{}' not found", session_name),
                     data: None,
-                })?
+                })?;
+            // Update last activity timestamp
+            session.last_activity = std::time::Instant::now();
+            session.id
         };
 
         // Wait for output
@@ -1174,14 +1251,25 @@ impl StandaloneMcpServer {
     fn list_sessions(&self) -> Result<Value, JsonRpcError> {
         let sessions = self.sessions.lock().unwrap();
         let active = self.active_session.lock().unwrap();
+        let timeout_secs = SESSION_IDLE_TIMEOUT_SECS;
 
         let session_list: Vec<Value> = sessions.iter().map(|(name, info)| {
             let is_active = active.as_ref() == Some(name);
+            let age_secs = info.created_at.elapsed().as_secs();
+            let idle_secs = info.last_activity.elapsed().as_secs();
+            let expires_in = if idle_secs < timeout_secs {
+                timeout_secs - idle_secs
+            } else {
+                0
+            };
             json!({
                 "name": name,
                 "cols": info.cols,
                 "rows": info.rows,
-                "active": is_active
+                "active": is_active,
+                "age_secs": age_secs,
+                "idle_secs": idle_secs,
+                "expires_in_secs": expires_in
             })
         }).collect();
 
@@ -1285,14 +1373,16 @@ impl StandaloneMcpServer {
             })?;
 
         let pty_id = {
-            let sessions = self.sessions.lock().unwrap();
-            sessions.get(&session_name)
-                .map(|s| s.id)
+            let mut sessions = self.sessions.lock().unwrap();
+            let session = sessions.get_mut(&session_name)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
                     message: format!("Session '{}' not found", session_name),
                     data: None,
-                })?
+                })?;
+            // Update last activity timestamp
+            session.last_activity = std::time::Instant::now();
+            session.id
         };
 
         self.pty_manager.write(&pty_id, input.as_bytes())
@@ -1677,6 +1767,42 @@ impl StandaloneMcpServer {
             "content": [{
                 "type": "text",
                 "text": format!("AgTerm GUI launched (PID: {})", child.id())
+            }]
+        }))
+    }
+
+    fn keep_alive(&self, args: Value) -> Result<Value, JsonRpcError> {
+        let session_name = args.get("session")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| self.active_session.lock().unwrap().clone())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "No active session. Create one first.".to_string(),
+                data: None,
+            })?;
+
+        let (idle_secs, expires_in) = {
+            let mut sessions = self.sessions.lock().unwrap();
+            let session = sessions.get_mut(&session_name)
+                .ok_or_else(|| JsonRpcError {
+                    code: -32602,
+                    message: format!("Session '{}' not found", session_name),
+                    data: None,
+                })?;
+
+            let old_idle = session.last_activity.elapsed().as_secs();
+            session.last_activity = std::time::Instant::now();
+            (old_idle, SESSION_IDLE_TIMEOUT_SECS)
+        };
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": format!(
+                    "Session '{}' kept alive. Was idle for {}s, now expires in {}s.",
+                    session_name, idle_secs, expires_in
+                )
             }]
         }))
     }
