@@ -162,6 +162,7 @@ impl Default for HistoryViewState {
 }
 
 /// Format duration for display
+#[allow(dead_code)]
 fn format_duration(duration_ms: u64) -> String {
     if duration_ms < 1000 {
         format!("{}ms", duration_ms)
@@ -171,6 +172,7 @@ fn format_duration(duration_ms: u64) -> String {
 }
 
 /// Format timestamp for display
+#[allow(dead_code)]
 fn format_timestamp(timestamp: i64) -> String {
     if let Some(dt) = Local.timestamp_opt(timestamp, 0).single() {
         dt.format("%H:%M").to_string()
@@ -180,6 +182,7 @@ fn format_timestamp(timestamp: i64) -> String {
 }
 
 /// Create a history entry row
+#[allow(dead_code)]
 fn history_entry_row<F>(
     entry: &HistoryEntryDisplay,
     theme: Theme,
@@ -287,13 +290,14 @@ where
 }
 
 /// Create history group section (date header + entries)
+#[allow(dead_code)]
 fn history_group_view<F>(
     group: &HistoryGroup,
     index: usize,
     is_expanded: bool,
     theme: Theme,
     on_toggle: impl Fn(usize) + 'static + Clone,
-    on_replay: F,
+    _on_replay: F,
 ) -> impl IntoView
 where
     F: Fn(String) + 'static + Clone,
@@ -301,7 +305,7 @@ where
     let colors = theme.colors();
     let entry_count = group.entries.len();
     let date_label = group.date_label.clone();
-    let entries = group.entries.clone();
+    let _entries = group.entries.clone();
 
     let on_toggle_clone = on_toggle.clone();
 
@@ -366,7 +370,7 @@ where
 pub fn history_view<F>(
     state: HistoryViewState,
     theme: Theme,
-    on_replay: F,
+    _on_replay: F,
 ) -> impl IntoView
 where
     F: Fn(String) + 'static + Clone,
@@ -374,8 +378,8 @@ where
     let colors = theme.colors();
 
     let state_search = state.clone();
-    let state_groups = state.clone();
-    let state_expanded = state.clone();
+    let _state_groups = state.clone();
+    let _state_expanded = state.clone();
 
     container(
         v_stack((
