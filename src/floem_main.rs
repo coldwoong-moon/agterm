@@ -82,22 +82,16 @@ fn main() {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
     let mcp_server_mode = args.iter().any(|arg| arg == "--mcp-server");
-    let headless_mode = args.iter().any(|arg| arg == "--headless");
 
     // Initialize logging system with default configuration
     let log_config = agterm::logging::LoggingConfig::default();
     agterm::logging::init_logging(&log_config);
 
     if mcp_server_mode {
-        if headless_mode {
-            // Run as MCP server only (no GUI)
-            tracing::info!("Starting AgTerm in headless MCP server mode");
-            run_mcp_server_headless();
-        } else {
-            // Run MCP server with GUI
-            tracing::info!("Starting AgTerm with MCP server and GUI");
-            run_mcp_server_with_gui();
-        }
+        // MCP server mode is always headless (no GUI)
+        // Use open_gui MCP tool to launch GUI when needed
+        tracing::info!("Starting AgTerm in headless MCP server mode");
+        run_mcp_server_headless();
     } else {
         // Run as GUI application only
         run_gui();
@@ -116,36 +110,6 @@ fn run_gui() {
     let window_config = floem::window::WindowConfig::default()
         .size(floem::kurbo::Size::new(1200.0, 800.0))
         .title("AgTerm")
-        .resizable(true);
-
-    // Launch the Floem application with window configuration
-    floem::Application::new()
-        .window(|_| agterm::floem_app::app_view(), Some(window_config))
-        .run();
-}
-
-fn run_mcp_server_with_gui() {
-    // Create Tokio runtime for async operations
-    let rt = tokio::runtime::Runtime::new()
-        .expect("Failed to create Tokio runtime");
-    let _guard = rt.enter();
-
-    // Start MCP server in a background thread
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new()
-            .expect("Failed to create Tokio runtime for MCP server");
-        rt.block_on(async {
-            let server = agterm::mcp_server::StandaloneMcpServer::new();
-            server.run().await;
-        });
-    });
-
-    tracing::info!("MCP server started in background, launching GUI...");
-
-    // Configure window with appropriate size
-    let window_config = floem::window::WindowConfig::default()
-        .size(floem::kurbo::Size::new(1200.0, 800.0))
-        .title("AgTerm (MCP Server)")
         .resizable(true);
 
     // Launch the Floem application with window configuration
