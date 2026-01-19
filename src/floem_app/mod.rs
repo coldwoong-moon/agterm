@@ -17,11 +17,21 @@ pub mod multi_agent;
 use floem::prelude::*;
 use floem::views::{v_stack, h_stack, Decorators, stack, dyn_container};
 use floem::keyboard::{Key, NamedKey};
+use floem::action::exec_after;
 use std::time::Duration;
 
 pub use state::AppState;
 use views::McpPanelState;
 use async_bridge::AsyncBridge;
+
+/// Start a recurring timer to poll MCP results
+fn start_mcp_polling(mcp_state: McpPanelState) {
+    exec_after(Duration::from_millis(100), move |_| {
+        mcp_state.poll_results();
+        // Schedule the next poll
+        start_mcp_polling(mcp_state.clone());
+    });
+}
 
 /// Convert keyboard input to bytes for PTY
 fn convert_key_to_bytes(key: &Key, modifiers: &floem::keyboard::Modifiers) -> Option<Vec<u8>> {
@@ -106,26 +116,9 @@ pub fn app_view() -> impl IntoView {
         app_state.clone(),
     );
 
-    // Clone for polling in idle callback
-    let mcp_panel_for_polling = mcp_panel_state.clone();
-
-    // Set up periodic polling for MCP results using a timer
-    // This spawns a background task that triggers result polling
-    let poll_trigger = RwSignal::new(0u64);
-    {
-        let poll_trigger = poll_trigger;
-        let mcp_state = mcp_panel_for_polling.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                // Trigger a poll by incrementing the counter
-                // The poll happens in the main thread via the effect below
-                poll_trigger.update(|v| *v = v.wrapping_add(1));
-                // Also poll directly here to process results
-                mcp_state.poll_results();
-            }
-        });
-    }
+    // Start periodic polling for MCP results using Floem's timer system
+    // This runs on the UI thread, avoiding cross-thread signal access issues
+    start_mcp_polling(mcp_panel_state.clone());
 
     // Enable IME input
     floem::action::set_ime_allowed(true);
