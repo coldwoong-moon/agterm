@@ -114,11 +114,13 @@ impl McpResponse {
     fn extract_from_prompt_line(text: &str) -> Option<String> {
         for line in text.lines() {
             let trimmed = line.trim();
-            if trimmed.starts_with("$ ") {
-                return Some(trimmed[2..].trim().to_string());
+            if let Some(cmd) = trimmed.strip_prefix("$ ") {
+                return Some(cmd.trim().to_string());
             }
-            if trimmed.starts_with("# ") && Self::looks_like_shell_command(&trimmed[2..]) {
-                return Some(trimmed[2..].trim().to_string());
+            if let Some(cmd) = trimmed.strip_prefix("# ") {
+                if Self::looks_like_shell_command(cmd) {
+                    return Some(cmd.trim().to_string());
+                }
             }
         }
         None
@@ -169,7 +171,7 @@ impl McpResponse {
         let first_word = text.split_whitespace().next().unwrap_or("");
 
         // Check if starts with common command
-        if common_commands.iter().any(|&cmd| first_word == cmd) {
+        if common_commands.contains(&first_word) {
             return true;
         }
 

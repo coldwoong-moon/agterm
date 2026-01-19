@@ -60,6 +60,7 @@ pub mod link_handler;
 pub mod logging;
 pub mod macros;
 pub mod mcp;
+pub mod mcp_server;
 pub mod mouse_actions;
 pub mod notification;
 pub mod performance_monitor;

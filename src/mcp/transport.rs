@@ -93,13 +93,13 @@ impl TransportType {
         match self {
             Self::Stdio { command, args, .. } => {
                 if args.is_empty() {
-                    format!("stdio: {}", command)
+                    format!("stdio: {command}")
                 } else {
                     format!("stdio: {} {}", command, args.join(" "))
                 }
             }
-            Self::Http { url, .. } => format!("http: {}", url),
-            Self::Sse { url } => format!("sse: {}", url),
+            Self::Http { url, .. } => format!("http: {url}"),
+            Self::Sse { url } => format!("sse: {url}"),
         }
     }
 

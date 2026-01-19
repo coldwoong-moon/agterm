@@ -273,7 +273,7 @@ impl McpClient {
         // 4. Store the process handle for later communication
 
         // Placeholder implementation
-        log::info!("Connecting to MCP server via stdio: {} {:?}", command, args);
+        log::info!("Connecting to MCP server via stdio: {command} {args:?}");
 
         // Simulate connection delay
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -294,7 +294,7 @@ impl McpClient {
         // 4. Set up event stream handler
 
         // Placeholder implementation
-        log::info!("Connecting to MCP server via HTTP: {}", url);
+        log::info!("Connecting to MCP server via HTTP: {url}");
 
         // Simulate connection delay
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -316,7 +316,7 @@ impl McpClient {
         // 5. Set up message handler
 
         // Placeholder implementation
-        log::info!("Connecting to MCP server via WebSocket: {}", url);
+        log::info!("Connecting to MCP server via WebSocket: {url}");
 
         // Simulate connection delay
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -474,7 +474,7 @@ impl McpClient {
         // 4. Deserialize and return response
 
         // Placeholder implementation - simulate request/response
-        log::debug!("Sending request: {:?}", request);
+        log::debug!("Sending request: {request:?}");
 
         // Simulate network delay
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -500,7 +500,7 @@ impl McpClient {
                 let delay = Duration::from_millis(
                     retry_config.base_delay_ms * (retry_config.backoff_factor.powi(attempt as i32 - 1) as u64)
                 );
-                log::debug!("Retrying request after {:?} (attempt {})", delay, attempt);
+                log::debug!("Retrying request after {delay:?} (attempt {attempt})");
                 tokio::time::sleep(delay).await;
             }
 

@@ -112,13 +112,12 @@ impl TerminalContext {
                 context.push_str("Git Status: Uncommitted changes\n");
             }
             if let Some(ref remote) = git.remote_url {
-                context.push_str(&format!("Git Remote: {}\n", remote));
+                context.push_str(&format!("Git Remote: {remote}\n"));
             }
             if let Some((ahead, behind)) = git.ahead_behind {
                 if ahead > 0 || behind > 0 {
                     context.push_str(&format!(
-                        "Git Sync: {} ahead, {} behind\n",
-                        ahead, behind
+                        "Git Sync: {ahead} ahead, {behind} behind\n"
                     ));
                 }
             }
@@ -128,7 +127,7 @@ impl TerminalContext {
         context.push_str(&format!("User: {}\n", self.environment.user));
         context.push_str(&format!("Home: {}\n", self.environment.home.display()));
         if let Some(ref editor) = self.environment.editor {
-            context.push_str(&format!("Editor: {}\n", editor));
+            context.push_str(&format!("Editor: {editor}\n"));
         }
 
         // Terminal dimensions
@@ -144,7 +143,7 @@ impl TerminalContext {
 
         // Selection
         if let Some(ref sel) = self.selection {
-            context.push_str(&format!("Selection: {}\n", sel));
+            context.push_str(&format!("Selection: {sel}\n"));
         }
 
         // Recent output (last 10 lines)
@@ -152,7 +151,7 @@ impl TerminalContext {
             context.push_str("\nRecent Output:\n");
             let start = self.recent_output.len().saturating_sub(10);
             for line in &self.recent_output[start..] {
-                context.push_str(&format!("  {}\n", line));
+                context.push_str(&format!("  {line}\n"));
             }
         }
 
@@ -177,7 +176,7 @@ impl TerminalContext {
 
         // Check if we're in a git repository
         let output = Command::new("git")
-            .args(&["rev-parse", "--is-inside-work-tree"])
+            .args(["rev-parse", "--is-inside-work-tree"])
             .current_dir(cwd)
             .output()
             .ok()?;
@@ -188,7 +187,7 @@ impl TerminalContext {
 
         // Get branch name
         let branch_output = Command::new("git")
-            .args(&["rev-parse", "--abbrev-ref", "HEAD"])
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
             .current_dir(cwd)
             .output()
             .ok()?;
@@ -199,7 +198,7 @@ impl TerminalContext {
 
         // Check if dirty
         let status_output = Command::new("git")
-            .args(&["status", "--porcelain"])
+            .args(["status", "--porcelain"])
             .current_dir(cwd)
             .output()
             .ok()?;
@@ -208,7 +207,7 @@ impl TerminalContext {
 
         // Get remote URL
         let remote_output = Command::new("git")
-            .args(&["config", "--get", "remote.origin.url"])
+            .args(["config", "--get", "remote.origin.url"])
             .current_dir(cwd)
             .output()
             .ok();
@@ -236,7 +235,7 @@ impl TerminalContext {
         use std::process::Command;
 
         let output = Command::new("git")
-            .args(&["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+            .args(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
             .current_dir(cwd)
             .output()
             .ok()?;
@@ -246,7 +245,7 @@ impl TerminalContext {
         }
 
         let output_str = String::from_utf8_lossy(&output.stdout);
-        let parts: Vec<&str> = output_str.trim().split_whitespace().collect();
+        let parts: Vec<&str> = output_str.split_whitespace().collect();
 
         if parts.len() == 2 {
             let ahead = parts[0].parse().ok()?;

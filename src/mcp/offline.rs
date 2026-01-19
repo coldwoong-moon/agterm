@@ -291,11 +291,7 @@ impl CachedResponse {
     /// Get remaining TTL in seconds
     pub fn remaining_ttl(&self) -> u64 {
         let age = self.age_seconds();
-        if age >= self.ttl_seconds {
-            0
-        } else {
-            self.ttl_seconds - age
-        }
+        self.ttl_seconds.saturating_sub(age)
     }
 }
 
