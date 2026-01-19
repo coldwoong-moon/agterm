@@ -266,6 +266,7 @@ impl Default for LinkDetector {
 
 /// Action to perform when a link is activated
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub enum LinkAction {
     /// Open the link in the system's default application
     OpenDefault,

@@ -3,16 +3,16 @@
 //! Provides functionality for detecting URLs and file paths in terminal output
 //! and opening them in the system's default application.
 
-use std::sync::LazyLock;
+use once_cell::sync::Lazy;
 use regex::Regex;
 
 /// URL pattern regex - matches http://, https?://, and file:// URLs
-pub static URL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+pub static URL_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?i)https?://[^\s<>"'`)\]]+|file://[^\s<>"'`)\]]+"#).unwrap()
 });
 
 /// File path pattern regex - matches absolute paths, home-relative paths, and relative paths
-pub static FILE_PATH_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+pub static FILE_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?:^|[\s:])(/[^\s:]+|~[^\s:]+|\.{1,2}/[^\s:]+)").unwrap()
 });
 

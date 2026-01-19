@@ -121,6 +121,7 @@ impl Locale {
     /// assert_eq!(locale.language, "en");
     /// assert_eq!(locale.region, Some("US".to_string()));
     /// ```
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Result<Self> {
         let parts: Vec<&str> = s.split('-').collect();
 

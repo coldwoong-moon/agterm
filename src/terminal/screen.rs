@@ -367,6 +367,7 @@ impl ImageData {
 /// leaving alternate screen mode (used by vim, less, htop, etc.)
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // Fields used through derived traits
+#[allow(clippy::type_complexity)]
 struct AlternateScreenState {
     /// Saved main screen buffer
     main_buffer: Vec<Vec<Cell>>,
@@ -590,6 +591,7 @@ impl CompressionStats {
 }
 
 /// Terminal screen buffer with VTE parser
+#[allow(clippy::type_complexity)]
 pub struct TerminalScreen {
     cols: usize,
     rows: usize,

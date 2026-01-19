@@ -383,6 +383,7 @@ pub enum PluginEvent {
 }
 
 /// Context provided to plugins for interacting with AgTerm
+#[allow(clippy::type_complexity)]
 pub struct PluginContext {
     terminal_writer: Arc<Mutex<Vec<u8>>>,
     terminal_reader: Arc<Mutex<Vec<u8>>>,

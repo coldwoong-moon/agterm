@@ -1,6 +1,7 @@
 //! Memory optimization utilities for terminal screen buffers
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
 /// String interner for reducing memory usage of repeated strings (URLs, etc.)
@@ -159,9 +160,8 @@ pub struct MemoryStats {
     pub total_bytes: usize,
 }
 
-impl MemoryStats {
-    /// Get a human-readable string representation
-    pub fn to_string(&self) -> String {
+impl fmt::Display for MemoryStats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let buffer_kb = self.buffer_bytes / 1024;
         let scrollback_kb = self.scrollback_bytes / 1024;
         let interner_kb = self.interner_bytes / 1024;
@@ -174,7 +174,8 @@ impl MemoryStats {
             0.0
         };
 
-        format!(
+        write!(
+            f,
             "Memory: {}KB total | Buffer: {}KB ({} lines) | Scrollback: {}KB ({} lines) | \
              Interner: {}KB ({} strings, {:.1}% hit rate)",
             total_kb,

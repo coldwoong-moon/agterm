@@ -54,6 +54,7 @@ impl Encoding {
     }
 
     /// Parse encoding from string (case-insensitive)
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         let s = s.to_lowercase();
         match s.as_str() {

@@ -491,6 +491,7 @@ impl ProfileManager {
     }
 
     /// Load built-in profiles
+    #[allow(clippy::field_reassign_with_default)]
     fn load_builtin_profiles(&mut self) {
         // Default profile
         let mut default = Profile::default();

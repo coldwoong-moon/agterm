@@ -738,7 +738,7 @@ pub fn integration_script(shell: ShellType) -> String {
 // Helper functions
 
 /// Abbreviate a path for display
-fn abbreviate_path(path: &PathBuf) -> String {
+fn abbreviate_path(path: &std::path::Path) -> String {
     let path_str = path.to_string_lossy();
 
     // Replace home directory with ~
