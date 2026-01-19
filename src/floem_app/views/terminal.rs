@@ -8,7 +8,7 @@
 
 use floem::prelude::*;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate, Scope, Trigger, create_effect};
-use floem::peniko::{Color, kurbo::Rect};
+use floem::peniko::{Color, kurbo::{Rect, Line, Stroke}};
 use floem::views::{container, Decorators};
 use floem::{View, ViewId};
 use floem_renderer::Renderer;
@@ -26,8 +26,10 @@ use crate::terminal::screen::TerminalScreen;
 
 use crate::terminal::search::{SearchState, SearchMatch};
 /// Terminal canvas constants
-const CELL_WIDTH: f64 = 9.0;   // Character width in pixels
-const CELL_HEIGHT: f64 = 18.0;  // Character height in pixels
+/// Default cell dimensions at default font size (14.0)
+const DEFAULT_FONT_SIZE: f64 = 14.0;
+const CELL_WIDTH: f64 = 9.0;   // Character width at font size 14
+const CELL_HEIGHT: f64 = 18.0;  // Character height at font size 14
 const DEFAULT_COLS: usize = 80;
 const DEFAULT_ROWS: usize = 24;
 /// Double-click time threshold (milliseconds)
@@ -128,6 +130,12 @@ pub struct TerminalState {
     search_state: Arc<Mutex<SearchState>>,
     /// Trigger for cross-thread repaint (used with ext_event)
     repaint_trigger: Trigger,
+}
+
+impl Default for TerminalState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TerminalState {
@@ -231,6 +239,24 @@ impl TerminalState {
         }
     }
 
+    /// Get current cursor position (row, col)
+    pub fn cursor_position(&self) -> (usize, usize) {
+        match self.screen.lock() {
+            Ok(s) => s.cursor_position(),
+            Err(e) => {
+                tracing::error!("Failed to lock terminal screen to get cursor position: {}", e);
+                (0, 0)
+            }
+        }
+    }
+
+    /// Get cell dimensions for calculating pixel positions
+    /// Returns (cell_width, cell_height) based on current font size
+    pub fn cell_dimensions(font_size: f32) -> (f64, f64) {
+        let scale = font_size as f64 / DEFAULT_FONT_SIZE;
+        (CELL_WIDTH * scale, CELL_HEIGHT * scale)
+    }
+
     /// Scroll up by lines
     #[allow(dead_code)]
     pub fn scroll_up(&self, lines: usize) {
@@ -285,8 +311,6 @@ impl TerminalState {
             .map(|s| s.scrollback_size())
             .unwrap_or(0)
     }
-
-    /// Get window title from OSC sequences
 
     /// Perform search in terminal buffer (future feature)
     #[allow(dead_code)]
@@ -449,6 +473,8 @@ pub struct TerminalCanvas {
     font_family: Vec<FamilyOwned>,
     /// Last known canvas size for resize detection (width, height)
     last_size: std::cell::Cell<(f64, f64)>,
+    /// Last known font size for cache invalidation
+    last_font_size: std::cell::Cell<f32>,
     /// Whether this terminal is focused
     #[allow(dead_code)]
     is_focused: RwSignal<bool>,
@@ -468,7 +494,8 @@ pub struct TerminalCanvas {
 impl TerminalCanvas {
     pub fn new(state: TerminalState, app_state: AppState, is_focused: RwSignal<bool>) -> Self {
         // Parse monospace font families (fallback chain)
-        let font_family = FamilyOwned::parse_list("JetBrains Mono, Menlo, Monaco, Courier New, monospace")
+        // Include Noto Sans Mono CJK KR for Korean/CJK text support
+        let font_family = FamilyOwned::parse_list("JetBrains Mono, Noto Sans Mono CJK KR, Menlo, Monaco, Courier New, monospace")
             .collect::<Vec<_>>();
 
         // Create view ID first
@@ -487,12 +514,16 @@ impl TerminalCanvas {
 
         tracing::debug!("TerminalCanvas created with ext_event trigger for cross-thread repaint");
 
+        // Get initial font size from app state
+        let initial_font_size = app_state.font_size.get();
+
         Self {
             id,
             state,
             app_state,
             font_family,
             last_size: std::cell::Cell::new((0.0, 0.0)),
+            last_font_size: std::cell::Cell::new(initial_font_size),
             is_focused,
             text_cache: std::cell::RefCell::new(HashMap::with_capacity(500)),
             selection: std::cell::RefCell::new(None),
@@ -502,10 +533,39 @@ impl TerminalCanvas {
         }
     }
 
+    /// Calculate cell dimensions based on current font size
+    /// Returns (cell_width, cell_height) scaled proportionally to font size
+    fn cell_dimensions(&self) -> (f64, f64) {
+        let font_size = self.app_state.font_size.get() as f64;
+        let scale = font_size / DEFAULT_FONT_SIZE;
+        (CELL_WIDTH * scale, CELL_HEIGHT * scale)
+    }
+
+    /// Check if font size changed and invalidate cache if needed
+    fn check_font_size_changed(&self) -> bool {
+        let current_font_size = self.app_state.font_size.get();
+        let last_font_size = self.last_font_size.get();
+
+        if (current_font_size - last_font_size).abs() > 0.01 {
+            self.last_font_size.set(current_font_size);
+            // Clear text cache when font size changes
+            self.text_cache.borrow_mut().clear();
+            tracing::debug!(
+                "Font size changed from {} to {}, cache cleared",
+                last_font_size,
+                current_font_size
+            );
+            true
+        } else {
+            false
+        }
+    }
+
     /// Calculate terminal dimensions from canvas size
     fn calculate_dimensions(&self, width: f64, height: f64) -> (usize, usize) {
-        let cols = (width / CELL_WIDTH).floor() as usize;
-        let rows = (height / CELL_HEIGHT).floor() as usize;
+        let (cell_width, cell_height) = self.cell_dimensions();
+        let cols = (width / cell_width).floor() as usize;
+        let rows = (height / cell_height).floor() as usize;
 
         // Ensure minimum size
         let cols = cols.max(1);
@@ -560,56 +620,56 @@ impl TerminalCanvas {
 
     /// OPTIMIZATION: Get or create cached text layout for a character
     /// This avoids creating a new TextLayout for every cell on every frame
-    fn get_cached_text_layout(&self, ch: char, bold: bool, italic: bool, fg_color: Color) -> TextLayout {
+    fn get_cached_text_layout(&self, ch: char, bold: bool, italic: bool, fg_color: Color, font_size: f32) -> TextLayout {
         let cache_key = TextCacheKey { ch, bold, italic };
-        
+
         let mut cache = self.text_cache.borrow_mut();
-        
+
         // Check cache
         if let Some(cached_layout) = cache.get(&cache_key) {
-            // Clone cached layout and update color
+            // Clone cached layout and update color and font size
             let mut layout = cached_layout.clone();
-            
+
             let mut attrs = Attrs::new()
                 .color(fg_color)
                 .family(&self.font_family)
-                .font_size(14.0);
-            
+                .font_size(font_size);
+
             if bold {
                 attrs = attrs.weight(Weight::BOLD);
             }
             if italic {
                 attrs = attrs.style(FontStyle::Italic);
             }
-            
+
             let attrs_list = AttrsList::new(attrs);
             layout.set_text(&ch.to_string(), attrs_list);
-            
+
             return layout;
         }
-        
+
         // Create new layout
         let mut attrs = Attrs::new()
             .color(fg_color)
             .family(&self.font_family)
-            .font_size(14.0);
-        
+            .font_size(font_size);
+
         if bold {
             attrs = attrs.weight(Weight::BOLD);
         }
         if italic {
             attrs = attrs.style(FontStyle::Italic);
         }
-        
+
         let attrs_list = AttrsList::new(attrs);
         let mut text_layout = TextLayout::new();
         text_layout.set_text(&ch.to_string(), attrs_list);
-        
+
         // Cache it (with size limit to prevent memory bloat)
         if cache.len() < 500 {
             cache.insert(cache_key, text_layout.clone());
         }
-        
+
         text_layout
     }
 
@@ -689,8 +749,9 @@ impl TerminalCanvas {
 
     /// Convert screen coordinates to terminal cell coordinates
     fn screen_to_cell(&self, x: f64, y: f64) -> SelectionPos {
-        let col = (x / CELL_WIDTH).floor() as usize;
-        let row = (y / CELL_HEIGHT).floor() as usize;
+        let (cell_width, cell_height) = self.cell_dimensions();
+        let col = (x / cell_width).floor() as usize;
+        let row = (y / cell_height).floor() as usize;
         let (cols, rows) = self.state.dimensions();
         SelectionPos::new(row.min(rows.saturating_sub(1)), col.min(cols.saturating_sub(1)))
     }
@@ -928,6 +989,8 @@ impl TerminalCanvas {
             return;
         }
 
+        let (cell_width, cell_height) = self.cell_dimensions();
+
         let cursor_color = if is_focused {
             colors::ACCENT_BLUE
         } else {
@@ -940,8 +1003,8 @@ impl TerminalCanvas {
                 let cursor_rect = Rect::new(
                     x,
                     y,
-                    x + CELL_WIDTH,
-                    y + CELL_HEIGHT,
+                    x + cell_width,
+                    y + cell_height,
                 );
 
                 if is_focused && blink_on {
@@ -960,9 +1023,9 @@ impl TerminalCanvas {
                 // Underline cursor (2px height at bottom of cell)
                 let underline_rect = Rect::new(
                     x,
-                    y + CELL_HEIGHT - 2.0,
-                    x + CELL_WIDTH,
-                    y + CELL_HEIGHT,
+                    y + cell_height - 2.0,
+                    x + cell_width,
+                    y + cell_height,
                 );
 
                 cx.fill(&underline_rect, cursor_color, 0.0);
@@ -973,7 +1036,7 @@ impl TerminalCanvas {
                     x,
                     y,
                     x + 2.0,
-                    y + CELL_HEIGHT,
+                    y + cell_height,
                 );
 
                 cx.fill(&bar_rect, cursor_color, 0.0);
@@ -1026,12 +1089,25 @@ impl View for TerminalCanvas {
     fn paint(&mut self, cx: &mut floem::context::PaintCx) {
         // Paint is called whenever request_paint() is invoked (including from PTY thread)
 
+        // PERFORMANCE: Use get_untracked() in paint to avoid signal subscription overhead
+        // paint() is called frequently and shouldn't create reactive dependencies
+
+        // Check if font size changed and invalidate cache if needed
+        let font_changed = self.check_font_size_changed();
+
+        // Get dynamic cell dimensions based on current font size
+        let (cell_width, cell_height) = self.cell_dimensions();
+        let font_size = self.app_state.font_size.get_untracked();
+
         // Get layout size from Floem
         let layout = self.id.get_layout().unwrap_or_default();
         let canvas_width = layout.size.width as f64;
         let canvas_height = layout.size.height as f64;
 
-        // Handle resize if canvas size changed
+        // Handle resize if canvas size changed or font changed
+        if font_changed {
+            self.last_size.set((0.0, 0.0)); // Force resize recalculation
+        }
         self.handle_resize(canvas_width, canvas_height);
 
         let screen = match self.state.screen.lock() {
@@ -1062,8 +1138,8 @@ impl View for TerminalCanvas {
             canvas_height,
         );
 
-        // Get dynamic colors from app state
-        let colors = self.app_state.colors();
+        // PERFORMANCE: Get colors without signal tracking in paint
+        let colors = self.app_state.theme.get_untracked().colors();
 
         // Draw background
         cx.fill(&canvas_rect, colors.bg_primary, 0.0);
@@ -1074,8 +1150,8 @@ impl View for TerminalCanvas {
         // Render all cells (dirty tracking disabled for cross-thread repaint compatibility)
         for (row_idx, row) in lines.iter().enumerate().take(rows) {
             for (col_idx, cell) in row.iter().enumerate().take(cols) {
-                let x = col_idx as f64 * CELL_WIDTH;
-                let y = row_idx as f64 * CELL_HEIGHT;
+                let x = col_idx as f64 * cell_width;
+                let y = row_idx as f64 * cell_height;
 
                 // Check if this cell is selected
                 let is_selected = selection
@@ -1132,8 +1208,8 @@ impl View for TerminalCanvas {
                     let cell_rect = Rect::new(
                         x,
                         y,
-                        x + CELL_WIDTH,
-                        y + CELL_HEIGHT,
+                        x + cell_width,
+                        y + cell_height,
                     );
                     cx.fill(&cell_rect, bg, 0.0);
                 }
@@ -1144,34 +1220,63 @@ impl View for TerminalCanvas {
                         cell.c,
                         cell.bold,
                         cell.italic,
-                        fg_color
+                        fg_color,
+                        font_size,
                     );
 
                     // Draw the text at cell position (with vertical centering adjustment)
-                    cx.draw_text(&text_layout, (x, y + 2.0));
+                    let text_offset = (cell_height - font_size as f64) / 2.0;
+                    cx.draw_text(&text_layout, (x, y + text_offset));
+                }
+
+                // Draw underline if attribute is set
+                if cell.underline {
+                    let underline_y = y + cell_height - 2.0;
+                    let underline = Line::new(
+                        (x, underline_y),
+                        (x + cell_width, underline_y)
+                    );
+                    cx.stroke(&underline, fg_color, &Stroke::new(1.0));
+                }
+
+                // Draw strikethrough if attribute is set
+                if cell.strikethrough {
+                    let strike_y = y + cell_height / 2.0;
+                    let strike = Line::new(
+                        (x, strike_y),
+                        (x + cell_width, strike_y)
+                    );
+                    cx.stroke(&strike, fg_color, &Stroke::new(1.0));
                 }
             }
         }
 
-        // Draw cursor
-        if cursor_visible && cursor_row < rows && cursor_col < cols {
-            let cursor_x = cursor_col as f64 * CELL_WIDTH;
-            let cursor_y = cursor_row as f64 * CELL_HEIGHT;
+        // Draw cursor (only when focused)
+        let is_focused = self.is_focused.get_untracked();
+        if is_focused && cursor_visible && cursor_row < rows && cursor_col < cols {
+            let cursor_x = cursor_col as f64 * cell_width;
+            let cursor_y = cursor_row as f64 * cell_height;
 
             let cursor_rect = Rect::new(
                 cursor_x,
                 cursor_y,
-                cursor_x + CELL_WIDTH,
-                cursor_y + CELL_HEIGHT,
+                cursor_x + cell_width,
+                cursor_y + cell_height,
             );
 
-            // Draw cursor as outlined rectangle
-            let colors = self.app_state.colors();
+            // Draw cursor as outlined rectangle (use untracked in paint)
+            let colors = self.app_state.theme.get_untracked().colors();
             cx.stroke(
                 &cursor_rect,
                 colors.accent_blue,
                 &floem::peniko::kurbo::Stroke::new(2.0),
             );
+        }
+
+        // Draw dim overlay for inactive panes
+        if !is_focused {
+            let overlay_color = Color::rgba8(0, 0, 0, 100); // Semi-transparent black
+            cx.fill(&canvas_rect, overlay_color, 0.0);
         }
     }
 

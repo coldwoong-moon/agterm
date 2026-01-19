@@ -144,7 +144,7 @@ impl Tab {
         match tree {
             PaneTree::Leaf { terminal_state, .. } => terminal_state.pty_session(),
             PaneTree::Split { first, .. } => {
-                first.with(|t| Self::get_first_pty_session(t))
+                first.with(Self::get_first_pty_session)
             }
         }
     }
@@ -495,7 +495,7 @@ impl AppState {
     pub fn add_profile(&self, profile: Profile) -> Result<String, String> {
         self.profile_manager
             .write()
-            .map_err(|e| format!("Lock error: {}", e))
+            .map_err(|e| format!("Lock error: {e}"))
             .and_then(|mut pm| pm.add_profile(profile).map_err(|e| e.to_string()))
     }
 
@@ -504,7 +504,7 @@ impl AppState {
     pub fn update_profile(&self, profile_id: &str, profile: Profile) -> Result<(), String> {
         self.profile_manager
             .write()
-            .map_err(|e| format!("Lock error: {}", e))
+            .map_err(|e| format!("Lock error: {e}"))
             .and_then(|mut pm| pm.update_profile(profile_id, profile).map_err(|e| e.to_string()))
     }
 
@@ -513,7 +513,7 @@ impl AppState {
     pub fn delete_profile(&self, profile_id: &str) -> Result<(), String> {
         self.profile_manager
             .write()
-            .map_err(|e| format!("Lock error: {}", e))
+            .map_err(|e| format!("Lock error: {e}"))
             .and_then(|mut pm| pm.delete_profile(profile_id).map_err(|e| e.to_string()))
     }
 
@@ -522,7 +522,7 @@ impl AppState {
     pub fn clone_profile(&self, profile_id: &str, new_name: String) -> Result<String, String> {
         self.profile_manager
             .write()
-            .map_err(|e| format!("Lock error: {}", e))
+            .map_err(|e| format!("Lock error: {e}"))
             .and_then(|mut pm| pm.clone_profile(profile_id, new_name).map_err(|e| e.to_string()))
     }
 
@@ -587,6 +587,119 @@ impl AppState {
         // - Key bindings (requires UI integration)
 
         tracing::info!("Profile '{}' applied to tab '{}'", profile.name, tab.title.get());
+    }
+
+    // ========================================================================
+    // Pane Management Methods
+    // ========================================================================
+
+    /// Split the focused pane vertically (top/bottom)
+    pub fn split_pane_vertical(&self) {
+        if let Some(active_tab) = self.active_tab_ref() {
+            let mut tree = active_tab.pane_tree.get();
+            if let Some((focused_id, _)) = tree.get_focused_leaf() {
+                tracing::info!("Splitting pane {} vertically", focused_id);
+                Self::split_pane_recursive(&mut tree, focused_id, true, &self.pty_manager);
+                active_tab.pane_tree.set(tree);
+            }
+        }
+    }
+
+    /// Split the focused pane horizontally (left/right)
+    pub fn split_pane_horizontal(&self) {
+        if let Some(active_tab) = self.active_tab_ref() {
+            let mut tree = active_tab.pane_tree.get();
+            if let Some((focused_id, _)) = tree.get_focused_leaf() {
+                tracing::info!("Splitting pane {} horizontally", focused_id);
+                Self::split_pane_recursive(&mut tree, focused_id, false, &self.pty_manager);
+                active_tab.pane_tree.set(tree);
+            }
+        }
+    }
+
+    /// Navigate to the next pane
+    pub fn next_pane(&self) {
+        if let Some(active_tab) = self.active_tab_ref() {
+            let tree = active_tab.pane_tree.get();
+            if let Some(next_id) = tree.navigate(crate::floem_app::pane::NavigationDirection::Next) {
+                tracing::info!("Navigating to next pane: {}", next_id);
+                tree.clear_focus();
+                tree.set_focus(next_id);
+                active_tab.pane_tree.set(tree);
+            }
+        }
+    }
+
+    /// Navigate to the previous pane
+    pub fn previous_pane(&self) {
+        if let Some(active_tab) = self.active_tab_ref() {
+            let tree = active_tab.pane_tree.get();
+            if let Some(prev_id) = tree.navigate(crate::floem_app::pane::NavigationDirection::Previous) {
+                tracing::info!("Navigating to previous pane: {}", prev_id);
+                tree.clear_focus();
+                tree.set_focus(prev_id);
+                active_tab.pane_tree.set(tree);
+            }
+        }
+    }
+
+    /// Close the focused pane
+    pub fn close_focused_pane(&self) {
+        if let Some(active_tab) = self.active_tab_ref() {
+            let mut tree = active_tab.pane_tree.get();
+
+            // Don't close if it's the last pane
+            if tree.count_leaves() <= 1 {
+                tracing::warn!("Cannot close the last pane");
+                return;
+            }
+
+            if tree.close_focused_pane(&self.pty_manager) {
+                active_tab.pane_tree.set(tree);
+                tracing::info!("Focused pane closed");
+            }
+        }
+    }
+
+    /// Helper function to split a specific pane in the tree
+    fn split_pane_recursive(
+        tree: &mut crate::floem_app::pane::PaneTree,
+        target_id: uuid::Uuid,
+        vertical: bool,
+        pty_manager: &std::sync::Arc<crate::terminal::pty::PtyManager>,
+    ) -> bool {
+        use crate::floem_app::pane::PaneTree;
+        use floem::reactive::{SignalGet, SignalUpdate};
+
+        match tree {
+            PaneTree::Leaf { id, .. } => {
+                if *id == target_id {
+                    if vertical {
+                        tree.split_vertical(pty_manager);
+                    } else {
+                        tree.split_horizontal(pty_manager);
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            PaneTree::Split { first, second, .. } => {
+                let mut first_val = first.get();
+                if Self::split_pane_recursive(&mut first_val, target_id, vertical, pty_manager) {
+                    first.set(first_val);
+                    return true;
+                }
+
+                let mut second_val = second.get();
+                if Self::split_pane_recursive(&mut second_val, target_id, vertical, pty_manager) {
+                    second.set(second_val);
+                    return true;
+                }
+
+                false
+            }
+        }
     }
 }
 

@@ -223,7 +223,8 @@ fn new_tab_button(state: &AppState) -> impl IntoView {
             .cursor(floem::style::CursorStyle::Pointer)
             .hover(move |s| s.background(hover_color))
     })
-    .on_click_stop(move |_| {
+    .on_event_stop(floem::event::EventListener::PointerDown, move |_| {
+        tracing::info!("New tab button PointerDown!");
         state_hover.add_tab();
     })
 }

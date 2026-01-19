@@ -30,10 +30,12 @@ pub fn pane_tree_view(
                 render_pane_tree(tree, app_state_clone.clone())
             }
         )
+        .style(|s| s.flex_grow(1.0).width_full().height_full())
     )
     .style(move |s| {
         let colors = app_state_style.colors();
-        s.width_full()
+        s.flex_grow(1.0)
+            .width_full()
             .height_full()
             .background(colors.bg_primary)
     })
@@ -77,7 +79,8 @@ fn render_leaf_pane(
     let app_state_style = app_state.clone();
 
     // Create terminal canvas directly (repaint is triggered via ViewId.request_paint())
-    let terminal_canvas_view = TerminalCanvas::new(terminal_state_clone.clone(), app_state_canvas.clone(), is_focused);
+    let terminal_canvas_view = TerminalCanvas::new(terminal_state_clone.clone(), app_state_canvas.clone(), is_focused)
+        .style(|s| s.flex_grow(1.0).width_full().height_full().min_width(400.0).min_height(300.0));
 
     container(
         v_stack((
@@ -87,7 +90,7 @@ fn render_leaf_pane(
                     .style(move |s| {
                         let colors = app_state_label.colors();
                         s.font_size(11.0)
-                            .font_family("monospace".to_string())
+                            .font_family("JetBrains Mono, Noto Sans Mono CJK KR, Menlo, monospace".to_string())
                             .color(colors.text_secondary)
                             .padding(4.0)
                     })
@@ -104,22 +107,25 @@ fn render_leaf_pane(
             container(
                 v_stack((
                     terminal_canvas_view,
-                    // IME composing text overlay
+                    // IME composing text overlay - positioned near cursor
                     container(
                         label(move || {
                             let composing = terminal_state_ime_label.ime_composing.get();
                             if composing.is_empty() {
                                 "".to_string()
                             } else {
-                                format!("IME: {}", composing)
+                                // Show just the composing text for cleaner look
+                                composing
                             }
                         })
                         .style(move |s| {
                             let colors = app_state_ime_label.colors();
-                            s.font_size(12.0)
-                                .font_family("monospace".to_string())
-                                .color(colors.accent_blue)
-                                .padding(4.0)
+                            let font_size = app_state_ime_label.font_size.get();
+                            s.font_size(font_size)
+                                .font_family("JetBrains Mono, Noto Sans Mono CJK KR, Menlo, Monaco, monospace".to_string())
+                                .color(colors.text_primary)
+                                .padding_horiz(4.0)
+                                .padding_vert(2.0)
                         })
                     )
                     .style(move |s| {
@@ -128,16 +134,24 @@ fn render_leaf_pane(
                         if composing.is_empty() {
                             s.display(floem::style::Display::None)
                         } else {
+                            // Calculate position based on cursor
+                            let (cursor_row, cursor_col) = terminal_state_ime_label_style.cursor_position();
+                            let font_size = app_state_ime_style.font_size.get();
+                            let (cell_width, cell_height) = TerminalState::cell_dimensions(font_size);
+
+                            let x_pos = (cursor_col as f64 * cell_width) as f32;
+                            let y_pos = (cursor_row as f64 * cell_height) as f32;
+
                             s.position(floem::style::Position::Absolute)
-                                .inset_left(10.0)
-                                .inset_bottom(10.0)
-                                .background(colors.bg_secondary)
-                                .border(1.0)
-                                .border_color(colors.accent_blue)
-                                .border_radius(4.0)
+                                .inset_left(x_pos)
+                                .inset_top(y_pos)
+                                .background(colors.accent_blue.multiply_alpha(0.9))
+                                .border_radius(2.0)
+                                .z_index(100)
                         }
                     }),
                 ))
+                .style(|s| s.flex_grow(1.0).width_full().height_full())
             )
                 // NOTE: Keyboard events are handled at the app level (mod.rs)
                 // to ensure consistent routing to the active terminal
@@ -212,27 +226,14 @@ fn render_leaf_pane(
                         .background(colors.bg_primary)
                 })
         ))
+        .style(|s| s.flex_grow(1.0).width_full().height_full())
     )
     .style(move |s| {
         let colors = app_state_style.colors();
-        let mut style = s
-            .width_full()
+        s.width_full()
             .height_full()
             .flex_col()
-            .background(colors.bg_primary);
-
-        // Add focus border
-        if is_focused.get() {
-            style = style
-                .border(2.0)
-                .border_color(colors.accent_blue);
-        } else {
-            style = style
-                .border(1.0)
-                .border_color(colors.border);
-        }
-
-        style
+            .background(colors.bg_primary)
     })
 }
 
@@ -401,6 +402,16 @@ fn vertical_divider(ratio: RwSignal<f64>, app_state: AppState) -> impl IntoView 
         })
         .on_event_stop(floem::event::EventListener::PointerUp, move |_event| {
             set_dragging.set(false);
+            // Snap to common ratios if close enough
+            let current = ratio.get();
+            let snap_threshold = 0.03;
+            let snap_targets = [0.25, 0.333, 0.5, 0.666, 0.75];
+            for target in snap_targets {
+                if (current - target).abs() < snap_threshold {
+                    ratio.set(target);
+                    break;
+                }
+            }
         })
 }
 
@@ -449,5 +460,15 @@ fn horizontal_divider(ratio: RwSignal<f64>, app_state: AppState) -> impl IntoVie
         })
         .on_event_stop(floem::event::EventListener::PointerUp, move |_event| {
             set_dragging.set(false);
+            // Snap to common ratios if close enough
+            let current = ratio.get();
+            let snap_threshold = 0.03;
+            let snap_targets = [0.25, 0.333, 0.5, 0.666, 0.75];
+            for target in snap_targets {
+                if (current - target).abs() < snap_threshold {
+                    ratio.set(target);
+                    break;
+                }
+            }
         })
 }

@@ -265,14 +265,14 @@ impl Settings {
 
         // Validate terminal size
         if let Some(cols) = self.default_cols {
-            if cols < 20 || cols > 500 {
+            if !(20..=500).contains(&cols) {
                 tracing::warn!("default_cols out of range ({}), using 80", cols);
                 self.default_cols = Some(80);
             }
         }
 
         if let Some(rows) = self.default_rows {
-            if rows < 10 || rows > 200 {
+            if !(10..=200).contains(&rows) {
                 tracing::warn!("default_rows out of range ({}), using 24", rows);
                 self.default_rows = Some(24);
             }
@@ -307,6 +307,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_clamp_font_size() {
         let mut settings = Settings::default();
         settings.font_size = 100.0;

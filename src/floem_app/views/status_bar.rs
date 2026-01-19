@@ -4,9 +4,35 @@ use floem::prelude::*;
 use floem::reactive::SignalGet;
 use floem::views::{container, h_stack, label, Decorators};
 use std::env;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::floem_app::state::AppState;
 use crate::floem_app::theme::layout;
+
+/// Cached git information to avoid running git commands on every render
+struct GitInfoCache {
+    branch: Option<String>,
+    is_repo: bool,
+    last_check: Instant,
+}
+
+impl Default for GitInfoCache {
+    fn default() -> Self {
+        Self {
+            branch: None,
+            is_repo: false,
+            last_check: Instant::now() - Duration::from_secs(10), // Force initial check
+        }
+    }
+}
+
+static GIT_CACHE: LazyLock<Mutex<GitInfoCache>> = LazyLock::new(|| {
+    Mutex::new(GitInfoCache::default())
+});
+
+/// Cache duration for git information (5 seconds)
+const GIT_CACHE_DURATION: Duration = Duration::from_secs(5);
 
 /// Get the current working directory from environment
 fn get_current_directory() -> String {
@@ -17,7 +43,8 @@ fn get_current_directory() -> String {
 }
 
 /// Get git branch for the current directory (if in a git repo)
-fn get_git_branch() -> Option<String> {
+/// PERFORMANCE: This is now only called when cache is stale
+fn get_git_branch_uncached() -> Option<String> {
     use std::process::Command;
 
     Command::new("git")
@@ -36,7 +63,8 @@ fn get_git_branch() -> Option<String> {
 }
 
 /// Check if current directory is a git repository
-fn is_git_repo() -> bool {
+/// PERFORMANCE: This is now only called when cache is stale
+fn is_git_repo_uncached() -> bool {
     use std::process::Command;
 
     Command::new("git")
@@ -44,6 +72,24 @@ fn is_git_repo() -> bool {
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
+}
+
+/// Get cached git info, refreshing if stale
+fn get_cached_git_info() -> (bool, Option<String>) {
+    let mut cache = GIT_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+
+    if cache.last_check.elapsed() >= GIT_CACHE_DURATION {
+        // Cache is stale, refresh
+        cache.is_repo = is_git_repo_uncached();
+        cache.branch = if cache.is_repo {
+            get_git_branch_uncached()
+        } else {
+            None
+        };
+        cache.last_check = Instant::now();
+    }
+
+    (cache.is_repo, cache.branch.clone())
 }
 
 /// Status bar view with enhanced information display
@@ -83,11 +129,12 @@ pub fn status_bar(state: &AppState) -> impl IntoView {
                 s.font_size(11.0).color(colors.text_secondary)
             }),
 
-            // Git branch (if in a git repo)
+            // Git branch (if in a git repo) - uses cached info for performance
             label(move || {
-                if is_git_repo() {
-                    if let Some(branch) = get_git_branch() {
-                        format!(" [{}]", branch)
+                let (is_repo, branch) = get_cached_git_info();
+                if is_repo {
+                    if let Some(branch) = branch {
+                        format!(" [{branch}]")
                     } else {
                         String::new()
                     }
@@ -142,7 +189,7 @@ pub fn status_bar(state: &AppState) -> impl IntoView {
                         .map(|i| i + 1)
                         .unwrap_or(1);
 
-                    format!("Pane {}/{}", focused, pane_count)
+                    format!("Pane {focused}/{pane_count}")
                 } else {
                     "No panes".to_string()
                 }
@@ -174,7 +221,7 @@ pub fn status_bar(state: &AppState) -> impl IntoView {
                 if let Some(tab) = state_terminal_size.active_tab_ref() {
                     if let Some((_, terminal_state)) = tab.pane_tree.get().get_focused_leaf() {
                         let (cols, rows) = terminal_state.dimensions();
-                        format!("{}x{}", cols, rows)
+                        format!("{cols}x{rows}")
                     } else {
                         "80x24".to_string()
                     }

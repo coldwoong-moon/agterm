@@ -7,6 +7,7 @@ use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::views::{h_stack, text_input, label, container, Decorators};
 use floem::keyboard::{Key, NamedKey};
 
+use crate::floem_app::state::AppState;
 use crate::floem_app::theme::colors;
 
 /// Search bar state (future feature)
@@ -65,10 +66,11 @@ impl Default for SearchBarState {
     }
 }
 
-/// Create the search bar view (future feature)
+/// Create the search bar view with dynamic theming
 #[allow(dead_code)]
 pub fn search_bar<F1, F2, F3>(
     state: SearchBarState,
+    app_state: AppState,
     on_query_change: F1,
     on_next: F2,
     on_prev: F3,
@@ -85,6 +87,18 @@ where
     let on_next_clone = on_next.clone();
     let on_prev_clone = on_prev.clone();
 
+    // Clone AppState for different style closures
+    let app_state_label = app_state.clone();
+    let app_state_input = app_state.clone();
+    let app_state_counter = app_state.clone();
+    let app_state_prev_label = app_state.clone();
+    let app_state_prev_btn = app_state.clone();
+    let app_state_next_label = app_state.clone();
+    let app_state_next_btn = app_state.clone();
+    let app_state_close_label = app_state.clone();
+    let app_state_close_btn = app_state.clone();
+    let app_state_container = app_state.clone();
+
     // Set up reactive query change monitoring
     {
         let on_query_change = on_query_change.clone();
@@ -96,17 +110,18 @@ where
 
     container(
         h_stack((
-            // Search label
-            label(|| "Find:".to_string())
-                .style(|s| {
+            // Search icon and label
+            label(|| "🔍 Find:".to_string())
+                .style(move |s| {
+                    let colors = app_state_label.colors();
                     s.padding(5.0)
-                        .color(colors::TEXT_PRIMARY)
+                        .color(colors.text_primary)
                         .font_size(14.0)
                 }),
 
             // Search input
             text_input(query)
-                .placeholder("Search...")
+                .placeholder("Search... (Enter: next, Shift+Enter: prev)")
                 .on_event(floem::event::EventListener::KeyDown, move |event| {
                     if let floem::event::Event::KeyDown(key_event) = event {
                         match &key_event.key.logical_key {
@@ -128,41 +143,54 @@ where
                     }
                     floem::event::EventPropagation::Continue
                 })
-                .style(|s| {
+                .style(move |s| {
+                    let colors = app_state_input.colors();
                     s.width(300.0)
-                        .padding(5.0)
+                        .padding(8.0)
                         .border(1.0)
-                        .border_color(colors::BORDER)
-                        .border_radius(4.0)
-                        .background(colors::BG_SECONDARY)
-                        .color(colors::TEXT_PRIMARY)
+                        .border_color(colors.border)
+                        .border_radius(6.0)
+                        .background(colors.bg_secondary)
+                        .color(colors.text_primary)
                         .font_size(14.0)
+                        .focus(move |s| {
+                            s.border_color(colors::ACCENT_BLUE)
+                                .border(2.0)
+                        })
                 }),
 
-            // Match counter
+            // Match counter with highlighting
             label(move || {
                 let total = match_count.get();
                 if total == 0 {
                     "No matches".to_string()
                 } else if let Some(current) = current_match.get() {
-                    format!("{}/{}", current, total)
+                    format!("{current} of {total}")
                 } else {
-                    format!("{} matches", total)
+                    format!("{total} matches")
                 }
             })
-            .style(|s| {
+            .style(move |s| {
+                let colors = app_state_counter.colors();
+                let total = match_count.get();
+                let text_color = if total == 0 {
+                    colors.text_muted
+                } else {
+                    colors.accent_blue
+                };
                 s.padding(5.0)
-                    .color(colors::TEXT_SECONDARY)
+                    .color(text_color)
                     .font_size(13.0)
                     .min_width(100.0)
             }),
 
             // Previous button
             container(
-                label(|| "↑".to_string())
-                    .style(|s| {
-                        s.color(colors::TEXT_PRIMARY)
-                            .font_size(16.0)
+                label(|| "▲".to_string())
+                    .style(move |s| {
+                        let colors = app_state_prev_label.colors();
+                        s.color(colors.text_primary)
+                            .font_size(12.0)
                     })
             )
             .on_click_stop({
@@ -171,22 +199,25 @@ where
                     on_prev();
                 }
             })
-            .style(|s| {
-                s.padding(8.0)
+            .style(move |s| {
+                let colors = app_state_prev_btn.colors();
+                s.padding_horiz(12.0)
+                    .padding_vert(6.0)
                     .border(1.0)
-                    .border_color(colors::BORDER)
+                    .border_color(colors.border)
                     .border_radius(4.0)
-                    .background(colors::BG_SECONDARY)
+                    .background(colors.bg_secondary)
                     .cursor(floem::style::CursorStyle::Pointer)
                     .hover(|s| s.background(colors::BG_HOVER))
             }),
 
             // Next button
             container(
-                label(|| "↓".to_string())
-                    .style(|s| {
-                        s.color(colors::TEXT_PRIMARY)
-                            .font_size(16.0)
+                label(|| "▼".to_string())
+                    .style(move |s| {
+                        let colors = app_state_next_label.colors();
+                        s.color(colors.text_primary)
+                            .font_size(12.0)
                     })
             )
             .on_click_stop({
@@ -195,12 +226,14 @@ where
                     on_next();
                 }
             })
-            .style(|s| {
-                s.padding(8.0)
+            .style(move |s| {
+                let colors = app_state_next_btn.colors();
+                s.padding_horiz(12.0)
+                    .padding_vert(6.0)
                     .border(1.0)
-                    .border_color(colors::BORDER)
+                    .border_color(colors.border)
                     .border_radius(4.0)
-                    .background(colors::BG_SECONDARY)
+                    .background(colors.bg_secondary)
                     .cursor(floem::style::CursorStyle::Pointer)
                     .hover(|s| s.background(colors::BG_HOVER))
             }),
@@ -208,9 +241,10 @@ where
             // Close button
             container(
                 label(|| "✕".to_string())
-                    .style(|s| {
-                        s.color(colors::TEXT_PRIMARY)
-                            .font_size(16.0)
+                    .style(move |s| {
+                        let colors = app_state_close_label.colors();
+                        s.color(colors.text_secondary)
+                            .font_size(14.0)
                     })
             )
             .on_click_stop({
@@ -219,29 +253,28 @@ where
                     state.hide();
                 }
             })
-            .style(|s| {
-                s.padding(8.0)
-                    .margin_left(10.0)
-                    .border(1.0)
-                    .border_color(colors::BORDER)
+            .style(move |s| {
+                let colors = app_state_close_btn.colors();
+                s.padding(6.0)
+                    .margin_left(8.0)
                     .border_radius(4.0)
-                    .background(colors::BG_SECONDARY)
                     .cursor(floem::style::CursorStyle::Pointer)
-                    .hover(|s| s.background(colors::BG_HOVER))
+                    .hover(|s| s.background(colors::BG_HOVER).color(colors.text_primary))
             }),
         ))
         .style(|s| {
-            s.gap(10.0)
+            s.gap(8.0)
                 .items_center()
         })
     )
     .style(move |s| {
         let visible = state.visible.get();
+        let colors = app_state_container.colors();
         s.width_full()
             .padding(10.0)
-            .background(colors::BG_PRIMARY)
+            .background(colors.bg_primary)
             .border_bottom(1.0)
-            .border_color(colors::BORDER)
+            .border_color(colors.border)
             .display(if visible {
                 floem::style::Display::Flex
             } else {

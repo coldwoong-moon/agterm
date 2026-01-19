@@ -36,7 +36,8 @@ impl AgentType {
         }
     }
 
-    /// Get all available agents
+    /// Get all available agents (used in tests)
+    #[cfg(test)]
     pub fn all() -> &'static [AgentType] {
         &[
             AgentType::ClaudeCode,
@@ -90,7 +91,11 @@ impl McpPanelState {
         self.selected_agent.set(agent);
     }
 
+    // Methods below are prepared for future MCP server integration.
+    // Currently unused but will be called when MCP connection is implemented.
+
     /// Set connection status
+    #[allow(dead_code)]
     pub fn set_connected(&self, connected: bool, server_name: Option<String>) {
         self.connected.set(connected);
         if let Some(name) = server_name {
@@ -99,16 +104,19 @@ impl McpPanelState {
     }
 
     /// Update tools list
+    #[allow(dead_code)]
     pub fn update_tools(&self, tools: Vec<ToolInfo>) {
         self.tools.set(tools);
     }
 
     /// Set loading state
+    #[allow(dead_code)]
     pub fn set_loading(&self, loading: bool) {
         self.is_loading.set(loading);
     }
 
     /// Set error message
+    #[allow(dead_code)]
     pub fn set_error(&self, error: Option<String>) {
         self.error_message.set(error);
     }
@@ -121,8 +129,7 @@ impl Default for McpPanelState {
 }
 
 /// Create the MCP panel view
-pub fn mcp_panel(state: McpPanelState, theme: Theme) -> impl IntoView {
-    let colors = theme.colors();
+pub fn mcp_panel(state: McpPanelState, theme: RwSignal<Theme>) -> impl IntoView {
     let visible = state.visible;
 
     dyn_container(
@@ -136,13 +143,13 @@ pub fn mcp_panel(state: McpPanelState, theme: Theme) -> impl IntoView {
             container(
                 v_stack((
                     // Header section
-                    header_view(state.clone(), colors),
+                    header_view(state.clone(), theme),
                     // Agent selector buttons
-                    agent_selector_view(state.clone(), colors),
+                    agent_selector_view(state.clone(), theme),
                     // Connection status
-                    connection_status_view(state.clone(), colors),
+                    connection_status_view(state.clone(), theme),
                     // Tools list (scrollable)
-                    tools_list_view(state.clone(), colors),
+                    tools_list_view(state.clone(), theme),
                 ))
                 .style(move |s| {
                     s.flex_direction(FlexDirection::Column)
@@ -151,6 +158,7 @@ pub fn mcp_panel(state: McpPanelState, theme: Theme) -> impl IntoView {
                 }),
             )
             .style(move |s| {
+                let colors = theme.get().colors();
                 s.width(350.0)
                     .height_full()
                     .background(colors.bg_primary)
@@ -162,11 +170,12 @@ pub fn mcp_panel(state: McpPanelState, theme: Theme) -> impl IntoView {
 }
 
 /// Header with title and collapse button
-fn header_view(state: McpPanelState, colors: crate::floem_app::theme::ColorPalette) -> impl IntoView {
+fn header_view(state: McpPanelState, theme: RwSignal<Theme>) -> impl IntoView {
     let state_clone = state.clone();
 
     h_stack((
         label(|| "AI Agents".to_string()).style(move |s| {
+            let colors = theme.get().colors();
             s.font_size(16.0)
                 .font_weight(floem::text::Weight::BOLD)
                 .color(colors.text_primary)
@@ -178,6 +187,7 @@ fn header_view(state: McpPanelState, colors: crate::floem_app::theme::ColorPalet
                 state_clone.toggle_visibility();
             })
             .style(move |s| {
+                let colors = theme.get().colors();
                 s.padding(4.0)
                     .font_size(20.0)
                     .color(colors.text_primary)
@@ -187,6 +197,7 @@ fn header_view(state: McpPanelState, colors: crate::floem_app::theme::ColorPalet
             }),
     ))
     .style(move |s| {
+        let colors = theme.get().colors();
         s.width_full()
             .padding(12.0)
             .background(colors.bg_secondary)
@@ -197,54 +208,68 @@ fn header_view(state: McpPanelState, colors: crate::floem_app::theme::ColorPalet
     })
 }
 
-/// Agent selector buttons
+/// Agent selector buttons (2x2 grid layout)
 fn agent_selector_view(
     state: McpPanelState,
-    colors: crate::floem_app::theme::ColorPalette,
+    theme: RwSignal<Theme>,
 ) -> impl IntoView {
     let state_clone = state.clone();
+    let state_clone2 = state.clone();
 
-    h_stack((
-        AgentType::all()
-            .iter()
-            .map(|agent| {
-                let agent = *agent;
-                let state = state_clone.clone();
-                let selected = state.selected_agent;
-
-                container(label(move || agent.name().to_string()))
-                    .on_click_stop(move |_| {
-                        state.select_agent(agent);
-                    })
-                    .style(move |s| {
-                        let is_selected = selected.get() == agent;
-                        let base = s
-                            .padding(8.0)
-                            .font_size(12.0)
-                            .border(1.0)
-                            .border_radius(4.0)
-                            .cursor(CursorStyle::Pointer)
-                            .flex_grow(1.0)
-                            .justify_content(JustifyContent::Center);
-
-                        if is_selected {
-                            base.background(colors.accent_blue)
-                                .border_color(colors.accent_blue)
-                                .color(Color::WHITE)
-                        } else {
-                            base.background(colors.bg_secondary)
-                                .border_color(colors.border)
-                                .color(colors.text_primary)
-                                .hover(|s| s.background(colors.bg_tab_hover))
-                        }
-                    })
+    // Create agent button helper
+    let create_agent_button = move |agent: AgentType, state: McpPanelState, theme: RwSignal<Theme>| {
+        let selected = state.selected_agent;
+        container(label(move || agent.name().to_string()))
+            .on_click_stop(move |_| {
+                tracing::info!("Agent button clicked: {:?}", agent);
+                state.select_agent(agent);
             })
-            .collect::<Vec<_>>(),
+            .style(move |s| {
+                let colors = theme.get().colors();
+                let is_selected = selected.get() == agent;
+                let base = s
+                    .padding(10.0)
+                    .font_size(11.0)
+                    .border(1.0)
+                    .border_radius(6.0)
+                    .cursor(CursorStyle::Pointer)
+                    .flex_grow(1.0)
+                    .justify_content(JustifyContent::Center)
+                    .align_items(AlignItems::Center);
+
+                if is_selected {
+                    base.background(colors.accent_blue)
+                        .border_color(colors.accent_blue)
+                        .color(Color::WHITE)
+                } else {
+                    base.background(colors.bg_secondary)
+                        .border_color(colors.border)
+                        .color(colors.text_primary)
+                        .hover(|s| s.background(colors.bg_tab_hover))
+                }
+            })
+    };
+
+    // 2x2 Grid layout
+    v_stack((
+        // Row 1: Claude Code, Gemini CLI
+        h_stack((
+            create_agent_button(AgentType::ClaudeCode, state_clone.clone(), theme),
+            create_agent_button(AgentType::GeminiCli, state_clone.clone(), theme),
+        ))
+        .style(|s| s.width_full().gap(6.0)),
+        // Row 2: OpenAI Codex, Qwen Code
+        h_stack((
+            create_agent_button(AgentType::OpenAICodex, state_clone2.clone(), theme),
+            create_agent_button(AgentType::QwenCode, state_clone2.clone(), theme),
+        ))
+        .style(|s| s.width_full().gap(6.0)),
     ))
     .style(move |s| {
+        let colors = theme.get().colors();
         s.width_full()
             .padding(12.0)
-            .gap(8.0)
+            .gap(6.0)
             .background(colors.bg_primary)
     })
 }
@@ -252,7 +277,7 @@ fn agent_selector_view(
 /// Connection status display
 fn connection_status_view(
     state: McpPanelState,
-    colors: crate::floem_app::theme::ColorPalette,
+    theme: RwSignal<Theme>,
 ) -> impl IntoView {
     let connected = state.connected;
     let server_name = state.server_name;
@@ -269,6 +294,7 @@ fn connection_status_view(
                 }
             })
             .style(move |s| {
+                let colors = theme.get().colors();
                 let color = if connected.get() {
                     colors.accent_green
                 } else {
@@ -277,6 +303,7 @@ fn connection_status_view(
                 s.font_size(14.0).color(color)
             }),
             label(move || server_name.get()).style(move |s| {
+                let colors = theme.get().colors();
                 s.font_size(12.0).color(colors.text_secondary).margin_left(6.0)
             }),
         ))
@@ -287,6 +314,7 @@ fn connection_status_view(
             move |error_opt| {
                 if let Some(error_text) = error_opt {
                     container(label(move || error_text.clone())).style(move |s| {
+                        let colors = theme.get().colors();
                         s.font_size(11.0)
                             .color(colors.accent_red)
                             .margin_top(4.0)
@@ -301,6 +329,7 @@ fn connection_status_view(
         ),
     ))
     .style(move |s| {
+        let colors = theme.get().colors();
         s.width_full()
             .padding(12.0)
             .background(colors.bg_secondary)
@@ -312,7 +341,7 @@ fn connection_status_view(
 /// Tools list with scrolling
 fn tools_list_view(
     state: McpPanelState,
-    colors: crate::floem_app::theme::ColorPalette,
+    theme: RwSignal<Theme>,
 ) -> impl IntoView {
     let tools = state.tools;
     let is_loading = state.is_loading;
@@ -325,6 +354,7 @@ fn tools_list_view(
                 move |loading| {
                     if loading {
                         container(label(|| "Loading tools...".to_string())).style(move |s| {
+                            let colors = theme.get().colors();
                             s.font_size(12.0)
                                 .color(colors.text_muted)
                                 .padding(12.0)
@@ -342,11 +372,32 @@ fn tools_list_view(
                 move |(tool_list, loading)| {
                     if tool_list.is_empty() && !loading {
                         container(
-                            label(|| "No tools available".to_string()).style(move |s| {
-                                s.font_size(12.0)
-                                    .color(colors.text_muted)
-                                    .padding(20.0)
+                            v_stack((
+                                label(|| "🔌 No MCP Server Connected".to_string())
+                                    .style(move |s| {
+                                        let colors = theme.get().colors();
+                                        s.font_size(14.0)
+                                            .font_weight(floem::text::Weight::MEDIUM)
+                                            .color(colors.text_secondary)
+                                            .margin_bottom(8.0)
+                                    }),
+                                label(|| "Select an AI agent above to connect".to_string())
+                                    .style(move |s| {
+                                        let colors = theme.get().colors();
+                                        s.font_size(12.0)
+                                            .color(colors.text_muted)
+                                    }),
+                                label(|| "to an MCP server and access tools.".to_string())
+                                    .style(move |s| {
+                                        let colors = theme.get().colors();
+                                        s.font_size(12.0)
+                                            .color(colors.text_muted)
+                                    }),
+                            ))
+                            .style(move |s| {
+                                s.padding(24.0)
                                     .width_full()
+                                    .align_items(AlignItems::Center)
                                     .justify_content(JustifyContent::Center)
                             }),
                         )
@@ -355,7 +406,7 @@ fn tools_list_view(
                             v_stack((
                                 tool_list
                                     .iter()
-                                    .map(|tool| tool_item_view(tool.clone(), colors))
+                                    .map(|tool| tool_item_view(tool.clone(), theme))
                                     .collect::<Vec<_>>(),
                             ))
                             .style(|s| s.width_full().gap(8.0)),
@@ -372,6 +423,7 @@ fn tools_list_view(
         }),
     )
     .style(move |s| {
+        let colors = theme.get().colors();
         s.width_full()
             .flex_grow(1.0)
             .background(colors.bg_primary)
@@ -379,13 +431,14 @@ fn tools_list_view(
 }
 
 /// Individual tool item
-fn tool_item_view(tool: ToolInfo, colors: crate::floem_app::theme::ColorPalette) -> impl IntoView {
+fn tool_item_view(tool: ToolInfo, theme: RwSignal<Theme>) -> impl IntoView {
     let tool_name = tool.name.clone();
     let tool_desc = tool.description.clone();
     let has_desc = tool.description.is_some();
 
     v_stack((
         label(move || tool_name.clone()).style(move |s| {
+            let colors = theme.get().colors();
             s.font_size(13.0)
                 .font_weight(floem::text::Weight::SEMIBOLD)
                 .color(colors.text_primary)
@@ -396,6 +449,7 @@ fn tool_item_view(tool: ToolInfo, colors: crate::floem_app::theme::ColorPalette)
                 .unwrap_or_else(|| "No description".to_string())
         }))
         .style(move |s| {
+            let colors = theme.get().colors();
             if has_desc {
                 s.font_size(11.0)
                     .color(colors.text_secondary)
@@ -409,6 +463,7 @@ fn tool_item_view(tool: ToolInfo, colors: crate::floem_app::theme::ColorPalette)
         }),
     ))
     .style(move |s| {
+        let colors = theme.get().colors();
         s.width_full()
             .padding(10.0)
             .background(colors.bg_secondary)

@@ -3,6 +3,11 @@
 //! This module provides components for rendering AI responses as blocks within the terminal.
 //! Supports different block types (Thinking, Response, Command, Error) with risk assessment
 //! for executable commands.
+//!
+//! Note: This module is prepared for future AI integration and is not yet connected
+//! to the main application flow. All components are tested but not actively used.
+
+#![allow(dead_code)]
 
 use floem::prelude::*;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
@@ -199,7 +204,7 @@ pub fn ai_blocks_view(state: &AiBlockState) -> impl IntoView {
             dyn_stack(
                 move || blocks_signal.get(),
                 |block| block.id.clone(),
-                move |block| ai_block_item(block),
+                ai_block_item,
             )
             .style(|s| s.flex_col().gap(8.0)),
         ))
@@ -336,12 +341,12 @@ fn command_block_view(block: AiBlock) -> impl IntoView {
                     label(move || command.clone())
                         .style(|s| {
                             s.font_size(12.0)
-                                .font_family("monospace".to_string())
+                                .font_family("JetBrains Mono, Noto Sans Mono CJK KR, Menlo, monospace".to_string())
                                 .color(theme::colors::TEXT_PRIMARY)
                         }),
 
                     // Risk level indicator
-                    label(move || format!("Risk: {}", risk_name))
+                    label(move || format!("Risk: {risk_name}"))
                         .style(move |s| {
                             s.font_size(10.0)
                                 .color(risk_color)

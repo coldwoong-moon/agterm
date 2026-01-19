@@ -121,7 +121,7 @@ impl AsyncBridge {
     pub fn send_command(&self, command: AsyncCommand) -> Result<(), String> {
         self.command_tx
             .try_send(command)
-            .map_err(|e| format!("Failed to send command: {}", e))
+            .map_err(|e| format!("Failed to send command: {e}"))
     }
 
     /// Try to receive a result (non-blocking)
@@ -222,8 +222,7 @@ impl BridgeWorker {
                     RiskLevel::High | RiskLevel::Critical => AsyncResult::CommandBlocked {
                         command,
                         reason: format!(
-                            "Command blocked due to {:?} risk level",
-                            risk_level
+                            "Command blocked due to {risk_level:?} risk level"
                         ),
                     },
                 }

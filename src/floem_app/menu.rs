@@ -336,7 +336,7 @@ fn menu_view(menu: MenuDef, app_state: AppState) -> impl IntoView {
     let is_open = RwSignal::new(false);
     let menu_clone = menu.clone();
     let app_state_clone = app_state.clone();
-    let is_open_for_dropdown = is_open.clone();
+    let is_open_for_dropdown = is_open;
 
     v_stack((
         // Menu button

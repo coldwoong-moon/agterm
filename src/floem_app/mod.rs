@@ -96,10 +96,10 @@ pub fn app_view() -> impl IntoView {
             // Horizontal layout: terminal area + MCP panel
             h_stack((
                 views::terminal_area(&app_state)
-                    .style(|s| s.flex_grow(1.0)),
-                views::mcp_panel(mcp_panel_state.clone(), app_state.theme.get()),
+                    .style(|s| s.flex_grow(1.0).height_full()),
+                views::mcp_panel(mcp_panel_state.clone(), app_state.theme),
             ))
-            .style(|s| s.width_full().flex_grow(1.0)),
+            .style(|s| s.width_full().height_full().flex_grow(1.0)),
             views::status_bar(&app_state),
         ))
         .style(|s| {
@@ -109,20 +109,25 @@ pub fn app_view() -> impl IntoView {
         }),
 
         // Settings overlay (shown conditionally)
+        // IMPORTANT: Only render overlay when visible to avoid blocking mouse events
         dyn_container(
             move || settings_visible.get(),
             move |is_visible| {
                 if is_visible {
-                    views::settings_panel(&app_state_settings, settings_visible).into_any()
+                    views::settings_panel(&app_state_settings, settings_visible)
+                        .style(|s| {
+                            s.position(floem::style::Position::Absolute)
+                                .inset(0.0)
+                        })
+                        .into_any()
                 } else {
-                    floem::views::empty().into_any()
+                    // Return empty view with display:none to not intercept events
+                    floem::views::empty()
+                        .style(|s| s.display(floem::style::Display::None))
+                        .into_any()
                 }
             }
-        )
-        .style(|s| {
-            s.position(floem::style::Position::Absolute)
-                .inset(0.0)
-        }),
+        ),
     ))
     .on_event(floem::event::EventListener::KeyDown, move |event| {
         if let floem::event::Event::KeyDown(key_event) = event {
@@ -141,16 +146,52 @@ pub fn app_view() -> impl IntoView {
                     mcp_panel_state.toggle_visibility();
                     return floem::event::EventPropagation::Stop;
                 }
+                // Handle Shift+Cmd+T for theme toggle
+                if ch.as_str() == "t" && key_event.modifiers.meta() && key_event.modifiers.shift() {
+                    tracing::info!("Theme toggle shortcut triggered (Shift+Cmd+T)");
+                    app_state_keyboard.toggle_theme();
+                    return floem::event::EventPropagation::Stop;
+                }
                 // Handle Cmd+T for new tab
-                if ch.as_str() == "t" && key_event.modifiers.meta() {
+                if ch.as_str() == "t" && key_event.modifiers.meta() && !key_event.modifiers.shift() {
                     tracing::info!("New tab shortcut triggered (Cmd+T)");
                     app_state_keyboard.new_tab();
                     return floem::event::EventPropagation::Stop;
                 }
+                // Handle Cmd+Shift+W to close pane (before Cmd+W for tab)
+                if ch.as_str() == "w" && key_event.modifiers.meta() && key_event.modifiers.shift() {
+                    tracing::info!("Close pane shortcut triggered (Cmd+Shift+W)");
+                    app_state_keyboard.close_focused_pane();
+                    return floem::event::EventPropagation::Stop;
+                }
                 // Handle Cmd+W to close tab
-                if ch.as_str() == "w" && key_event.modifiers.meta() {
+                if ch.as_str() == "w" && key_event.modifiers.meta() && !key_event.modifiers.shift() {
                     tracing::info!("Close tab shortcut triggered (Cmd+W)");
                     app_state_keyboard.close_active_tab();
+                    return floem::event::EventPropagation::Stop;
+                }
+                // Handle Cmd+D for vertical split (top/bottom)
+                if ch.as_str() == "d" && key_event.modifiers.meta() && !key_event.modifiers.shift() {
+                    tracing::info!("Split pane vertical shortcut triggered (Cmd+D)");
+                    app_state_keyboard.split_pane_vertical();
+                    return floem::event::EventPropagation::Stop;
+                }
+                // Handle Cmd+Shift+D for horizontal split (left/right)
+                if ch.as_str() == "d" && key_event.modifiers.meta() && key_event.modifiers.shift() {
+                    tracing::info!("Split pane horizontal shortcut triggered (Cmd+Shift+D)");
+                    app_state_keyboard.split_pane_horizontal();
+                    return floem::event::EventPropagation::Stop;
+                }
+                // Handle Cmd+] for next pane
+                if ch.as_str() == "]" && key_event.modifiers.meta() {
+                    tracing::info!("Next pane shortcut triggered (Cmd+])");
+                    app_state_keyboard.next_pane();
+                    return floem::event::EventPropagation::Stop;
+                }
+                // Handle Cmd+[ for previous pane
+                if ch.as_str() == "[" && key_event.modifiers.meta() {
+                    tracing::info!("Previous pane shortcut triggered (Cmd+[)");
+                    app_state_keyboard.previous_pane();
                     return floem::event::EventPropagation::Stop;
                 }
             }
