@@ -69,10 +69,29 @@ cargo clippy            # Lints
 
 ## Environment Variables
 
+### Application Environment Variables
+
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `AGTERM_DEBUG` | Enable debug panel on start | `1` |
-| `AGTERM_LOG` | Set log filter | `agterm=debug,agterm::terminal::pty=trace` |
+| `AGTERM_LOG` | Advanced log filter (module-specific) | `agterm=debug,agterm::terminal::pty=trace` |
+| `AGTERM_LOG_LEVEL` | Simple log level override | `debug` (trace/debug/info/warn/error) |
+| `AGTERM_LOG_PATH` | Custom log directory path | `/custom/logs` |
+
+### PTY Session Environment Variables
+
+AgTerm automatically configures environment variables for shell sessions:
+
+| Variable | Default Value | Purpose |
+|----------|---------------|---------|
+| `TERM` | `xterm-256color` | 256-color terminal support |
+| `COLORTERM` | `truecolor` | 24-bit true color support |
+| `TERM_PROGRAM` | `agterm` | Terminal emulator identification |
+| `AGTERM_VERSION` | (version) | AgTerm version |
+| `SHELL` | (auto-detected) | Shell path |
+| `LANG` | `en_US.UTF-8` | UTF-8 locale |
+
+Critical variables (`HOME`, `USER`, `PATH`) are always inherited. See [ENVIRONMENT_VARIABLES.md](../ENVIRONMENT_VARIABLES.md) for details.
 
 ## Keyboard Shortcuts
 
@@ -100,8 +119,78 @@ cargo test
 # Expected: 49+ tests passing
 ```
 
-## Log Files
+## Logging System
 
-Logs are stored in: `~/.local/share/agterm/logs/agterm.log.*`
+AgTerm uses the tracing ecosystem for comprehensive structured logging.
 
-Daily rotation is enabled by default.
+### Log Locations
+
+**Default paths:**
+- macOS/Linux: `~/.local/share/agterm/logs/agterm.log.*`
+- Windows: `%APPDATA%\agterm\logs\agterm.log.*`
+
+**Features:**
+- Daily log rotation (automatic cleanup)
+- Console output during development
+- In-memory buffer for debug panel
+- Module-level filtering support
+
+### Log Levels
+
+| Level | Purpose | Use Case |
+|-------|---------|----------|
+| `trace` | Very detailed | Step-by-step debugging, PTY I/O |
+| `debug` | Detailed | Development, troubleshooting |
+| `info` | Informational | Normal operations, state changes |
+| `warn` | Warnings | Non-critical issues, fallbacks |
+| `error` | Errors | Failures, exceptions |
+
+### Configuration
+
+**In config file** (`~/.config/agterm/config.toml`):
+```toml
+[logging]
+level = "info"
+format = "pretty"
+timestamps = true
+file_line = false
+file_output = true
+file_path = "/custom/path"  # Optional
+```
+
+**Via environment variables:**
+```bash
+# Simple level override
+AGTERM_LOG_LEVEL=debug cargo run
+
+# Module-specific filtering
+AGTERM_LOG=agterm=debug,agterm::terminal::pty=trace cargo run
+
+# Custom log path
+AGTERM_LOG_PATH=/tmp/agterm-logs cargo run
+```
+
+### What Gets Logged
+
+**Application Lifecycle:**
+- Startup and shutdown events
+- Configuration loading
+- Settings changes
+
+**Terminal Operations:**
+- Tab creation/closing
+- Pane splits
+- PTY session lifecycle
+- Shell spawning
+
+**PTY Events:**
+- Session creation with retry attempts
+- Read/write operations
+- Session cleanup
+- Errors and warnings
+
+**Debug Information:**
+- Performance metrics
+- Memory usage
+- Thread activity
+- Adaptive polling behavior
