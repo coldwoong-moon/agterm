@@ -95,7 +95,6 @@ impl McpPanelState {
     // Currently unused but will be called when MCP connection is implemented.
 
     /// Set connection status
-    #[allow(dead_code)]
     pub fn set_connected(&self, connected: bool, server_name: Option<String>) {
         self.connected.set(connected);
         if let Some(name) = server_name {
@@ -104,19 +103,16 @@ impl McpPanelState {
     }
 
     /// Update tools list
-    #[allow(dead_code)]
     pub fn update_tools(&self, tools: Vec<ToolInfo>) {
         self.tools.set(tools);
     }
 
     /// Set loading state
-    #[allow(dead_code)]
     pub fn set_loading(&self, loading: bool) {
         self.is_loading.set(loading);
     }
 
     /// Set error message
-    #[allow(dead_code)]
     pub fn set_error(&self, error: Option<String>) {
         self.error_message.set(error);
     }

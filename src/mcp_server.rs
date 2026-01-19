@@ -162,7 +162,7 @@ fn remove_command_echo(output: &str, command: &str) -> String {
     let mut cleaned = output.to_string();
 
     // Remove command that might be repeated (echo artifact)
-    let repeated_pattern = format!("{}{}", cmd_trimmed, cmd_trimmed);
+    let repeated_pattern = format!("{cmd_trimmed}{cmd_trimmed}");
     cleaned = cleaned.replace(&repeated_pattern, "");
 
     let lines: Vec<&str> = cleaned.lines().collect();
@@ -346,7 +346,7 @@ impl McpServer {
                 }).to_string()
             });
 
-            if let Err(e) = writeln!(stdout, "{}", response_json) {
+            if let Err(e) = writeln!(stdout, "{response_json}") {
                 tracing::error!("Error writing to stdout: {}", e);
                 break;
             }
@@ -366,7 +366,7 @@ impl McpServer {
                     result: None,
                     error: Some(JsonRpcError {
                         code: -32700,
-                        message: format!("Parse error: {}", e),
+                        message: format!("Parse error: {e}"),
                         data: None,
                     }),
                 };
@@ -516,7 +516,7 @@ impl McpServer {
 
             _ => Err(JsonRpcError {
                 code: -32601,
-                message: format!("Method not found: {}", method),
+                message: format!("Method not found: {method}"),
                 data: None,
             }),
         }
@@ -576,7 +576,7 @@ impl McpServer {
             _ => {
                 return Err(JsonRpcError {
                     code: -32602,
-                    message: format!("Unknown tool: {}", name),
+                    message: format!("Unknown tool: {name}"),
                     data: None,
                 });
             }
@@ -585,14 +585,14 @@ impl McpServer {
         // Send command to main app
         self.command_tx.send(command).await.map_err(|e| JsonRpcError {
             code: -32603,
-            message: format!("Failed to send command: {}", e),
+            message: format!("Failed to send command: {e}"),
             data: None,
         })?;
 
         // Wait for response
         let response = self.response_rx.recv().map_err(|e| JsonRpcError {
             code: -32603,
-            message: format!("Failed to receive response: {}", e),
+            message: format!("Failed to receive response: {e}"),
             data: None,
         })?;
 
@@ -743,7 +743,7 @@ impl StandaloneMcpServer {
                 }).to_string()
             });
 
-            if let Err(e) = writeln!(stdout, "{}", response_json) {
+            if let Err(e) = writeln!(stdout, "{response_json}") {
                 tracing::error!("Error writing to stdout: {}", e);
                 break;
             }
@@ -764,7 +764,7 @@ impl StandaloneMcpServer {
                     result: None,
                     error: Some(JsonRpcError {
                         code: -32700,
-                        message: format!("Parse error: {}", e),
+                        message: format!("Parse error: {e}"),
                         data: None,
                     }),
                 };
@@ -1019,7 +1019,7 @@ impl StandaloneMcpServer {
 
             _ => Err(JsonRpcError {
                 code: -32601,
-                message: format!("Method not found: {}", method),
+                message: format!("Method not found: {method}"),
                 data: None,
             }),
         }
@@ -1044,7 +1044,7 @@ impl StandaloneMcpServer {
             "keep_alive" => self.keep_alive(args),
             _ => Err(JsonRpcError {
                 code: -32602,
-                message: format!("Unknown tool: {}", name),
+                message: format!("Unknown tool: {name}"),
                 data: None,
             }),
         }
@@ -1057,7 +1057,7 @@ impl StandaloneMcpServer {
             if sessions.len() >= MAX_SESSIONS {
                 return Err(JsonRpcError {
                     code: -32603,
-                    message: format!("Maximum session limit ({}) reached. Close some sessions first.", MAX_SESSIONS),
+                    message: format!("Maximum session limit ({MAX_SESSIONS}) reached. Close some sessions first."),
                     data: None,
                 });
             }
@@ -1074,7 +1074,7 @@ impl StandaloneMcpServer {
         let pty_id = self.pty_manager.create_session(rows, cols)
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to create session: {}", e),
+                message: format!("Failed to create session: {e}"),
                 data: None,
             })?;
 
@@ -1138,7 +1138,7 @@ impl StandaloneMcpServer {
             let session = sessions.get_mut(&session_name)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
-                    message: format!("Session '{}' not found", session_name),
+                    message: format!("Session '{session_name}' not found"),
                     data: None,
                 })?;
 
@@ -1158,11 +1158,11 @@ impl StandaloneMcpServer {
         };
 
         // Send command with newline
-        let command_with_newline = format!("{}\n", command);
+        let command_with_newline = format!("{command}\n");
         self.pty_manager.write(&pty_id, command_with_newline.as_bytes())
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to write to session: {}", e),
+                message: format!("Failed to write to session: {e}"),
                 data: None,
             })?;
 
@@ -1183,7 +1183,7 @@ impl StandaloneMcpServer {
         let output = self.pty_manager.read(&pty_id)
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to read from session: {}", e),
+                message: format!("Failed to read from session: {e}"),
                 data: None,
             })?;
 
@@ -1219,7 +1219,7 @@ impl StandaloneMcpServer {
             let session = sessions.get_mut(&session_name)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
-                    message: format!("Session '{}' not found", session_name),
+                    message: format!("Session '{session_name}' not found"),
                     data: None,
                 })?;
             // Update last activity timestamp
@@ -1233,7 +1233,7 @@ impl StandaloneMcpServer {
         let output = self.pty_manager.read(&pty_id)
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to read from session: {}", e),
+                message: format!("Failed to read from session: {e}"),
                 data: None,
             })?;
 
@@ -1296,7 +1296,7 @@ impl StandaloneMcpServer {
                 .map(|s| s.id)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
-                    message: format!("Session '{}' not found", session_name),
+                    message: format!("Session '{session_name}' not found"),
                     data: None,
                 })?
         };
@@ -1334,7 +1334,7 @@ impl StandaloneMcpServer {
             if !sessions.contains_key(session_name) {
                 return Err(JsonRpcError {
                     code: -32602,
-                    message: format!("Session '{}' not found", session_name),
+                    message: format!("Session '{session_name}' not found"),
                     data: None,
                 });
             }
@@ -1377,7 +1377,7 @@ impl StandaloneMcpServer {
             let session = sessions.get_mut(&session_name)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
-                    message: format!("Session '{}' not found", session_name),
+                    message: format!("Session '{session_name}' not found"),
                     data: None,
                 })?;
             // Update last activity timestamp
@@ -1388,7 +1388,7 @@ impl StandaloneMcpServer {
         self.pty_manager.write(&pty_id, input.as_bytes())
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to write to session: {}", e),
+                message: format!("Failed to write to session: {e}"),
                 data: None,
             })?;
 
@@ -1425,7 +1425,7 @@ impl StandaloneMcpServer {
                 .map(|s| s.id)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
-                    message: format!("Session '{}' not found", session_name),
+                    message: format!("Session '{session_name}' not found"),
                     data: None,
                 })?
         };
@@ -1436,7 +1436,7 @@ impl StandaloneMcpServer {
             "ctrl-z" => &[0x1a],
             _ => return Err(JsonRpcError {
                 code: -32602,
-                message: format!("Unknown signal: {}", signal),
+                message: format!("Unknown signal: {signal}"),
                 data: None,
             }),
         };
@@ -1444,7 +1444,7 @@ impl StandaloneMcpServer {
         self.pty_manager.write(&pty_id, bytes)
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to send signal: {}", e),
+                message: format!("Failed to send signal: {e}"),
                 data: None,
             })?;
 
@@ -1488,7 +1488,7 @@ impl StandaloneMcpServer {
             let session = sessions.get_mut(&session_name)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
-                    message: format!("Session '{}' not found", session_name),
+                    message: format!("Session '{session_name}' not found"),
                     data: None,
                 })?;
             // Update stored dimensions
@@ -1500,7 +1500,7 @@ impl StandaloneMcpServer {
         self.pty_manager.resize(&pty_id, rows, cols)
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to resize session: {}", e),
+                message: format!("Failed to resize session: {e}"),
                 data: None,
             })?;
 
@@ -1529,7 +1529,7 @@ impl StandaloneMcpServer {
                 .map(|s| s.id)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
-                    message: format!("Session '{}' not found", session_name),
+                    message: format!("Session '{session_name}' not found"),
                     data: None,
                 })?
         };
@@ -1538,7 +1538,7 @@ impl StandaloneMcpServer {
         self.pty_manager.write(&pty_id, b"pwd\n")
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to execute pwd: {}", e),
+                message: format!("Failed to execute pwd: {e}"),
                 data: None,
             })?;
 
@@ -1547,7 +1547,7 @@ impl StandaloneMcpServer {
         let output = self.pty_manager.read(&pty_id)
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to read output: {}", e),
+                message: format!("Failed to read output: {e}"),
                 data: None,
             })?;
 
@@ -1593,17 +1593,17 @@ impl StandaloneMcpServer {
                 .map(|s| s.id)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
-                    message: format!("Session '{}' not found", session_name),
+                    message: format!("Session '{session_name}' not found"),
                     data: None,
                 })?
         };
 
         // Execute cd command
-        let cd_cmd = format!("cd {} && pwd\n", path);
+        let cd_cmd = format!("cd {path} && pwd\n");
         self.pty_manager.write(&pty_id, cd_cmd.as_bytes())
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to change directory: {}", e),
+                message: format!("Failed to change directory: {e}"),
                 data: None,
             })?;
 
@@ -1612,7 +1612,7 @@ impl StandaloneMcpServer {
         let output = self.pty_manager.read(&pty_id)
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to read output: {}", e),
+                message: format!("Failed to read output: {e}"),
                 data: None,
             })?;
 
@@ -1630,7 +1630,7 @@ impl StandaloneMcpServer {
         if new_cwd.is_empty() {
             return Err(JsonRpcError {
                 code: -32603,
-                message: format!("Failed to change to directory: {}", path),
+                message: format!("Failed to change to directory: {path}"),
                 data: None,
             });
         }
@@ -1676,7 +1676,7 @@ impl StandaloneMcpServer {
                 .map(|s| s.id)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
-                    message: format!("Session '{}' not found", session_name),
+                    message: format!("Session '{session_name}' not found"),
                     data: None,
                 })?
         };
@@ -1686,7 +1686,7 @@ impl StandaloneMcpServer {
         self.pty_manager.write(&pty_id, export_cmd.as_bytes())
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to set environment variable: {}", e),
+                message: format!("Failed to set environment variable: {e}"),
                 data: None,
             })?;
 
@@ -1720,7 +1720,7 @@ impl StandaloneMcpServer {
             let session = sessions.get(&session_name)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
-                    message: format!("Session '{}' not found", session_name),
+                    message: format!("Session '{session_name}' not found"),
                     data: None,
                 })?;
 
@@ -1745,7 +1745,7 @@ impl StandaloneMcpServer {
         let exe_path = std::env::current_exe()
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to get executable path: {}", e),
+                message: format!("Failed to get executable path: {e}"),
                 data: None,
             })?;
 
@@ -1759,7 +1759,7 @@ impl StandaloneMcpServer {
             .spawn()
             .map_err(|e| JsonRpcError {
                 code: -32603,
-                message: format!("Failed to launch GUI: {}", e),
+                message: format!("Failed to launch GUI: {e}"),
                 data: None,
             })?;
 
@@ -1787,7 +1787,7 @@ impl StandaloneMcpServer {
             let session = sessions.get_mut(&session_name)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
-                    message: format!("Session '{}' not found", session_name),
+                    message: format!("Session '{session_name}' not found"),
                     data: None,
                 })?;
 

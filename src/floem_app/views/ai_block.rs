@@ -3,11 +3,6 @@
 //! This module provides components for rendering AI responses as blocks within the terminal.
 //! Supports different block types (Thinking, Response, Command, Error) with risk assessment
 //! for executable commands.
-//!
-//! Note: This module is prepared for future AI integration and is not yet connected
-//! to the main application flow. All components are tested but not actively used.
-
-#![allow(dead_code)]
 
 use floem::prelude::*;
 use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
@@ -16,6 +11,7 @@ use floem::peniko::Color;
 use floem::text::Weight;
 use floem::style::CursorStyle;
 
+use crate::floem_app::async_bridge::RiskLevel;
 use crate::floem_app::theme;
 
 /// Type of AI block being displayed
@@ -62,6 +58,18 @@ impl CommandRiskLevel {
             Self::Medium => "Medium Risk",
             Self::High => "High Risk",
             Self::Critical => "Critical Risk",
+        }
+    }
+}
+
+/// Convert from async_bridge::RiskLevel to CommandRiskLevel
+impl From<RiskLevel> for CommandRiskLevel {
+    fn from(level: RiskLevel) -> Self {
+        match level {
+            RiskLevel::Low => CommandRiskLevel::Low,
+            RiskLevel::Medium => CommandRiskLevel::Medium,
+            RiskLevel::High => CommandRiskLevel::High,
+            RiskLevel::Critical => CommandRiskLevel::Critical,
         }
     }
 }
