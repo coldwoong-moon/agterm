@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Bundle Identification -->
+    <key>CFBundleIdentifier</key>
+    <string>com.coldwoong-moon.agterm</string>
+
+    <key>CFBundleName</key>
+    <string>AgTerm</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>AgTerm</string>
+
+    <key>CFBundleExecutable</key>
+    <string>agterm</string>
+
+    <!-- Version Information -->
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <!-- Bundle Type -->
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleSignature</key>
+    <string>????</string>
+
+    <!-- Icon -->
+    <key>CFBundleIconFile</key>
+    <string>icon.icns</string>
+
+    <!-- Category -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+
+    <!-- Copyright -->
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright (c) 2024 coldwoong-moon</string>
+
+    <!-- Description -->
+    <key>CFBundleGetInfoString</key>
+    <string>AI Agent Terminal - Native GPU-accelerated terminal with AI orchestration</string>
+
+    <!-- High DPI Support -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- Retina Display Support -->
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+
+    <!-- Minimum macOS Version -->
+    <key>LSMinimumSystemVersion</key>
+    <string>10.15</string>
+
+    <!-- Terminal Access Permissions -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>AgTerm needs access to execute terminal commands and scripts.</string>
+
+    <!-- File Access (for terminal operations) -->
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>AgTerm needs access to your Desktop for terminal operations.</string>
+
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>AgTerm needs access to your Documents for terminal operations.</string>
+
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>AgTerm needs access to your Downloads for terminal operations.</string>
+
+    <!-- Network Access (for MCP protocol) -->
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>AgTerm needs network access for Model Context Protocol integration.</string>
+
+    <!-- Accessibility (for terminal emulation) -->
+    <key>NSAccessibilityUsageDescription</key>
+    <string>AgTerm needs accessibility access for advanced terminal features.</string>
+
+    <!-- Document Types (optional - for file associations) -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Shell Script</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.shell-script</string>
+            </array>
+        </dict>
+    </array>
+
+    <!-- URL Types (for custom URL schemes) -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>AgTerm Protocol</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>agterm</string>
+            </array>
+        </dict>
+    </array>
+
+    <!-- Support for Full Keyboard Access -->
+    <key>NSSupportsFullKeyboardAccess</key>
+    <true/>
+
+    <!-- Enable GPU Acceleration -->
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+</dict>
+</plist>
