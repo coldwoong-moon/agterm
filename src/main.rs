@@ -11,46 +11,33 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-mod completion;
-mod config;
-mod debug;
-mod encoding;
-mod history;
-mod keybind;
-mod logging;
-mod macros;
-mod mouse_actions;
-mod notification;
-mod session;
-mod shell;
-mod sound;
-mod ssh;
-mod terminal;
+// Iced-specific modules (not in library)
 mod terminal_canvas;
-mod theme;
-mod trigger;
-mod ui;
 
-use completion::{CompletionEngine, CompletionItem};
-use config::AppConfig;
-use debug::panel::TerminalState;
-use debug::{DebugPanel, DebugPanelMessage};
-use history::HistoryManager;
-use keybind::KeyBindings;
+// Re-export library modules with iced-gui feature
+use agterm::completion::{CompletionEngine, CompletionItem};
+use agterm::config::{self, AppConfig};
+use agterm::debug::panel::TerminalState;
+use agterm::debug::{DebugPanel, DebugPanelMessage};
+use agterm::history::HistoryManager;
+use agterm::keybind::KeyBindings;
 // KeyAction reserved for future keymap management features
 #[allow(unused_imports)]
-use keybind::Action as KeyAction;
-use logging::{LogBuffer, LoggingConfig};
-use notification::NotificationManager;
-use shell::ShellInfo;
+use agterm::keybind::Action as KeyAction;
+use agterm::logging::{self, LogBuffer};
+#[allow(unused_imports)]
+use agterm::logging::LoggingConfig;
+use agterm::notification::NotificationManager;
+use agterm::shell::{self, ShellInfo};
+use agterm::sound;
+use agterm::ssh;
+use agterm::terminal::env::EnvironmentInfo;
+use agterm::terminal::pty::PtyManager;
+use agterm::terminal::screen::{Cell, TerminalScreen};
+use agterm::theme::{self, Theme};
+use agterm::trigger::TriggerManager;
+use agterm::ui::{self, palette::{palette_input_id, CommandPalette, PaletteMessage}, mcp_panel::{McpPanel, McpPanelMessage}};
 use terminal_canvas::{CursorState, CursorStyle, TerminalCanvas, TerminalCanvasState};
-use theme::Theme;
-use ui::palette::{palette_input_id, CommandPalette, PaletteMessage};
-
-use terminal::env::EnvironmentInfo;
-use terminal::pty::PtyManager;
-use terminal::screen::{Cell, TerminalScreen};
-use trigger::TriggerManager;
 
 // ============================================================================
 // Font Configuration - Embedded D2Coding for Korean/CJK support
@@ -86,6 +73,7 @@ mod inline_theme {
     // Accent colors
     #[allow(dead_code)]
     pub const ACCENT_BLUE: Color = Color::from_rgb(0.36, 0.54, 0.98); // #5c8afa
+    #[allow(dead_code)]
     pub const ACCENT_GREEN: Color = Color::from_rgb(0.35, 0.78, 0.55); // #59c78c
     #[allow(dead_code)]
     pub const ACCENT_YELLOW: Color = Color::from_rgb(0.95, 0.77, 0.36); // #f2c55c
@@ -143,6 +131,7 @@ mod inline_theme {
     use iced::Border;
 
     /// Container style for status bar
+    #[allow(dead_code)]
     pub fn status_bar_style(_theme: &iced::Theme) -> container::Style {
         container::Style {
             background: Some(BG_PRIMARY.into()),
@@ -256,12 +245,12 @@ fn cells_to_styled_spans(cells: &[Cell]) -> Vec<StyledSpan> {
         // Handle reverse video mode by swapping fg and bg
         let (fg_color, bg_color) = if cell.reverse {
             // In reverse mode, swap foreground and background
-            let fg = cell.bg.as_ref().map(|c| c.to_color());
-            let bg = cell.fg.as_ref().map(|c| c.to_color());
+            let fg = cell.bg.as_ref().map(|c| c.to_color().into());
+            let bg = cell.fg.as_ref().map(|c| c.to_color().into());
             (fg, bg)
         } else {
-            let fg = cell.fg.as_ref().map(|c| c.to_color());
-            let bg = cell.bg.as_ref().map(|c| c.to_color());
+            let fg = cell.fg.as_ref().map(|c| c.to_color().into());
+            let bg = cell.bg.as_ref().map(|c| c.to_color().into());
             (fg, bg)
         };
 
@@ -338,14 +327,7 @@ fn main() -> iced::Result {
         .expect("APP_CONFIG already initialized");
 
     // Initialize logging system
-    let logging_config = LoggingConfig {
-        level: logging::parse_level(&config.logging.level),
-        format: logging::LogFormat::from_str(&config.logging.format),
-        timestamps: config.logging.timestamps,
-        file_line: config.logging.file_line,
-        file_output: config.logging.file_output,
-        file_path: config.logging.file_path.clone(),
-    };
+    let logging_config = config.logging.to_logging_config();
     let log_buffer = logging::init_logging(&logging_config);
 
     // Store log buffer globally for access by DebugPanel
@@ -456,10 +438,12 @@ struct AgTerm {
     /// Current theme
     current_theme: Theme,
     /// Current keyboard modifiers (for Ctrl+Click URL opening)
+    #[allow(dead_code)]
     current_modifiers: Modifiers,
     /// Desktop notification manager
     notification_manager: NotificationManager,
     /// Key bindings manager
+    #[allow(dead_code)]
     keybindings: KeyBindings,
     /// Command palette
     command_palette: CommandPalette,
@@ -473,6 +457,8 @@ struct AgTerm {
     completion_visible: bool,
     /// Output trigger manager
     trigger_manager: TriggerManager,
+    /// MCP AI Assistant Panel
+    mcp_panel: McpPanel,
 }
 
 impl Default for AgTerm {
@@ -573,7 +559,7 @@ impl Default for AgTerm {
                     pane_layout: PaneLayout::Single,
                     panes: Vec::new(),
                     focused_pane: 0,
-                    title_info: terminal::title::TitleInfo::new(),
+                    title_info: agterm::terminal::title::TitleInfo::new(),
                 };
 
                 (vec![tab], 0, config.appearance.font.size, 1)
@@ -650,6 +636,7 @@ impl Default for AgTerm {
             completion_selected: 0,
             completion_visible: false,
             trigger_manager: TriggerManager::from_config(&config.triggers),
+            mcp_panel: McpPanel::with_example_servers(),
         }
     }
 }
@@ -674,6 +661,7 @@ impl Drop for AgTerm {
 
 /// Pane layout type
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 enum PaneLayout {
     /// Single pane (no split)
     Single,
@@ -684,6 +672,7 @@ enum PaneLayout {
 }
 
 /// A single pane within a tab
+#[allow(dead_code)]
 struct Pane {
     /// Screen buffer for this pane
     screen: TerminalScreen,
@@ -701,6 +690,7 @@ struct Pane {
     cursor_blink_on: bool,
 }
 
+#[allow(dead_code)]
 impl Pane {
     /// Create a new pane with given dimensions
     fn new(cols: usize, rows: usize, pty_id: Option<uuid::Uuid>) -> Self {
@@ -737,6 +727,7 @@ struct TabDragState {
 
 /// Tab context menu state
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct TabContextMenu {
     tab_index: usize,
     position: (f32, f32),
@@ -780,17 +771,21 @@ struct TerminalTab {
     /// Custom tab title (set via OSC 0/2 or manually)
     title: Option<String>,
     /// Dynamic title information from OSC sequences and shell integration
-    title_info: terminal::title::TitleInfo,
+    #[allow(dead_code)]
+    title_info: agterm::terminal::title::TitleInfo,
     /// Track last copied selection coordinates to avoid duplicate copies
     last_copied_selection: Option<(terminal_canvas::SelectionPoint, terminal_canvas::SelectionPoint)>,
     /// Bracket matching state
-    bracket_match: Option<terminal::bracket::BracketMatch>,
+    bracket_match: Option<agterm::terminal::bracket::BracketMatch>,
     // Pane management
     /// Pane layout type
+    #[allow(dead_code)]
     pane_layout: PaneLayout,
     /// Panes within this tab (empty if using legacy single-pane mode)
+    #[allow(dead_code)]
     panes: Vec<Pane>,
     /// Index of the focused pane
+    #[allow(dead_code)]
     focused_pane: usize,
 }
 
@@ -822,6 +817,7 @@ impl SignalType {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum Message {
     // Tab management
     NewTab,
@@ -920,6 +916,10 @@ enum Message {
     CompletionPrev,
     CompletionSelect,
     CompletionCancel,
+
+    // MCP AI Assistant Panel
+    ToggleMcpPanel,
+    McpPanelMessage(McpPanelMessage),
 }
 
 impl From<DebugPanelMessage> for Message {
@@ -1020,7 +1020,7 @@ impl AgTerm {
             );
 
             match &trigger.action {
-                trigger::TriggerAction::Notify { title, body } => {
+                agterm::trigger::TriggerAction::Notify { title, body } => {
                     // Send desktop notification
                     self.notification_manager.notify_custom(title, body);
                     tracing::info!(
@@ -1029,7 +1029,7 @@ impl AgTerm {
                         "Trigger notification sent"
                     );
                 }
-                trigger::TriggerAction::Highlight { color } => {
+                agterm::trigger::TriggerAction::Highlight { color } => {
                     // TODO: Implement text highlighting in terminal canvas
                     // This would require tracking highlighted regions in the terminal screen
                     tracing::debug!(
@@ -1038,7 +1038,7 @@ impl AgTerm {
                         "Trigger highlight requested (not yet implemented)"
                     );
                 }
-                trigger::TriggerAction::PlaySound { file } => {
+                agterm::trigger::TriggerAction::PlaySound { file } => {
                     if let Some(path) = file {
                         // TODO: Play custom sound file
                         tracing::debug!(
@@ -1051,7 +1051,7 @@ impl AgTerm {
                         self.play_bell_sound();
                     }
                 }
-                trigger::TriggerAction::RunCommand { command } => {
+                agterm::trigger::TriggerAction::RunCommand { command } => {
                     // TODO: Execute shell command
                     // Security consideration: This should be carefully implemented
                     // to avoid command injection vulnerabilities
@@ -1061,7 +1061,7 @@ impl AgTerm {
                         "Command execution requested (not yet implemented)"
                     );
                 }
-                trigger::TriggerAction::Log { message } => {
+                agterm::trigger::TriggerAction::Log { message } => {
                     tracing::info!(
                         trigger = %trigger.name,
                         message = %message,
@@ -1086,7 +1086,7 @@ impl AgTerm {
 
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             let (cursor_row, cursor_col) = tab.screen.cursor_position();
-            tab.bracket_match = terminal::bracket::find_matching_bracket(
+            tab.bracket_match = agterm::terminal::bracket::find_matching_bracket(
                 &tab.screen,
                 cursor_row,
                 cursor_col,
@@ -1195,7 +1195,7 @@ impl AgTerm {
                         pane_layout: PaneLayout::Single,
                         panes: Vec::new(),
                         focused_pane: 0,
-                        title_info: terminal::title::TitleInfo::new(),
+                        title_info: agterm::terminal::title::TitleInfo::new(),
                     };
 
                     tabs.push(tab);
@@ -1252,7 +1252,7 @@ impl AgTerm {
                     pane_layout: PaneLayout::Single,
                     panes: Vec::new(),
                     focused_pane: 0,
-                    title_info: terminal::title::TitleInfo::new(),
+                    title_info: agterm::terminal::title::TitleInfo::new(),
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
@@ -1307,7 +1307,7 @@ impl AgTerm {
                     pane_layout: PaneLayout::Single,
                     panes: Vec::new(),
                     focused_pane: 0,
-                    title_info: terminal::title::TitleInfo::new(),
+                    title_info: agterm::terminal::title::TitleInfo::new(),
                 };
                 self.tabs.push(tab);
                 self.active_tab = self.tabs.len() - 1;
@@ -1352,7 +1352,7 @@ impl AgTerm {
                         cursor_blink_on: true,
                         bell_pending: false,
                         title: None, // New tab starts with no custom title
-                        title_info: terminal::title::TitleInfo::new(),
+                        title_info: agterm::terminal::title::TitleInfo::new(),
                         last_copied_selection: None,
                         bracket_match: None,
                         pane_layout: PaneLayout::Single,
@@ -1617,6 +1617,14 @@ impl AgTerm {
                     && matches!(key.as_ref(), Key::Character("h"))
                 {
                     return self.update(Message::SplitHorizontal);
+                }
+
+                // Handle Cmd+Shift+M: Toggle MCP AI panel
+                if modifiers.command()
+                    && modifiers.shift()
+                    && matches!(key.as_ref(), Key::Character("m"))
+                {
+                    return self.update(Message::ToggleMcpPanel);
                 }
 
                 // Handle Cmd+Shift+P: Open command palette
@@ -2482,6 +2490,28 @@ impl AgTerm {
                 self.completion_selected = 0;
                 Task::none()
             }
+
+            // MCP Panel
+            Message::ToggleMcpPanel => {
+                let _ = self.mcp_panel.update(McpPanelMessage::TogglePanel);
+                Task::none()
+            }
+            Message::McpPanelMessage(msg) => {
+                // Handle ExecuteCommand specially - send command to terminal
+                if let McpPanelMessage::ExecuteCommand(ref cmd) = msg {
+                    let cmd = cmd.clone();
+                    // Send command to active terminal
+                    if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                        if let Some(session_id) = &tab.session_id {
+                            let cmd_with_newline = format!("{}\n", cmd);
+                            let _ = self.pty_manager.write(session_id, cmd_with_newline.as_bytes());
+                        }
+                    }
+                }
+                // Update panel state
+                let _ = self.mcp_panel.update(msg);
+                Task::none()
+            }
         }
     }
 
@@ -2523,15 +2553,31 @@ impl AgTerm {
         ]
         .width(Length::Fill);
 
-        // Main content with optional debug panel
-        let main_content: Element<Message> = if self.debug_panel.visible {
-            let debug_panel_view: Element<Message> = self.debug_panel.view();
-            row![terminal_area, debug_panel_view]
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-        } else {
-            terminal_area.height(Length::Fill).into()
+        // Main content with optional debug panel and MCP panel
+        let main_content: Element<Message> = {
+            let show_debug = self.debug_panel.visible;
+            let show_mcp = self.mcp_panel.is_visible();
+
+            if !show_debug && !show_mcp {
+                // No panels - just terminal area
+                terminal_area.height(Length::Fill).into()
+            } else {
+                // Build row with terminal and optional panels
+                let mut content_row = row![terminal_area];
+
+                if show_debug {
+                    let debug_panel_view: Element<Message> = self.debug_panel.view();
+                    content_row = content_row.push(debug_panel_view);
+                }
+
+                if show_mcp {
+                    let mcp_panel_view: Element<Message> =
+                        self.mcp_panel.view().map(Message::McpPanelMessage);
+                    content_row = content_row.push(mcp_panel_view);
+                }
+
+                content_row.width(Length::Fill).height(Length::Fill).into()
+            }
         };
 
         // Add bell flash overlay if active
@@ -2601,7 +2647,19 @@ impl AgTerm {
                         t.clone()
                     }
                 })
-                .unwrap_or_else(|| format!("Terminal {}", i + 1));
+                .unwrap_or_else(|| {
+                    // If no custom title, show terminal number with directory
+                    if !tab.cwd.is_empty() && tab.cwd != "/" {
+                        // Extract just the directory name from path
+                        let dir_name = std::path::Path::new(&tab.cwd)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(&tab.cwd);
+                        format!("Terminal {} ({})", i + 1, dir_name)
+                    } else {
+                        format!("Terminal {}", i + 1)
+                    }
+                });
             let can_close = self.tabs.len() > 1;
             let has_bell = tab.bell_pending;
 
@@ -2981,7 +3039,7 @@ mod tests {
             cursor_blink_on: true,
             bell_pending: false,
             title: None,
-            title_info: terminal::title::TitleInfo::new(),
+            title_info: agterm::terminal::title::TitleInfo::new(),
             last_copied_selection: None,
             bracket_match: None,
             pane_layout: PaneLayout::Single,
@@ -3022,6 +3080,7 @@ mod tests {
             completion_selected: 0,
             completion_visible: false,
             trigger_manager: TriggerManager::new(),
+            mcp_panel: McpPanel::new(),
         }
     }
 

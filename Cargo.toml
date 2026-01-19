@@ -3,8 +3,11 @@ name = "agterm"
 version = "1.0.0"
 edition = "2021"
 rust-version = "1.75"
+authors = ["coldwoong-moon"]
 license = "MIT"
 description = "AI Agent Terminal - Native GPU-accelerated terminal with AI orchestration"
+default-run = "agterm"
+homepage = "https://github.com/coldwoong-moon/agterm"
 repository = "https://github.com/coldwoong-moon/agterm"
 readme = "README.md"
 keywords = ["terminal", "gpu", "ai-agent", "mcp", "iced"]
@@ -33,15 +36,25 @@ exclude = [
 
 [[bin]]
 name = "agterm"
-path = "src/main.rs"
+path = "src/floem_main.rs"
+required-features = ["floem-gui"]
 
 [lib]
 name = "agterm"
 path = "src/lib.rs"
 
+[features]
+default = ["floem-gui"]
+floem-gui = ["dep:floem", "dep:floem_renderer"]
+iced-gui = ["dep:iced"]
+
 [dependencies]
-# GUI Framework (tiny-skia CPU renderer - faster for many small text widgets)
-iced = { version = "0.13", default-features = false, features = ["tokio", "advanced", "tiny-skia", "canvas"] }
+# GUI Framework - Floem (default, reactive GUI)
+floem = { version = "0.2", optional = true }
+floem_renderer = { version = "0.2", optional = true }
+
+# GUI Framework - Iced (optional, for tests)
+iced = { version = "0.13", default-features = false, features = ["tokio", "advanced", "wgpu", "canvas"], optional = true }
 
 # Terminal/PTY
 portable-pty = "0.8"
@@ -50,11 +63,11 @@ unicode-width = "0.1"  # Wide character (CJK) width calculation
 regex = "1"  # URL pattern matching for hyperlink detection
 once_cell = "1"  # Lazy static initialization for regex patterns
 
-# TODO: implement async operations with tokio
-# tokio = { version = "1", features = ["full"] }
+# Async runtime
+tokio = { version = "1", features = ["full"] }
 
-# TODO: implement MCP (Model Context Protocol) support
-# rmcp = { version = "0.13", features = ["client", "client-side-sse", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+# MCP (Model Context Protocol) support
+rmcp = { version = "0.13", features = ["client", "client-side-sse", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 
 # Unique IDs
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -92,8 +105,9 @@ base64 = "0.22.1"
 # TODO: consider using for flexible error contexts
 # anyhow = "1"
 
-# TODO: implement async utilities if needed
-# futures = "0.3"
+# Async utilities
+futures = "0.3"
+async-stream = "0.3"
 
 # TODO: implement parking_lot for sync primitives if needed
 # parking_lot = "0.12"

@@ -33,40 +33,42 @@
 //! - Accessibility features with WCAG compliance and screen reader support
 //! - Plugin API for extensibility with permission-based security
 //! - Internationalization (i18n) with multi-language support
+//! - MCP (Model Context Protocol) integration for AI agent orchestration
+//! - Command validator for AI-generated command risk analysis and safety
 
-pub mod accessibility;
+// Core modules (framework-independent)
 pub mod aliases;
 pub mod annotations;
 pub mod automation;
 pub mod bookmarks;
 pub mod broadcast;
 pub mod clipboard_history;
+pub mod color;
+pub mod command_validator;
 pub mod completion;
 pub mod config;
-pub mod debug;
-pub mod diff_view;
 pub mod encoding;
 pub mod env_manager;
-
 pub mod filters;
 pub mod highlighting;
 pub mod history;
 pub mod i18n;
 pub mod image_protocol;
+#[cfg(feature = "iced-gui")]
 pub mod keybind;
 pub mod link_handler;
 pub mod logging;
 pub mod macros;
-pub mod markdown;
+pub mod mcp;
 pub mod mouse_actions;
 pub mod notification;
 pub mod performance_monitor;
 pub mod pipeline;
 pub mod plugin_api;
+#[cfg(any(feature = "iced-gui", feature = "floem-gui"))]
 pub mod profiles;
 pub mod quick_actions;
 pub mod recording;
-pub mod render_cache;
 pub mod session;
 pub mod session_tags;
 pub mod shell;
@@ -79,9 +81,27 @@ pub mod statistics;
 pub mod tab_manager;
 pub mod terminal;
 pub mod timer;
-
-pub mod theme;
-pub mod theme_editor;
 pub mod trigger;
-pub mod ui;
 pub mod workspace;
+
+// Iced-specific modules (require iced-gui feature)
+#[cfg(feature = "iced-gui")]
+pub mod accessibility;
+#[cfg(feature = "iced-gui")]
+pub mod debug;
+#[cfg(feature = "iced-gui")]
+pub mod diff_view;
+#[cfg(feature = "iced-gui")]
+pub mod markdown;
+#[cfg(feature = "iced-gui")]
+pub mod render_cache;
+#[cfg(feature = "iced-gui")]
+pub mod theme;
+#[cfg(feature = "iced-gui")]
+pub mod theme_editor;
+#[cfg(feature = "iced-gui")]
+pub mod ui;
+
+// Floem-specific modules (require floem-gui feature)
+#[cfg(feature = "floem-gui")]
+pub mod floem_app;
