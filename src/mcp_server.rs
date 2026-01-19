@@ -20,12 +20,24 @@
 //! - `list_panes`: List all panes in a tab
 
 use crate::terminal::pty::{PtyId, PtyManager};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+
+/// Strip ANSI escape codes from terminal output
+fn strip_ansi_codes(input: &str) -> String {
+    // Match ANSI escape sequences: ESC [ ... (letter or ~)
+    let ansi_regex = Regex::new(r"\x1b\[[0-9;]*[a-zA-Z~]|\x1b\][^\x07]*\x07|\x1b[()][AB012]|\x1b[>=]").unwrap();
+    let result = ansi_regex.replace_all(input, "");
+    // Also remove other control characters except newline and tab
+    result.chars()
+        .filter(|c| *c == '\n' || *c == '\t' || *c == '\r' || !c.is_control())
+        .collect()
+}
 
 /// MCP Server instance
 pub struct McpServer {
@@ -769,11 +781,12 @@ impl StandaloneMcpServer {
             })?;
 
         let output_str = String::from_utf8_lossy(&output);
+        let clean_output = strip_ansi_codes(&output_str);
 
         Ok(json!({
             "content": [{
                 "type": "text",
-                "text": output_str.to_string()
+                "text": clean_output
             }]
         }))
     }
@@ -813,11 +826,12 @@ impl StandaloneMcpServer {
             })?;
 
         let output_str = String::from_utf8_lossy(&output);
+        let clean_output = strip_ansi_codes(&output_str);
 
         Ok(json!({
             "content": [{
                 "type": "text",
-                "text": output_str.to_string()
+                "text": clean_output
             }]
         }))
     }
