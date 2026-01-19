@@ -145,28 +145,99 @@ fn strip_ansi_codes(input: &str) -> String {
     lines.join("\n")
 }
 
+/// Check if a string looks like a shell command fragment (contains shell operators)
+fn is_command_like(s: &str) -> bool {
+    s.contains("&&") || s.contains("||") || s.contains("|") ||
+    s.starts_with("-") || s.contains(";") || s.contains(">") || s.contains("<")
+}
+
 /// Remove echoed command from output
 fn remove_command_echo(output: &str, command: &str) -> String {
-    let lines: Vec<&str> = output.lines().collect();
     let cmd_trimmed = command.trim();
+    if cmd_trimmed.is_empty() {
+        return output.trim().to_string();
+    }
+
+    // First, try to remove the entire command (possibly wrapped across lines due to terminal width)
+    let mut cleaned = output.to_string();
+
+    // Remove command that might be repeated (echo artifact)
+    let repeated_pattern = format!("{}{}", cmd_trimmed, cmd_trimmed);
+    cleaned = cleaned.replace(&repeated_pattern, "");
+
+    let lines: Vec<&str> = cleaned.lines().collect();
 
     // Filter out lines that match the command (echoed input)
     let filtered: Vec<&str> = lines.into_iter()
         .filter(|line| {
             let line_trimmed = line.trim();
-            // Skip if line exactly matches command or contains it as echo
+
+            // Keep empty lines for now (will be trimmed at the end)
+            if line_trimmed.is_empty() {
+                return false;
+            }
+
+            // Skip if line exactly matches command
             if line_trimmed == cmd_trimmed {
                 return false;
             }
-            // Skip if line starts with the command (partial echo)
-            if line_trimmed.starts_with(cmd_trimmed) && line_trimmed.len() == cmd_trimmed.len() {
+
+            // Skip if line matches normalized command (different whitespace)
+            let normalized_line = line_trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+            let normalized_cmd = cmd_trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+            if normalized_line == normalized_cmd {
                 return false;
             }
+
+            // Skip if line starts with command (command followed by extra chars)
+            if line_trimmed.starts_with(cmd_trimmed) {
+                return false;
+            }
+
+            // For command fragments, only filter if it looks like shell syntax
+            // This prevents filtering output like "hello" when command is "echo hello"
+            if cmd_trimmed.contains(line_trimmed) && line_trimmed.len() < cmd_trimmed.len() {
+                // Only filter if line looks like a command (has shell operators)
+                if is_command_like(line_trimmed) {
+                    return false;
+                }
+                // Also filter if line is a suffix of the command and looks command-like
+                if cmd_trimmed.ends_with(line_trimmed) && is_command_like(line_trimmed) {
+                    return false;
+                }
+            }
+
+            // Skip if command starts with line (partial command echo)
+            // Only if the line looks like a command
+            if cmd_trimmed.starts_with(line_trimmed) && line_trimmed.len() > 5 && is_command_like(line_trimmed) {
+                return false;
+            }
+
+            // Check for lines that are command suffix fragments
+            // e.g., "-la | head -5" which is part of "pwd && ls -la | head -5"
+            if cmd_trimmed.ends_with(line_trimmed) && is_command_like(line_trimmed) {
+                return false;
+            }
+
+            // Skip lines that contain command concatenated with partial command
+            // e.g., "pwd && ls -la | head -5pwd && ls" (command + start of command again)
+            if line_trimmed.len() >= cmd_trimmed.len() && line_trimmed.contains(cmd_trimmed) {
+                // Check if line starts with command
+                if let Some(pos) = line_trimmed.find(cmd_trimmed) {
+                    if pos == 0 {
+                        // Line starts with full command
+                        return false;
+                    }
+                }
+            }
+
             true
         })
         .collect();
 
-    filtered.join("\n")
+    // Join and clean up
+    let result = filtered.join("\n");
+    result.trim().to_string()
 }
 
 /// MCP Server instance
@@ -1665,6 +1736,7 @@ mod tests {
 
     #[test]
     fn test_remove_command_echo() {
+        // Basic echo removal
         let output = "ls\nfile1.txt\nfile2.txt";
         let result = remove_command_echo(output, "ls");
         assert_eq!(result, "file1.txt\nfile2.txt");
@@ -1673,6 +1745,36 @@ mod tests {
         let output = "file1.txt\nfile2.txt";
         let result = remove_command_echo(output, "ls");
         assert_eq!(result, "file1.txt\nfile2.txt");
+
+        // Double echo (command repeated twice)
+        let output = "echo hello\necho hello\nhello";
+        let result = remove_command_echo(output, "echo hello");
+        assert_eq!(result, "hello");
+
+        // Concatenated echo (no newline between)
+        let output = "lsls\nfile1.txt";
+        let result = remove_command_echo(output, "ls");
+        assert_eq!(result, "file1.txt");
+
+        // Complex command echo
+        let output = "pwd && ls\n/tmp\nfile.txt";
+        let result = remove_command_echo(output, "pwd && ls");
+        assert_eq!(result, "/tmp\nfile.txt");
+
+        // Wrapped command echo (terminal width limitation)
+        // When command wraps due to terminal width, fragments appear on multiple lines
+        let output = "pwd && ls -la | head -5pwd && ls\n-la | head -5\n/Users/test\ntotal 100";
+        let result = remove_command_echo(output, "pwd && ls -la | head -5");
+        assert_eq!(result, "/Users/test\ntotal 100");
+
+        // Command fragment at line start
+        let output = "-la | head -5\n/Users/test\ndrwxr-xr-x";
+        let result = remove_command_echo(output, "ls -la | head -5");
+        assert_eq!(result, "/Users/test\ndrwxr-xr-x");
+
+        // Empty command
+        let result = remove_command_echo("some output", "");
+        assert_eq!(result, "some output");
     }
 
     #[test]
