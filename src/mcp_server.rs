@@ -650,7 +650,24 @@ struct SessionInfo {
     created_at: std::time::Instant,
     last_activity: std::time::Instant,
     history: Vec<HistoryEntry>,
+    /// Last command's exit code (None if not yet retrieved)
+    last_exit_code: Option<i32>,
 }
+
+/// Background job status
+#[derive(Debug, Clone, Serialize)]
+struct BackgroundJob {
+    job_id: String,
+    session_name: String,
+    command: String,
+    started_at: u64, // Unix timestamp
+    completed: bool,
+    exit_code: Option<i32>,
+    output: String,
+}
+
+/// Counter for generating unique job IDs
+static JOB_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Standalone MCP Server that manages PTY sessions directly
 ///
@@ -660,6 +677,7 @@ pub struct StandaloneMcpServer {
     pty_manager: Arc<PtyManager>,
     sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
     active_session: Arc<Mutex<Option<String>>>,
+    background_jobs: Arc<Mutex<HashMap<String, BackgroundJob>>>,
 }
 
 impl StandaloneMcpServer {
@@ -669,6 +687,7 @@ impl StandaloneMcpServer {
             pty_manager: Arc::new(PtyManager::new()),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             active_session: Arc::new(Mutex::new(None)),
+            background_jobs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -993,6 +1012,74 @@ impl StandaloneMcpServer {
                                 "session": {"type": "string", "description": "Session name (optional, uses active session)"}
                             }
                         }
+                    },
+                    {
+                        "name": "get_exit_code",
+                        "description": "Get the exit code of the last executed command. Returns the exit code from $? in the shell.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session": {"type": "string", "description": "Session name (optional, uses active session)"}
+                            }
+                        }
+                    },
+                    {
+                        "name": "watch_output",
+                        "description": "Watch session output until a pattern is matched or timeout. Useful for waiting for build completion, errors, or specific output patterns.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session": {"type": "string", "description": "Session name (optional, uses active session)"},
+                                "pattern": {"type": "string", "description": "Regex pattern to match in output"},
+                                "timeout_ms": {"type": "integer", "description": "Maximum time to wait in milliseconds (default: 30000, max: 300000)"},
+                                "poll_interval_ms": {"type": "integer", "description": "Polling interval in milliseconds (default: 200)"}
+                            },
+                            "required": ["pattern"]
+                        }
+                    },
+                    {
+                        "name": "run_background",
+                        "description": "Run a command in the background and return immediately with a job ID. Use get_job_status to check completion.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session": {"type": "string", "description": "Session name (optional, uses active session)"},
+                                "command": {"type": "string", "description": "Command to execute in background"},
+                                "completion_pattern": {"type": "string", "description": "Optional regex pattern to detect command completion (default: shell prompt)"}
+                            },
+                            "required": ["command"]
+                        }
+                    },
+                    {
+                        "name": "get_job_status",
+                        "description": "Get the status of a background job by its ID.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "job_id": {"type": "string", "description": "The job ID returned by run_background"}
+                            },
+                            "required": ["job_id"]
+                        }
+                    },
+                    {
+                        "name": "list_jobs",
+                        "description": "List all background jobs and their status.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {}
+                        }
+                    },
+                    {
+                        "name": "parse_errors",
+                        "description": "Parse compiler/build errors from output text. Supports Rust/Cargo, TypeScript/JavaScript, Go, and generic error formats.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "output": {"type": "string", "description": "Build/compile output text to parse"},
+                                "format": {"type": "string", "description": "Error format hint: 'rust', 'typescript', 'go', or 'auto' (default: auto)"}
+                            },
+                            "required": ["output"]
+                        }
                     }
                 ]
             })),
@@ -1042,6 +1129,12 @@ impl StandaloneMcpServer {
             "get_history" => self.get_history(args),
             "open_gui" => self.open_gui(),
             "keep_alive" => self.keep_alive(args),
+            "get_exit_code" => self.get_exit_code(args),
+            "watch_output" => self.watch_output(args),
+            "run_background" => self.run_background(args),
+            "get_job_status" => self.get_job_status(args),
+            "list_jobs" => self.list_jobs(),
+            "parse_errors" => self.parse_errors(args),
             _ => Err(JsonRpcError {
                 code: -32602,
                 message: format!("Unknown tool: {name}"),
@@ -1087,6 +1180,7 @@ impl StandaloneMcpServer {
             created_at: now,
             last_activity: now,
             history: Vec::new(),
+            last_exit_code: None,
         };
 
         {
@@ -1804,6 +1898,530 @@ impl StandaloneMcpServer {
                     session_name, idle_secs, expires_in
                 )
             }]
+        }))
+    }
+
+    fn get_exit_code(&self, args: Value) -> Result<Value, JsonRpcError> {
+        let session_name = args.get("session")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| self.active_session.lock().unwrap().clone())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "No active session. Create one first.".to_string(),
+                data: None,
+            })?;
+
+        let session_id = {
+            let sessions = self.sessions.lock().unwrap();
+            let session = sessions.get(&session_name)
+                .ok_or_else(|| JsonRpcError {
+                    code: -32602,
+                    message: format!("Session '{session_name}' not found"),
+                    data: None,
+                })?;
+            session.id.clone()
+        };
+
+        // Execute shell-agnostic command to get the last exit code
+        // fish uses $status, bash/zsh use $?
+        // Output both with markers, then parse the numeric value
+        let exit_code_cmd = "echo __EXITCODE_START__\"$?\"\"$status\"__EXITCODE_END__\n";
+        self.pty_manager.write(&session_id, exit_code_cmd.as_bytes())
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Failed to query exit code: {e}"),
+                data: None,
+            })?;
+
+        // Wait a bit for the response
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        // Read the output
+        let output_bytes = self.pty_manager.read(&session_id)
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Failed to read exit code: {e}"),
+                data: None,
+            })?;
+        let output = String::from_utf8_lossy(&output_bytes);
+
+        let cleaned = strip_ansi_codes(&output);
+
+        // Parse exit code from output - look for __EXITCODE_START__...__EXITCODE_END__
+        let exit_code: Option<i32> = if let Some(start) = cleaned.find("__EXITCODE_START__") {
+            if let Some(end) = cleaned.find("__EXITCODE_END__") {
+                let between = &cleaned[start + 18..end];
+                // Extract first number found (either $? or $status will be a number)
+                between.chars()
+                    .filter(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse::<i32>()
+                    .ok()
+            } else {
+                None
+            }
+        } else {
+            // Fallback: look for a standalone number
+            cleaned.lines()
+                .filter_map(|line| line.trim().parse::<i32>().ok())
+                .last()
+        };
+
+        // Update session's last_exit_code
+        if let Some(code) = exit_code {
+            let mut sessions = self.sessions.lock().unwrap();
+            if let Some(session) = sessions.get_mut(&session_name) {
+                session.last_exit_code = Some(code);
+            }
+        }
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": match exit_code {
+                    Some(code) => format!("Exit code: {}", code),
+                    None => "Could not determine exit code".to_string(),
+                }
+            }],
+            "exit_code": exit_code
+        }))
+    }
+
+    fn watch_output(&self, args: Value) -> Result<Value, JsonRpcError> {
+        let session_name = args.get("session")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| self.active_session.lock().unwrap().clone())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "No active session. Create one first.".to_string(),
+                data: None,
+            })?;
+
+        let pattern_str = args.get("pattern")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "Missing required parameter: pattern".to_string(),
+                data: None,
+            })?;
+
+        let pattern = Regex::new(pattern_str)
+            .map_err(|e| JsonRpcError {
+                code: -32602,
+                message: format!("Invalid regex pattern: {e}"),
+                data: None,
+            })?;
+
+        let timeout_ms = args.get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30_000)
+            .min(300_000); // Max 5 minutes
+
+        let poll_interval_ms = args.get("poll_interval_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200);
+
+        let session_id = {
+            let sessions = self.sessions.lock().unwrap();
+            let session = sessions.get(&session_name)
+                .ok_or_else(|| JsonRpcError {
+                    code: -32602,
+                    message: format!("Session '{session_name}' not found"),
+                    data: None,
+                })?;
+            session.id.clone()
+        };
+
+        let start_time = std::time::Instant::now();
+        let mut accumulated_output = String::new();
+        let mut match_found = false;
+        let mut matched_text = String::new();
+
+        while start_time.elapsed().as_millis() < timeout_ms as u128 {
+            // Read output
+            if let Ok(output_bytes) = self.pty_manager.read(&session_id) {
+                let output = String::from_utf8_lossy(&output_bytes);
+                let cleaned = strip_ansi_codes(&output);
+                accumulated_output.push_str(&cleaned);
+
+                // Check for pattern match
+                if let Some(m) = pattern.find(&accumulated_output) {
+                    match_found = true;
+                    matched_text = m.as_str().to_string();
+                    break;
+                }
+            }
+
+            // Update session activity
+            {
+                let mut sessions = self.sessions.lock().unwrap();
+                if let Some(session) = sessions.get_mut(&session_name) {
+                    session.last_activity = std::time::Instant::now();
+                }
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms));
+        }
+
+        let elapsed_ms = start_time.elapsed().as_millis() as u64;
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": if match_found {
+                    format!("Pattern matched after {}ms: '{}'", elapsed_ms, matched_text)
+                } else {
+                    format!("Timeout after {}ms. Pattern not found.", elapsed_ms)
+                }
+            }],
+            "matched": match_found,
+            "elapsed_ms": elapsed_ms,
+            "matched_text": if match_found { Some(matched_text) } else { None },
+            "output": accumulated_output
+        }))
+    }
+
+    fn run_background(&self, args: Value) -> Result<Value, JsonRpcError> {
+        let session_name = args.get("session")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| self.active_session.lock().unwrap().clone())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "No active session. Create one first.".to_string(),
+                data: None,
+            })?;
+
+        let command = args.get("command")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "Missing required parameter: command".to_string(),
+                data: None,
+            })?
+            .to_string();
+
+        let completion_pattern = args.get("completion_pattern")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        // Generate unique job ID
+        let job_id = format!("job_{}", JOB_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+
+        let session_id = {
+            let sessions = self.sessions.lock().unwrap();
+            let session = sessions.get(&session_name)
+                .ok_or_else(|| JsonRpcError {
+                    code: -32602,
+                    message: format!("Session '{session_name}' not found"),
+                    data: None,
+                })?;
+            session.id.clone()
+        };
+
+        // Create job entry
+        let job = BackgroundJob {
+            job_id: job_id.clone(),
+            session_name: session_name.clone(),
+            command: command.clone(),
+            started_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            completed: false,
+            exit_code: None,
+            output: String::new(),
+        };
+
+        {
+            let mut jobs = self.background_jobs.lock().unwrap();
+            jobs.insert(job_id.clone(), job);
+        }
+
+        // Execute command
+        let cmd_with_newline = format!("{}\n", command);
+        self.pty_manager.write(&session_id, cmd_with_newline.as_bytes())
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Failed to execute command: {e}"),
+                data: None,
+            })?;
+
+        // Update history
+        {
+            let mut sessions = self.sessions.lock().unwrap();
+            if let Some(session) = sessions.get_mut(&session_name) {
+                session.last_activity = std::time::Instant::now();
+                session.history.push(HistoryEntry {
+                    command: command.clone(),
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
+                });
+            }
+        }
+
+        // Spawn background thread to monitor completion
+        let jobs = Arc::clone(&self.background_jobs);
+        let pty_manager = Arc::clone(&self.pty_manager);
+        let job_id_clone = job_id.clone();
+        let session_id_clone = session_id.clone();
+
+        std::thread::spawn(move || {
+            let mut output = String::new();
+            let start = std::time::Instant::now();
+            let timeout = std::time::Duration::from_secs(300); // 5 minute max
+
+            // Default completion pattern: shell prompt (ends with $ or > or #)
+            let pattern = completion_pattern
+                .as_ref()
+                .and_then(|p| Regex::new(p).ok())
+                .unwrap_or_else(|| Regex::new(r"[$>#]\s*$").unwrap());
+
+            while start.elapsed() < timeout {
+                if let Ok(data) = pty_manager.read(&session_id_clone) {
+                    let text = String::from_utf8_lossy(&data);
+                    let cleaned = strip_ansi_codes(&text);
+                    output.push_str(&cleaned);
+
+                    // Check if command completed
+                    if pattern.is_match(&output) {
+                        break;
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+
+            // Update job status
+            if let Ok(mut jobs) = jobs.lock() {
+                if let Some(job) = jobs.get_mut(&job_id_clone) {
+                    job.completed = true;
+                    job.output = output;
+                }
+            }
+        });
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": format!("Background job started: {}", job_id)
+            }],
+            "job_id": job_id
+        }))
+    }
+
+    fn get_job_status(&self, args: Value) -> Result<Value, JsonRpcError> {
+        let job_id = args.get("job_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "Missing required parameter: job_id".to_string(),
+                data: None,
+            })?;
+
+        let jobs = self.background_jobs.lock().unwrap();
+        let job = jobs.get(job_id)
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: format!("Job '{}' not found", job_id),
+                data: None,
+            })?;
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": if job.completed {
+                    format!("Job {} completed.\nCommand: {}\nOutput:\n{}", job.job_id, job.command, job.output)
+                } else {
+                    format!("Job {} still running.\nCommand: {}", job.job_id, job.command)
+                }
+            }],
+            "job_id": job.job_id,
+            "session": job.session_name,
+            "command": job.command,
+            "completed": job.completed,
+            "exit_code": job.exit_code,
+            "output": if job.completed { Some(&job.output) } else { None }
+        }))
+    }
+
+    fn list_jobs(&self) -> Result<Value, JsonRpcError> {
+        let jobs = self.background_jobs.lock().unwrap();
+
+        let job_list: Vec<_> = jobs.values()
+            .map(|job| {
+                json!({
+                    "job_id": job.job_id,
+                    "session": job.session_name,
+                    "command": job.command,
+                    "completed": job.completed,
+                    "started_at": job.started_at
+                })
+            })
+            .collect();
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": format!("{} background job(s)", job_list.len())
+            }],
+            "jobs": job_list
+        }))
+    }
+
+    fn parse_errors(&self, args: Value) -> Result<Value, JsonRpcError> {
+        let output = args.get("output")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "Missing required parameter: output".to_string(),
+                data: None,
+            })?;
+
+        let format = args.get("format")
+            .and_then(|v| v.as_str())
+            .unwrap_or("auto");
+
+        let mut errors: Vec<Value> = Vec::new();
+        let mut warnings: Vec<Value> = Vec::new();
+
+        // Rust/Cargo error patterns
+        let rust_error = Regex::new(r"error\[E\d+\]: (.+)\n\s*--> ([^:]+):(\d+):(\d+)").unwrap();
+        let rust_warning = Regex::new(r"warning: (.+)\n\s*--> ([^:]+):(\d+):(\d+)").unwrap();
+        let rust_simple_error = Regex::new(r"error: (.+)").unwrap();
+
+        // TypeScript/JavaScript patterns
+        let ts_error = Regex::new(r"([^\s]+)\((\d+),(\d+)\): error TS\d+: (.+)").unwrap();
+        let eslint_error = Regex::new(r"([^\s]+):(\d+):(\d+): error (.+)").unwrap();
+
+        // Go patterns
+        let go_error = Regex::new(r"([^\s]+):(\d+):(\d+): (.+)").unwrap();
+
+        // Generic patterns
+        let generic_error = Regex::new(r"(?i)(error|fatal|failed).*:(.+)").unwrap();
+
+        let should_parse = |fmt: &str, target: &str| -> bool {
+            format == "auto" || format == fmt || fmt == target
+        };
+
+        // Parse Rust errors
+        if should_parse(format, "rust") {
+            for cap in rust_error.captures_iter(output) {
+                errors.push(json!({
+                    "type": "error",
+                    "language": "rust",
+                    "message": cap.get(1).map(|m| m.as_str()).unwrap_or(""),
+                    "file": cap.get(2).map(|m| m.as_str()).unwrap_or(""),
+                    "line": cap.get(3).map(|m| m.as_str().parse::<u32>().unwrap_or(0)).unwrap_or(0),
+                    "column": cap.get(4).map(|m| m.as_str().parse::<u32>().unwrap_or(0)).unwrap_or(0)
+                }));
+            }
+            for cap in rust_warning.captures_iter(output) {
+                warnings.push(json!({
+                    "type": "warning",
+                    "language": "rust",
+                    "message": cap.get(1).map(|m| m.as_str()).unwrap_or(""),
+                    "file": cap.get(2).map(|m| m.as_str()).unwrap_or(""),
+                    "line": cap.get(3).map(|m| m.as_str().parse::<u32>().unwrap_or(0)).unwrap_or(0),
+                    "column": cap.get(4).map(|m| m.as_str().parse::<u32>().unwrap_or(0)).unwrap_or(0)
+                }));
+            }
+            // Simple rust errors (no location)
+            if errors.is_empty() {
+                for cap in rust_simple_error.captures_iter(output) {
+                    let msg = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+                    if !msg.contains("[E") { // Avoid duplicates
+                        errors.push(json!({
+                            "type": "error",
+                            "language": "rust",
+                            "message": msg,
+                            "file": null,
+                            "line": null,
+                            "column": null
+                        }));
+                    }
+                }
+            }
+        }
+
+        // Parse TypeScript errors
+        if should_parse(format, "typescript") {
+            for cap in ts_error.captures_iter(output) {
+                errors.push(json!({
+                    "type": "error",
+                    "language": "typescript",
+                    "file": cap.get(1).map(|m| m.as_str()).unwrap_or(""),
+                    "line": cap.get(2).map(|m| m.as_str().parse::<u32>().unwrap_or(0)).unwrap_or(0),
+                    "column": cap.get(3).map(|m| m.as_str().parse::<u32>().unwrap_or(0)).unwrap_or(0),
+                    "message": cap.get(4).map(|m| m.as_str()).unwrap_or("")
+                }));
+            }
+            for cap in eslint_error.captures_iter(output) {
+                errors.push(json!({
+                    "type": "error",
+                    "language": "javascript",
+                    "file": cap.get(1).map(|m| m.as_str()).unwrap_or(""),
+                    "line": cap.get(2).map(|m| m.as_str().parse::<u32>().unwrap_or(0)).unwrap_or(0),
+                    "column": cap.get(3).map(|m| m.as_str().parse::<u32>().unwrap_or(0)).unwrap_or(0),
+                    "message": cap.get(4).map(|m| m.as_str()).unwrap_or("")
+                }));
+            }
+        }
+
+        // Parse Go errors
+        if should_parse(format, "go") && errors.is_empty() {
+            for cap in go_error.captures_iter(output) {
+                let file = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+                if file.ends_with(".go") {
+                    errors.push(json!({
+                        "type": "error",
+                        "language": "go",
+                        "file": file,
+                        "line": cap.get(2).map(|m| m.as_str().parse::<u32>().unwrap_or(0)).unwrap_or(0),
+                        "column": cap.get(3).map(|m| m.as_str().parse::<u32>().unwrap_or(0)).unwrap_or(0),
+                        "message": cap.get(4).map(|m| m.as_str()).unwrap_or("")
+                    }));
+                }
+            }
+        }
+
+        // Generic error fallback
+        if errors.is_empty() && format == "auto" {
+            for cap in generic_error.captures_iter(output) {
+                errors.push(json!({
+                    "type": "error",
+                    "language": "unknown",
+                    "message": cap.get(2).map(|m| m.as_str().trim()).unwrap_or(""),
+                    "file": null,
+                    "line": null,
+                    "column": null
+                }));
+            }
+        }
+
+        // Deduplicate errors
+        let mut seen = std::collections::HashSet::new();
+        errors.retain(|e| {
+            let key = e.to_string();
+            seen.insert(key)
+        });
+
+        let error_count = errors.len();
+        let warning_count = warnings.len();
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": format!("Found {} error(s) and {} warning(s)", error_count, warning_count)
+            }],
+            "errors": errors,
+            "warnings": warnings,
+            "error_count": error_count,
+            "warning_count": warning_count,
+            "has_errors": error_count > 0
         }))
     }
 }
