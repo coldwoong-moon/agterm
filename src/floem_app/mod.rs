@@ -12,9 +12,11 @@ pub mod mcp_client;
 use floem::prelude::*;
 use floem::views::{v_stack, h_stack, Decorators, stack, dyn_container};
 use floem::keyboard::{Key, NamedKey};
+use std::time::Duration;
 
 pub use state::AppState;
 use views::McpPanelState;
+use async_bridge::AsyncBridge;
 
 /// Convert keyboard input to bytes for PTY
 fn convert_key_to_bytes(key: &Key, modifiers: &floem::keyboard::Modifiers) -> Option<Vec<u8>> {
@@ -84,8 +86,40 @@ pub fn app_view() -> impl IntoView {
     // Settings panel visibility state
     let settings_visible = RwSignal::new(false);
 
-    // MCP panel state
-    let mcp_panel_state = McpPanelState::new();
+    // Create AsyncBridge for MCP communication
+    let (bridge, worker) = AsyncBridge::new();
+
+    // Spawn the worker on the Tokio runtime
+    tokio::spawn(async move {
+        worker.run().await;
+    });
+
+    // MCP panel state with bridge connection
+    let mcp_panel_state = McpPanelState::with_bridge(
+        bridge.command_tx().clone(),
+        bridge.into_result_rx(),
+    );
+
+    // Clone for polling in idle callback
+    let mcp_panel_for_polling = mcp_panel_state.clone();
+
+    // Set up periodic polling for MCP results using a timer
+    // This spawns a background task that triggers result polling
+    let poll_trigger = RwSignal::new(0u64);
+    {
+        let poll_trigger = poll_trigger;
+        let mcp_state = mcp_panel_for_polling.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                // Trigger a poll by incrementing the counter
+                // The poll happens in the main thread via the effect below
+                poll_trigger.update(|v| *v = v.wrapping_add(1));
+                // Also poll directly here to process results
+                mcp_state.poll_results();
+            }
+        });
+    }
 
     // Enable IME input
     floem::action::set_ime_allowed(true);

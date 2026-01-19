@@ -9,7 +9,7 @@ use floem::reactive::{RwSignal, SignalGet, SignalUpdate};
 use floem::style::{AlignItems, CursorStyle, FlexDirection, JustifyContent};
 use floem::views::{container, dyn_container, h_stack, label, scroll, v_stack, Decorators};
 
-use crate::floem_app::async_bridge::ToolInfo;
+use crate::floem_app::async_bridge::{AsyncCommand, AsyncResult, ToolInfo};
 use crate::floem_app::theme::Theme;
 
 /// AI Agent type for MCP integration
@@ -65,10 +65,14 @@ pub struct McpPanelState {
     pub is_loading: RwSignal<bool>,
     /// Error message (if any)
     pub error_message: RwSignal<Option<String>>,
+    /// Command sender for async operations
+    command_tx: Option<tokio::sync::mpsc::Sender<AsyncCommand>>,
+    /// Result receiver for async operations
+    result_rx: Option<std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<AsyncResult>>>>,
 }
 
 impl McpPanelState {
-    /// Create a new MCP panel state
+    /// Create a new MCP panel state without async bridge (for tests)
     pub fn new() -> Self {
         Self {
             visible: RwSignal::new(true),
@@ -78,6 +82,26 @@ impl McpPanelState {
             selected_agent: RwSignal::new(AgentType::ClaudeCode),
             is_loading: RwSignal::new(false),
             error_message: RwSignal::new(None),
+            command_tx: None,
+            result_rx: None,
+        }
+    }
+
+    /// Create a new MCP panel state with async bridge
+    pub fn with_bridge(
+        command_tx: tokio::sync::mpsc::Sender<AsyncCommand>,
+        result_rx: std::sync::mpsc::Receiver<AsyncResult>,
+    ) -> Self {
+        Self {
+            visible: RwSignal::new(true),
+            connected: RwSignal::new(false),
+            server_name: RwSignal::new(String::from("No server")),
+            tools: RwSignal::new(Vec::new()),
+            selected_agent: RwSignal::new(AgentType::ClaudeCode),
+            is_loading: RwSignal::new(false),
+            error_message: RwSignal::new(None),
+            command_tx: Some(command_tx),
+            result_rx: Some(std::sync::Arc::new(std::sync::Mutex::new(result_rx))),
         }
     }
 
@@ -115,6 +139,112 @@ impl McpPanelState {
     /// Set error message
     pub fn set_error(&self, error: Option<String>) {
         self.error_message.set(error);
+    }
+
+    /// Connect to the currently selected agent's MCP server
+    pub fn connect(&self) {
+        if let Some(ref tx) = self.command_tx {
+            let agent_name = match self.selected_agent.get() {
+                AgentType::ClaudeCode => "claude_code",
+                AgentType::GeminiCli => "gemini_cli",
+                AgentType::OpenAICodex => "openai_codex",
+                AgentType::QwenCode => "qwen_code",
+            };
+
+            self.set_loading(true);
+            self.set_error(None);
+
+            if let Err(e) = tx.try_send(AsyncCommand::McpConnect(agent_name.to_string())) {
+                tracing::error!("Failed to send connect command: {}", e);
+                self.set_loading(false);
+                self.set_error(Some(format!("Failed to connect: {e}")));
+            } else {
+                tracing::info!("Sent connect command for agent: {}", agent_name);
+            }
+        } else {
+            tracing::warn!("No command sender available for MCP connection");
+            self.set_error(Some("MCP bridge not initialized".to_string()));
+        }
+    }
+
+    /// Disconnect from the current MCP server
+    pub fn disconnect(&self) {
+        if let Some(ref tx) = self.command_tx {
+            self.set_loading(true);
+
+            if let Err(e) = tx.try_send(AsyncCommand::McpDisconnect) {
+                tracing::error!("Failed to send disconnect command: {}", e);
+                self.set_loading(false);
+            } else {
+                tracing::info!("Sent disconnect command");
+            }
+        }
+    }
+
+    /// Request list of available tools
+    pub fn refresh_tools(&self) {
+        if let Some(ref tx) = self.command_tx {
+            if !self.connected.get() {
+                return;
+            }
+
+            self.set_loading(true);
+
+            if let Err(e) = tx.try_send(AsyncCommand::McpListTools) {
+                tracing::error!("Failed to send list tools command: {}", e);
+                self.set_loading(false);
+            } else {
+                tracing::info!("Sent list tools command");
+            }
+        }
+    }
+
+    /// Poll for async results and update state (call this periodically)
+    pub fn poll_results(&self) {
+        if let Some(ref rx_arc) = self.result_rx {
+            if let Ok(rx) = rx_arc.try_lock() {
+                while let Ok(result) = rx.try_recv() {
+                    self.handle_result(result);
+                }
+            }
+        }
+    }
+
+    /// Handle a single async result
+    fn handle_result(&self, result: AsyncResult) {
+        match result {
+            AsyncResult::McpConnected { server_name } => {
+                tracing::info!("MCP connected to: {}", server_name);
+                self.set_connected(true, Some(server_name));
+                self.set_loading(false);
+                self.set_error(None);
+                // Automatically fetch tools after connecting
+                self.refresh_tools();
+            }
+            AsyncResult::McpDisconnected => {
+                tracing::info!("MCP disconnected");
+                self.set_connected(false, Some("No server".to_string()));
+                self.tools.set(Vec::new());
+                self.set_loading(false);
+            }
+            AsyncResult::McpTools(tools) => {
+                tracing::info!("Received {} tools", tools.len());
+                self.update_tools(tools);
+                self.set_loading(false);
+            }
+            AsyncResult::McpToolResult(value) => {
+                tracing::info!("Tool result: {:?}", value);
+                self.set_loading(false);
+            }
+            AsyncResult::Error(msg) => {
+                tracing::error!("MCP error: {}", msg);
+                self.set_error(Some(msg));
+                self.set_loading(false);
+            }
+            AsyncResult::CommandApproved { .. } | AsyncResult::CommandBlocked { .. } => {
+                // Command validation results - handled elsewhere
+            }
+        }
     }
 }
 
@@ -278,32 +408,92 @@ fn connection_status_view(
     let connected = state.connected;
     let server_name = state.server_name;
     let error_message = state.error_message;
+    let is_loading = state.is_loading;
+    let state_for_button = state.clone();
 
     v_stack((
-        // Connection indicator
+        // Connection indicator and button row
         h_stack((
-            label(move || {
-                if connected.get() {
-                    "●".to_string()
-                } else {
-                    "○".to_string()
-                }
-            })
-            .style(move |s| {
-                let colors = theme.get().colors();
-                let color = if connected.get() {
-                    colors.accent_green
-                } else {
-                    colors.text_muted
-                };
-                s.font_size(14.0).color(color)
-            }),
-            label(move || server_name.get()).style(move |s| {
-                let colors = theme.get().colors();
-                s.font_size(12.0).color(colors.text_secondary).margin_left(6.0)
-            }),
+            // Status indicator
+            h_stack((
+                label(move || {
+                    if connected.get() {
+                        "●".to_string()
+                    } else {
+                        "○".to_string()
+                    }
+                })
+                .style(move |s| {
+                    let colors = theme.get().colors();
+                    let color = if connected.get() {
+                        colors.accent_green
+                    } else {
+                        colors.text_muted
+                    };
+                    s.font_size(14.0).color(color)
+                }),
+                label(move || server_name.get()).style(move |s| {
+                    let colors = theme.get().colors();
+                    s.font_size(12.0).color(colors.text_secondary).margin_left(6.0)
+                }),
+            ))
+            .style(|s| s.align_items(AlignItems::Center).flex_grow(1.0)),
+            // Connect/Disconnect button
+            dyn_container(
+                move || (connected.get(), is_loading.get()),
+                move |(is_connected, loading)| {
+                    let state_clone = state_for_button.clone();
+                    let button_text = if loading {
+                        "...".to_string()
+                    } else if is_connected {
+                        "Disconnect".to_string()
+                    } else {
+                        "Connect".to_string()
+                    };
+
+                    container(label(move || button_text.clone()))
+                        .on_click_stop(move |_| {
+                            if loading {
+                                return;
+                            }
+                            if is_connected {
+                                state_clone.disconnect();
+                            } else {
+                                state_clone.connect();
+                            }
+                        })
+                        .style(move |s| {
+                            let colors = theme.get().colors();
+                            let base = s
+                                .padding_horiz(12.0)
+                                .padding_vert(6.0)
+                                .font_size(11.0)
+                                .border(1.0)
+                                .border_radius(4.0);
+
+                            if loading {
+                                base.background(colors.bg_secondary)
+                                    .border_color(colors.border)
+                                    .color(colors.text_muted)
+                                    .cursor(CursorStyle::Default)
+                            } else if is_connected {
+                                base.background(colors.bg_secondary)
+                                    .border_color(colors.accent_red)
+                                    .color(colors.accent_red)
+                                    .cursor(CursorStyle::Pointer)
+                                    .hover(|s| s.background(Color::rgba8(235, 100, 115, 30)))
+                            } else {
+                                base.background(colors.accent_green)
+                                    .border_color(colors.accent_green)
+                                    .color(Color::WHITE)
+                                    .cursor(CursorStyle::Pointer)
+                                    .hover(|s| s.background(Color::rgba8(80, 200, 120, 255)))
+                            }
+                        })
+                },
+            ),
         ))
-        .style(move |s| s.align_items(AlignItems::Center)),
+        .style(|s| s.width_full().align_items(AlignItems::Center).justify_content(JustifyContent::SpaceBetween)),
         // Error message (if any)
         dyn_container(
             move || error_message.get(),

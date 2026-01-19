@@ -140,6 +140,16 @@ impl AsyncBridge {
         }
         results
     }
+
+    /// Get a clone of the command sender
+    pub fn command_tx(&self) -> &tokio::sync::mpsc::Sender<AsyncCommand> {
+        &self.command_tx
+    }
+
+    /// Take ownership of the result receiver (consumes the bridge)
+    pub fn into_result_rx(self) -> std::sync::mpsc::Receiver<AsyncResult> {
+        self.result_rx
+    }
 }
 
 impl Default for AsyncBridge {
