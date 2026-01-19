@@ -639,6 +639,7 @@ impl StandaloneMcpServer {
         let request: JsonRpcRequest = match serde_json::from_str(line) {
             Ok(r) => r,
             Err(e) => {
+                tracing::warn!(error = %e, "Failed to parse MCP request");
                 return JsonRpcResponse {
                     jsonrpc: "2.0".to_string(),
                     id: None,
@@ -652,22 +653,44 @@ impl StandaloneMcpServer {
             }
         };
 
+        tracing::debug!(
+            method = %request.method,
+            id = ?request.id,
+            "MCP request received"
+        );
+
         let result = self.handle_method(&request.method, request.params);
 
-        match result {
-            Ok(value) => JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id: request.id,
-                result: Some(value),
-                error: None,
-            },
-            Err(e) => JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id: request.id,
-                result: None,
-                error: Some(e),
-            },
-        }
+        let response = match result {
+            Ok(value) => {
+                tracing::debug!(
+                    method = %request.method,
+                    "MCP request successful"
+                );
+                JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id: request.id,
+                    result: Some(value),
+                    error: None,
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    method = %request.method,
+                    error_code = e.code,
+                    error_message = %e.message,
+                    "MCP request failed"
+                );
+                JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id: request.id,
+                    result: None,
+                    error: Some(e),
+                }
+            }
+        };
+
+        response
     }
 
     fn handle_method(&self, method: &str, params: Option<Value>) -> Result<Value, JsonRpcError> {
