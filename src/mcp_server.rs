@@ -3,21 +3,67 @@
 //! This module implements an MCP (Model Context Protocol) server that allows
 //! AI agents like Claude Code to control AgTerm terminals programmatically.
 //!
-//! ## Usage
+//! ## Usage Modes
 //!
-//! Run the MCP server:
 //! ```bash
+//! # MCP server with GUI (default)
 //! agterm --mcp-server
+//!
+//! # MCP server only (headless, no GUI)
+//! agterm --mcp-server --headless
 //! ```
 //!
-//! ## Available Tools
+//! ## Claude Code Integration
 //!
-//! - `create_tab`: Create a new terminal tab
-//! - `split_pane`: Split the current pane
-//! - `run_command`: Execute a command in a terminal
-//! - `get_output`: Get output from a terminal
-//! - `list_tabs`: List all tabs
-//! - `list_panes`: List all panes in a tab
+//! Add to `.mcp.json` in your project:
+//! ```json
+//! {
+//!   "mcpServers": {
+//!     "agterm": {
+//!       "command": "/path/to/agterm",
+//!       "args": ["--mcp-server"]
+//!     }
+//!   }
+//! }
+//! ```
+//!
+//! ## Available MCP Tools
+//!
+//! ### Session Management
+//! - `create_session`: Create a new terminal session with optional name, rows, cols
+//! - `list_sessions`: List all active terminal sessions
+//! - `close_session`: Close a terminal session by name
+//! - `switch_session`: Switch the active session
+//! - `resize_session`: Resize a terminal session (rows, cols)
+//!
+//! ### Command Execution
+//! - `run_command`: Execute a command in a session
+//!   - `wait: true` (default): Wait for output and return it
+//!   - `wait: false`: Async execution, return immediately
+//!   - `wait_ms`: Custom wait time in milliseconds (default: 300)
+//! - `send_input`: Send raw input to a session (for interactive commands)
+//! - `send_control`: Send control signals (ctrl-c, ctrl-d, ctrl-z)
+//!
+//! ### Output Retrieval
+//! - `get_output`: Get output from a session with optional wait_ms
+//!
+//! ### Environment & Directory
+//! - `get_cwd`: Get current working directory of a session
+//! - `set_cwd`: Change working directory of a session
+//! - `set_env`: Set environment variable in a session
+//!
+//! ### History
+//! - `get_history`: Get command history from a session (with optional limit)
+//!
+//! ## Example Workflow
+//!
+//! ```text
+//! 1. create_session(name: "build")
+//! 2. run_command(command: "cargo build", wait: false)  // async
+//! 3. get_output(wait_ms: 5000)  // check progress
+//! 4. run_command(command: "cargo test")  // sync, wait for result
+//! 5. close_session(session: "build")
+//! ```
 
 use crate::terminal::pty::{PtyId, PtyManager};
 use regex::Regex;
@@ -28,15 +74,99 @@ use std::io::{BufRead, BufReader, Write};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
-/// Strip ANSI escape codes from terminal output
+/// Strip ANSI escape codes and clean terminal output
 fn strip_ansi_codes(input: &str) -> String {
-    // Match ANSI escape sequences: ESC [ ... (letter or ~)
-    let ansi_regex = Regex::new(r"\x1b\[[0-9;]*[a-zA-Z~]|\x1b\][^\x07]*\x07|\x1b[()][AB012]|\x1b[>=]").unwrap();
+    // Comprehensive ANSI/terminal escape sequence patterns
+    let ansi_regex = Regex::new(concat!(
+        r"\x1b\[[0-9;?]*[a-zA-Z~]|",           // CSI sequences
+        r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|", // OSC sequences
+        r"\x1bP[^\x1b]*\x1b\\|",               // DCS (Device Control String)
+        r"\x1b[()][AB012]|",                   // Character set selection
+        r"\x1b[>=]|",                          // Application/Normal keypad
+        r"\x1b[78]|",                          // Save/Restore cursor
+        r"\x1b[DME]|",                         // Line control
+        r"P\+q[0-9a-fA-F]+\\|",                // Escaped DCS responses
+        r"\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]"  // More CSI sequences
+    )).unwrap();
+
     let result = ansi_regex.replace_all(input, "");
-    // Also remove other control characters except newline and tab
-    result.chars()
-        .filter(|c| *c == '\n' || *c == '\t' || *c == '\r' || !c.is_control())
-        .collect()
+
+    // Clean up control characters
+    let cleaned: String = result.chars()
+        .filter(|c| *c == '\n' || *c == ' ' || (*c >= ' ' && !c.is_control()))
+        .collect();
+
+    // Patterns to filter out
+    let noise_patterns = [
+        "warning: fish could not",
+        "This is often due to",
+        "See 'help terminal-compatibility'",
+        "man fish-terminal-compatibility",
+        "This fish process will no longer",
+        "Welcome to fish",
+        "Type help for instructions",
+        "friendly interactive shell",
+    ];
+
+    // Remove noise lines and shell prompts
+    let lines: Vec<&str> = cleaned.lines()
+        .map(|line| line.trim_end())
+        .filter(|line| {
+            if line.is_empty() {
+                return false;
+            }
+            // Filter noise patterns
+            for pattern in &noise_patterns {
+                if line.contains(pattern) {
+                    return false;
+                }
+            }
+            // Filter lines that are just special chars (%, ⏎, etc.)
+            if line.chars().all(|c| c == '%' || c == '⏎' || c.is_whitespace()) {
+                return false;
+            }
+            // Filter out shell prompt lines (various formats)
+            // zsh: user@host path %
+            // bash: user@host:path$
+            // fish: user@host path (branch)>
+            if line.contains("@") && (
+                line.ends_with(" %") ||
+                line.ends_with(">") ||
+                line.ends_with("$") ||
+                line.contains(" % ") ||
+                line.contains(")>")
+            ) {
+                return false;
+            }
+            true
+        })
+        .collect();
+
+    lines.join("\n")
+}
+
+/// Remove echoed command from output
+fn remove_command_echo(output: &str, command: &str) -> String {
+    let lines: Vec<&str> = output.lines().collect();
+    let cmd_trimmed = command.trim();
+
+    // Filter out lines that match the command (echoed input)
+    let filtered: Vec<&str> = lines.into_iter()
+        .filter(|line| {
+            let line_trimmed = line.trim();
+            // Skip if line exactly matches command or contains it as echo
+            if line_trimmed == cmd_trimmed {
+                return false;
+            }
+            // Skip if line starts with the command (partial echo)
+            if line_trimmed.starts_with(cmd_trimmed) && line_trimmed.len() == cmd_trimmed.len() {
+                return false;
+            }
+            true
+        })
+        .collect();
+
+    filtered.join("\n")
 }
 
 /// MCP Server instance
@@ -426,6 +556,13 @@ impl McpCommandReceiver {
     }
 }
 
+/// Command history entry
+#[derive(Debug, Clone, Serialize)]
+struct HistoryEntry {
+    command: String,
+    timestamp: u64,
+}
+
 /// Session metadata for tracking
 #[derive(Debug, Clone)]
 struct SessionInfo {
@@ -436,6 +573,7 @@ struct SessionInfo {
     cols: u16,
     #[allow(dead_code)]
     created_at: std::time::Instant,
+    history: Vec<HistoryEntry>,
 }
 
 /// Standalone MCP Server that manages PTY sessions directly
@@ -569,7 +707,9 @@ impl StandaloneMcpServer {
                             "type": "object",
                             "properties": {
                                 "command": {"type": "string", "description": "Command to execute"},
-                                "session": {"type": "string", "description": "Session name (optional, uses active session)"}
+                                "session": {"type": "string", "description": "Session name (optional, uses active session)"},
+                                "wait": {"type": "boolean", "description": "Wait for output (default: true). Set false for async execution."},
+                                "wait_ms": {"type": "integer", "description": "Wait time in milliseconds (default: 300)"}
                             },
                             "required": ["command"]
                         }
@@ -635,6 +775,65 @@ impl StandaloneMcpServer {
                             },
                             "required": ["signal"]
                         }
+                    },
+                    {
+                        "name": "resize_session",
+                        "description": "Resize a terminal session",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "rows": {"type": "integer", "description": "New number of rows"},
+                                "cols": {"type": "integer", "description": "New number of columns"},
+                                "session": {"type": "string", "description": "Session name (optional)"}
+                            },
+                            "required": ["rows", "cols"]
+                        }
+                    },
+                    {
+                        "name": "get_cwd",
+                        "description": "Get current working directory of a session",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session": {"type": "string", "description": "Session name (optional)"}
+                            }
+                        }
+                    },
+                    {
+                        "name": "set_cwd",
+                        "description": "Change working directory of a session",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string", "description": "Directory path to change to"},
+                                "session": {"type": "string", "description": "Session name (optional)"}
+                            },
+                            "required": ["path"]
+                        }
+                    },
+                    {
+                        "name": "set_env",
+                        "description": "Set environment variable in a session",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "description": "Environment variable name"},
+                                "value": {"type": "string", "description": "Environment variable value"},
+                                "session": {"type": "string", "description": "Session name (optional)"}
+                            },
+                            "required": ["name", "value"]
+                        }
+                    },
+                    {
+                        "name": "get_history",
+                        "description": "Get command history from a session",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session": {"type": "string", "description": "Session name (optional)"},
+                                "limit": {"type": "integer", "description": "Maximum number of entries to return (default: 50)"}
+                            }
+                        }
                     }
                 ]
             })),
@@ -677,6 +876,11 @@ impl StandaloneMcpServer {
             "switch_session" => self.switch_session(args),
             "send_input" => self.send_input(args),
             "send_control" => self.send_control(args),
+            "resize_session" => self.resize_session(args),
+            "get_cwd" => self.get_cwd(args),
+            "set_cwd" => self.set_cwd(args),
+            "set_env" => self.set_env(args),
+            "get_history" => self.get_history(args),
             _ => Err(JsonRpcError {
                 code: -32602,
                 message: format!("Unknown tool: {}", name),
@@ -707,6 +911,7 @@ impl StandaloneMcpServer {
             rows,
             cols,
             created_at: std::time::Instant::now(),
+            history: Vec::new(),
         };
 
         {
@@ -749,15 +954,29 @@ impl StandaloneMcpServer {
                 data: None,
             })?;
 
+        // Parse wait options
+        let should_wait = args.get("wait").and_then(|v| v.as_bool()).unwrap_or(true);
+        let wait_ms = args.get("wait_ms").and_then(|v| v.as_u64()).unwrap_or(300);
+
         let pty_id = {
-            let sessions = self.sessions.lock().unwrap();
-            sessions.get(&session_name)
-                .map(|s| s.id)
+            let mut sessions = self.sessions.lock().unwrap();
+            let session = sessions.get_mut(&session_name)
                 .ok_or_else(|| JsonRpcError {
                     code: -32602,
                     message: format!("Session '{}' not found", session_name),
                     data: None,
-                })?
+                })?;
+
+            // Record command in history
+            session.history.push(HistoryEntry {
+                command: command.to_string(),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            });
+
+            session.id
         };
 
         // Send command with newline
@@ -769,8 +988,18 @@ impl StandaloneMcpServer {
                 data: None,
             })?;
 
-        // Wait a bit for command to execute
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        // If async execution requested, return immediately
+        if !should_wait {
+            return Ok(json!({
+                "content": [{
+                    "type": "text",
+                    "text": format!("Command '{}' sent to session '{}'. Use get_output to retrieve results.", command, session_name)
+                }]
+            }));
+        }
+
+        // Wait for command to execute
+        std::thread::sleep(std::time::Duration::from_millis(wait_ms));
 
         // Read output
         let output = self.pty_manager.read(&pty_id)
@@ -783,10 +1012,13 @@ impl StandaloneMcpServer {
         let output_str = String::from_utf8_lossy(&output);
         let clean_output = strip_ansi_codes(&output_str);
 
+        // Remove echoed command from output
+        let final_output = remove_command_echo(&clean_output, command);
+
         Ok(json!({
             "content": [{
                 "type": "text",
-                "text": clean_output
+                "text": final_output
             }]
         }))
     }
@@ -1027,6 +1259,290 @@ impl StandaloneMcpServer {
             "content": [{
                 "type": "text",
                 "text": format!("Sent {} to '{}'", signal, session_name)
+            }]
+        }))
+    }
+
+    fn resize_session(&self, args: Value) -> Result<Value, JsonRpcError> {
+        let rows = args.get("rows")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "Missing rows".to_string(),
+                data: None,
+            })? as u16;
+
+        let cols = args.get("cols")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "Missing cols".to_string(),
+                data: None,
+            })? as u16;
+
+        let session_name = args.get("session")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| self.active_session.lock().unwrap().clone())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "No active session".to_string(),
+                data: None,
+            })?;
+
+        let pty_id = {
+            let mut sessions = self.sessions.lock().unwrap();
+            let session = sessions.get_mut(&session_name)
+                .ok_or_else(|| JsonRpcError {
+                    code: -32602,
+                    message: format!("Session '{}' not found", session_name),
+                    data: None,
+                })?;
+            // Update stored dimensions
+            session.rows = rows;
+            session.cols = cols;
+            session.id
+        };
+
+        self.pty_manager.resize(&pty_id, rows, cols)
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Failed to resize session: {}", e),
+                data: None,
+            })?;
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": format!("Resized session '{}' to {}x{}", session_name, cols, rows)
+            }]
+        }))
+    }
+
+    fn get_cwd(&self, args: Value) -> Result<Value, JsonRpcError> {
+        let session_name = args.get("session")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| self.active_session.lock().unwrap().clone())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "No active session".to_string(),
+                data: None,
+            })?;
+
+        let pty_id = {
+            let sessions = self.sessions.lock().unwrap();
+            sessions.get(&session_name)
+                .map(|s| s.id)
+                .ok_or_else(|| JsonRpcError {
+                    code: -32602,
+                    message: format!("Session '{}' not found", session_name),
+                    data: None,
+                })?
+        };
+
+        // Execute pwd command and get output
+        self.pty_manager.write(&pty_id, b"pwd\n")
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Failed to execute pwd: {}", e),
+                data: None,
+            })?;
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let output = self.pty_manager.read(&pty_id)
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Failed to read output: {}", e),
+                data: None,
+            })?;
+
+        let output_str = String::from_utf8_lossy(&output);
+        let clean_output = strip_ansi_codes(&output_str);
+        let cwd = remove_command_echo(&clean_output, "pwd")
+            .lines()
+            .find(|line| line.starts_with('/'))
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": cwd
+            }]
+        }))
+    }
+
+    fn set_cwd(&self, args: Value) -> Result<Value, JsonRpcError> {
+        let path = args.get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "Missing path".to_string(),
+                data: None,
+            })?;
+
+        let session_name = args.get("session")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| self.active_session.lock().unwrap().clone())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "No active session".to_string(),
+                data: None,
+            })?;
+
+        let pty_id = {
+            let sessions = self.sessions.lock().unwrap();
+            sessions.get(&session_name)
+                .map(|s| s.id)
+                .ok_or_else(|| JsonRpcError {
+                    code: -32602,
+                    message: format!("Session '{}' not found", session_name),
+                    data: None,
+                })?
+        };
+
+        // Execute cd command
+        let cd_cmd = format!("cd {} && pwd\n", path);
+        self.pty_manager.write(&pty_id, cd_cmd.as_bytes())
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Failed to change directory: {}", e),
+                data: None,
+            })?;
+
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        let output = self.pty_manager.read(&pty_id)
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Failed to read output: {}", e),
+                data: None,
+            })?;
+
+        let output_str = String::from_utf8_lossy(&output);
+        let clean_output = strip_ansi_codes(&output_str);
+
+        // Check if cd succeeded by looking for the path in output
+        let new_cwd = clean_output
+            .lines()
+            .find(|line| line.starts_with('/'))
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        if new_cwd.is_empty() {
+            return Err(JsonRpcError {
+                code: -32603,
+                message: format!("Failed to change to directory: {}", path),
+                data: None,
+            });
+        }
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": format!("Changed directory to: {}", new_cwd)
+            }]
+        }))
+    }
+
+    fn set_env(&self, args: Value) -> Result<Value, JsonRpcError> {
+        let name = args.get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "Missing environment variable name".to_string(),
+                data: None,
+            })?;
+
+        let value = args.get("value")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "Missing environment variable value".to_string(),
+                data: None,
+            })?;
+
+        let session_name = args.get("session")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| self.active_session.lock().unwrap().clone())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "No active session".to_string(),
+                data: None,
+            })?;
+
+        let pty_id = {
+            let sessions = self.sessions.lock().unwrap();
+            sessions.get(&session_name)
+                .map(|s| s.id)
+                .ok_or_else(|| JsonRpcError {
+                    code: -32602,
+                    message: format!("Session '{}' not found", session_name),
+                    data: None,
+                })?
+        };
+
+        // Export environment variable (works in bash, zsh, fish)
+        let export_cmd = format!("export {}='{}'\n", name, value.replace('\'', "'\\''"));
+        self.pty_manager.write(&pty_id, export_cmd.as_bytes())
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Failed to set environment variable: {}", e),
+                data: None,
+            })?;
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": format!("Set {}={}", name, value)
+            }]
+        }))
+    }
+
+    fn get_history(&self, args: Value) -> Result<Value, JsonRpcError> {
+        let session_name = args.get("session")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| self.active_session.lock().unwrap().clone())
+            .ok_or_else(|| JsonRpcError {
+                code: -32602,
+                message: "No active session".to_string(),
+                data: None,
+            })?;
+
+        let limit = args.get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50) as usize;
+
+        let history = {
+            let sessions = self.sessions.lock().unwrap();
+            let session = sessions.get(&session_name)
+                .ok_or_else(|| JsonRpcError {
+                    code: -32602,
+                    message: format!("Session '{}' not found", session_name),
+                    data: None,
+                })?;
+
+            let start = if session.history.len() > limit {
+                session.history.len() - limit
+            } else {
+                0
+            };
+            session.history[start..].to_vec()
+        };
+
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": serde_json::to_string_pretty(&history).unwrap_or_else(|_| "[]".to_string())
             }]
         }))
     }
