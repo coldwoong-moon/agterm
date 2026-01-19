@@ -1,0 +1,106 @@
+# Example MCP Configuration
+# This file demonstrates how to configure MCP servers for AgTerm
+
+default_server = "claude"
+
+[settings]
+offline_fallback = true
+cache_responses = true
+cache_ttl_seconds = 3600
+include_context = true
+context_lines = 100
+
+# Claude AI Server (using npx to run MCP server)
+[[servers]]
+name = "claude"
+description = "Claude AI MCP Server"
+enabled = true
+auto_connect = false
+
+[servers.config]
+name = "claude"
+server_type = "claude"
+timeout_ms = 30000
+
+[servers.config.transport]
+type = "stdio"
+command = "npx"
+args = ["-y", "@anthropic-ai/mcp-server"]
+
+[servers.config.retry]
+max_retries = 3
+base_delay_ms = 1000
+backoff_factor = 2.0
+
+# Local LLM Server (using HTTP transport)
+[[servers]]
+name = "ollama"
+description = "Local Ollama LLM Server"
+enabled = true
+auto_connect = false
+
+[servers.config]
+name = "ollama"
+server_type = "localllm"
+timeout_ms = 60000
+
+[servers.config.transport]
+type = "http"
+url = "http://localhost:11434"
+
+[servers.config.retry]
+max_retries = 2
+base_delay_ms = 500
+backoff_factor = 1.5
+
+# GitHub Copilot Server (example with WebSocket)
+[[servers]]
+name = "copilot"
+description = "GitHub Copilot MCP Server"
+enabled = false
+auto_connect = false
+
+[servers.config]
+name = "copilot"
+server_type = "githubcopilot"
+timeout_ms = 45000
+
+[servers.config.transport]
+type = "websocket"
+url = "wss://copilot.github.com/mcp"
+auth_token = "your_auth_token_here"
+
+[servers.config.retry]
+max_retries = 3
+base_delay_ms = 1000
+backoff_factor = 2.0
+
+# Custom Server (example with child process)
+[[servers]]
+name = "custom"
+description = "Custom MCP Server"
+enabled = false
+auto_connect = false
+
+[servers.config]
+name = "custom"
+server_type = "custom"
+timeout_ms = 30000
+
+[servers.config.transport]
+type = "stdio"
+command = "python"
+args = ["-m", "my_mcp_server"]
+
+[servers.config.transport.env]
+API_KEY = "your_api_key"
+DEBUG = "true"
+
+[servers.config.retry]
+max_retries = 2
+base_delay_ms = 1000
+backoff_factor = 2.0
+
+[servers.config.metadata]
+version = "1.0.0"
+author = "Your Name"
