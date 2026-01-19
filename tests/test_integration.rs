@@ -7,11 +7,15 @@
 //! - Alternate screen state restoration
 //! - Clipboard (OSC 52) base64 encoding
 //! - Tab management (creation, closing, cloning)
+//!
+//! Requires the `iced-gui` feature to be enabled.
+
+#![cfg(feature = "iced-gui")]
 
 use agterm::config::{AppConfig, BellStyle, CursorStyle, SelectionMode};
 use agterm::terminal::screen::{MouseEncoding, MouseMode, TerminalScreen};
 use agterm::theme::{ColorDef, Theme, ThemeVariant};
-use iced::Color;
+use iced::Color as IcedColor;
 
 // ============================================================================
 // Theme Loading and Color Conversion Tests
@@ -78,21 +82,21 @@ fn test_theme_ansi_palette_indexing() {
 
     // Test standard colors (0-7)
     let black = theme.ansi.get_color(0);
-    assert_ne!(black, Color::WHITE);
+    assert_ne!(black, IcedColor::WHITE);
 
     let red = theme.ansi.get_color(1);
-    assert_ne!(red, Color::BLACK);
+    assert_ne!(red, IcedColor::BLACK);
 
     // Test bright colors (8-15)
     let bright_black = theme.ansi.get_color(8);
-    assert_ne!(bright_black, Color::BLACK);
+    assert_ne!(bright_black, IcedColor::BLACK);
 
     let bright_white = theme.ansi.get_color(15);
-    assert_ne!(bright_white, Color::BLACK);
+    assert_ne!(bright_white, IcedColor::BLACK);
 
     // Test out of range (should return fallback)
     let fallback = theme.ansi.get_color(255);
-    assert_eq!(fallback, Color::WHITE);
+    assert_eq!(fallback, IcedColor::WHITE);
 }
 
 #[test]
@@ -909,8 +913,8 @@ fn test_theme_with_terminal_colors() {
     let theme_red = theme.ansi.get_color(1); // ANSI red
 
     // Both should exist and be valid colors
-    assert_ne!(terminal_color.to_color(), Color::BLACK);
-    assert_ne!(theme_red, Color::BLACK);
+    assert_ne!(terminal_color.to_color(), agterm::color::Color::BLACK);
+    assert_ne!(theme_red, IcedColor::BLACK);
 }
 
 #[test]

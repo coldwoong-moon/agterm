@@ -1,6 +1,10 @@
 //! Integration tests for theme editor
 //!
 //! Tests the complete workflow of creating, editing, and exporting themes
+//!
+//! Requires the `iced-gui` feature to be enabled.
+
+#![cfg(feature = "iced-gui")]
 
 use agterm::theme::Theme;
 use agterm::theme_editor::{

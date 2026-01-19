@@ -1,4 +1,8 @@
 //! Integration tests for the diff viewer module
+//!
+//! Requires the `iced-gui` feature to be enabled.
+
+#![cfg(feature = "iced-gui")]
 
 use agterm::diff_view::{
     diff_strings, DiffLine, DiffLineType, DiffResult, DiffViewMode, DiffViewer, MyersDiff,
