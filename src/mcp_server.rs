@@ -1925,8 +1925,8 @@ impl StandaloneMcpServer {
 
         // Execute shell-agnostic command to get the last exit code
         // fish uses $status, bash/zsh use $?
-        // Output both with markers, then parse the numeric value
-        let exit_code_cmd = "echo __EXITCODE_START__\"$?\"\"$status\"__EXITCODE_END__\n";
+        // Try $status first (fish), fall back to $? (bash/zsh)
+        let exit_code_cmd = "printf '__EXITCODE__%d__\\n' $status 2>/dev/null || printf '__EXITCODE__%d__\\n' $?\n";
         self.pty_manager.write(&session_id, exit_code_cmd.as_bytes())
             .map_err(|e| JsonRpcError {
                 code: -32603,
@@ -1948,16 +1948,12 @@ impl StandaloneMcpServer {
 
         let cleaned = strip_ansi_codes(&output);
 
-        // Parse exit code from output - look for __EXITCODE_START__...__EXITCODE_END__
-        let exit_code: Option<i32> = if let Some(start) = cleaned.find("__EXITCODE_START__") {
-            if let Some(end) = cleaned.find("__EXITCODE_END__") {
-                let between = &cleaned[start + 18..end];
-                // Extract first number found (either $? or $status will be a number)
-                between.chars()
-                    .filter(|c| c.is_ascii_digit())
-                    .collect::<String>()
-                    .parse::<i32>()
-                    .ok()
+        // Parse exit code from output - look for __EXITCODE__<number>__
+        let exit_code: Option<i32> = if let Some(start) = cleaned.find("__EXITCODE__") {
+            let after_marker = &cleaned[start + 12..];
+            if let Some(end) = after_marker.find("__") {
+                let num_str = &after_marker[..end];
+                num_str.trim().parse::<i32>().ok()
             } else {
                 None
             }
