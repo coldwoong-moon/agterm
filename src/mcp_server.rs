@@ -1566,9 +1566,100 @@ mod tests {
     }
 
     #[test]
+    fn test_json_rpc_with_params() {
+        let json = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"ls"}}}"#;
+        let request: JsonRpcRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.method, "tools/call");
+        assert!(request.params.is_some());
+        let params = request.params.unwrap();
+        assert_eq!(params.get("name").unwrap(), "run_command");
+    }
+
+    #[test]
     fn test_mcp_command_serialize() {
         let cmd = McpCommand::CreateTab { name: Some("test".to_string()) };
         let json = serde_json::to_string(&cmd).unwrap();
         assert!(json.contains("CreateTab"));
+    }
+
+    #[test]
+    fn test_strip_ansi_codes() {
+        // Basic CSI sequence
+        let input = "\x1b[32mgreen\x1b[0m";
+        let output = strip_ansi_codes(input);
+        assert_eq!(output, "green");
+
+        // OSC sequence (title)
+        let input = "\x1b]0;Terminal Title\x07text";
+        let output = strip_ansi_codes(input);
+        assert_eq!(output, "text");
+
+        // Multiple sequences
+        let input = "\x1b[1m\x1b[34mbold blue\x1b[0m normal";
+        let output = strip_ansi_codes(input);
+        assert_eq!(output, "bold blue normal");
+    }
+
+    #[test]
+    fn test_remove_command_echo() {
+        let output = "ls\nfile1.txt\nfile2.txt";
+        let result = remove_command_echo(output, "ls");
+        assert_eq!(result, "file1.txt\nfile2.txt");
+
+        // Command not in output
+        let output = "file1.txt\nfile2.txt";
+        let result = remove_command_echo(output, "ls");
+        assert_eq!(result, "file1.txt\nfile2.txt");
+    }
+
+    #[test]
+    fn test_history_entry_serialization() {
+        let entry = HistoryEntry {
+            command: "echo hello".to_string(),
+            timestamp: 1234567890,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("echo hello"));
+        assert!(json.contains("1234567890"));
+    }
+
+    #[test]
+    fn test_standalone_server_initialization() {
+        let server = StandaloneMcpServer::new();
+        let sessions = server.sessions.lock().unwrap();
+        assert!(sessions.is_empty());
+        let active = server.active_session.lock().unwrap();
+        assert!(active.is_none());
+    }
+
+    #[test]
+    fn test_json_rpc_response_serialization() {
+        let response = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(1)),
+            result: Some(json!({"status": "ok"})),
+            error: None,
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"jsonrpc\":\"2.0\""));
+        assert!(json.contains("\"result\""));
+        assert!(!json.contains("\"error\""));
+    }
+
+    #[test]
+    fn test_json_rpc_error_response() {
+        let response = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(1)),
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32600,
+                message: "Invalid request".to_string(),
+                data: None,
+            }),
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"error\""));
+        assert!(json.contains("-32600"));
     }
 }
