@@ -82,6 +82,7 @@ fn main() {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
     let mcp_server_mode = args.iter().any(|arg| arg == "--mcp-server");
+    let test_server_mode = args.iter().any(|arg| arg == "--test-server");
 
     // Initialize logging system with default configuration
     let log_config = agterm::logging::LoggingConfig::default();
@@ -93,18 +94,28 @@ fn main() {
         tracing::info!("Starting AgTerm in headless MCP server mode");
         run_mcp_server_headless();
     } else {
-        // Run as GUI application only
-        run_gui();
+        // Run as GUI application
+        run_gui(test_server_mode);
     }
 }
 
-fn run_gui() {
+fn run_gui(test_server: bool) {
     // Create Tokio runtime for async operations (MCP, etc.)
     let rt = tokio::runtime::Runtime::new()
         .expect("Failed to create Tokio runtime");
     let _guard = rt.enter();
 
     tracing::info!("Starting AgTerm (Floem GUI) with Tokio runtime");
+
+    // Start test server if requested
+    if test_server {
+        tracing::info!("Starting UI test server on port {}", agterm::floem_app::test_server::TEST_SERVER_PORT);
+        let test_srv = agterm::floem_app::test_server::TestServer::new();
+        if let Err(e) = test_srv.start() {
+            tracing::error!("Failed to start test server: {}", e);
+        }
+        // Note: AppState will be set after app_view initializes
+    }
 
     // Configure window with appropriate size
     let window_config = floem::window::WindowConfig::default()

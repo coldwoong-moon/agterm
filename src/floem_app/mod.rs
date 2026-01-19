@@ -13,6 +13,7 @@ pub mod execution_history;
 pub mod agent_registry;
 pub mod execution_pipeline;
 pub mod multi_agent;
+pub mod test_server;
 
 use floem::prelude::*;
 use floem::views::{v_stack, h_stack, Decorators, stack, dyn_container};
