@@ -1,7 +1,7 @@
 //! Floem-based GUI Application for AgTerm
 
 mod state;
-mod views;
+pub mod views;
 pub mod theme;
 pub mod pane;
 pub mod settings;
@@ -9,6 +9,10 @@ pub mod menu;
 pub mod async_bridge;
 pub mod mcp_client;
 pub mod command_validator;
+pub mod execution_history;
+pub mod agent_registry;
+pub mod execution_pipeline;
+pub mod multi_agent;
 
 use floem::prelude::*;
 use floem::views::{v_stack, h_stack, Decorators, stack, dyn_container};
